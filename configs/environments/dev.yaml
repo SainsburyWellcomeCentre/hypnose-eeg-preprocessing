@@ -1,0 +1,43 @@
+environment: dev
+
+pvfs_conversion:
+  enabled: true
+  source_uri: "/Volumes/eeg-lab/recorded-pvfs"
+  sink_uri: "/Volumes/eeg-results/edf"
+  source_glob: "*.pvfs"
+  recursive: true
+  poll_interval_seconds: 10
+  state_file: "state/pvfs_to_edf_state.json"
+  dry_run: false
+  # Replace with your vendor converter command.
+  # Available placeholders: {input}, {output}
+  command_template: "pvfs2edf --input {input} --output {output}"
+
+source:
+  kind: filesystem
+  uri: "/Volumes/eeg-lab/incoming"
+  format: "chunked-jsonl"
+  poll_interval_seconds: 1
+  glob: "*.jsonl"
+
+sink:
+  kind: filesystem
+  uri: "/Volumes/eeg-results/processed"
+  format: "parquet"
+  partition_by:
+    - "session_date"
+    - "subject_id"
+
+checkpoint:
+  kind: local-file
+  uri: "state/checkpoint_dev.json"
+  flush_every_batches: 5
+
+runtime:
+  batch_size_samples: 1024
+  max_retry_count: 3
+  retry_backoff_seconds: 2
+
+logging:
+  level: INFO
+  metrics_namespace: "hypnose_eeg"

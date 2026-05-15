@@ -1,0 +1,11 @@
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Local runtime state and caches
+state/*.json
+cache/
+outputs/reports/
+
+# OS files
+.DS_Store
