@@ -21,10 +21,9 @@ Raw and output data live outside the repo and are accessed via configurable sour
 - `docs/`: contracts and operations runbooks.
 
 ## Runtime flow
-1. `scripts/pvfs_to_edf.py` converts source `.pvfs` files to `.edf` in external sink storage.
-2. `io/sources` reads new EEG chunks from external storage.
-3. `io/checkpoints` loads/saves read cursor.
-4. `processing/realtime` handles filtering/windowing/features.
-5. `processing/analysis` computes metrics/summaries.
-6. `io/sinks` writes results to external output storage.
-7. `state/` updates cursor so the stream can resume safely.
+1. `io/sources` reads new EEG chunks from external storage.
+2. `io/checkpoints` loads/saves read cursor.
+3. `processing/realtime` handles filtering/windowing/features.
+4. `processing/analysis` computes metrics/summaries.
+5. `io/sinks` writes results to external output storage.
+6. `state/` updates cursor so the stream can resume safely.
