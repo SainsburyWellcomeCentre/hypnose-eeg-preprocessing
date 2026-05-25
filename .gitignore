@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 
 # Local runtime state and caches
+data/
 state/*.json
 cache/
 outputs/reports/
