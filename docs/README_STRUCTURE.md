@@ -10,15 +10,21 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
 - Keep cursor/checkpoint state for restart-safe continuous processing.
 
 ## Top-level folders
+- `configs/`: environment and pipeline runtime settings.
+- `data/`: contains raw and processed data processed in the repo.
+- `notebooks/`: exploratory jupyter notebooks for development.
+- `src`: scripts containing major processing modules of repo.
+- `scripts`: developed scripts for easy run and collaborative use.
+- `tests/`: fixtures and integration tests.
+- `docs/`: contracts and operations runbooks.
+- `cache/`: optional ephemeral local staging.
+
+## Sections for inclusion
 - `io/`: source and sink connectors, contracts, checkpoint helpers.
 - `processing/`: realtime transforms and analysis stages.
 - `utils/`: shared config, logging/metrics, quality/time helpers.
-- `configs/`: environment and pipeline runtime settings.
 - `state/`: local runtime state (cursor/checkpoint snapshots).
-- `cache/`: optional ephemeral local staging.
-- `outputs/`: local debug artifacts only.
-- `tests/`: fixtures and integration tests.
-- `docs/`: contracts and operations runbooks.
+
 
 ## Runtime flow
 1. `io/sources` reads new EEG chunks from external storage.
