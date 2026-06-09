@@ -1,7 +1,7 @@
-name: realtime_bandpower
+name: recording_bandpower
 
 ingest:
-  reader: stream_reader
+  reader: recording_reader
   expected_sample_rate_hz: 256
   channels:
     - Fp1
@@ -19,8 +19,6 @@ preprocessing:
   notch_hz: 50
   highpass_hz: 1.0
   lowpass_hz: 45.0
-  epoch_seconds: 2.0
-  hop_seconds: 0.5
 
 features:
   - type: bandpower

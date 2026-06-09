@@ -6,11 +6,10 @@ source:
   uri: "data/rawdata"
   format: "edf"
   glob: "**/*.edf"
-  epoch_seconds: 10.0
 
 sink:
   kind: filesystem
-  uri: "/Volumes/eeg-results/processed"
+  uri: "data/derivatives"
   format: "parquet"
   partition_by:
     - "session_date"
@@ -19,10 +18,8 @@ sink:
 checkpoint:
   kind: local-file
   uri: "state/checkpoint_dev.json"
-  flush_every_batches: 5
 
 runtime:
-  batch_size_samples: 1024
   max_retry_count: 3
   retry_backoff_seconds: 2
 

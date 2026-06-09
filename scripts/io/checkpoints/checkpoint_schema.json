@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "EEG Stream Checkpoint",
+  "title": "EEG Recording Checkpoint",
   "type": "object",
   "required": ["source_id", "cursor", "updated_at"],
   "properties": {
@@ -13,10 +13,9 @@
       "description": "Opaque position in upstream storage",
       "properties": {
         "last_file": { "type": "string" },
-        "last_offset": { "type": "integer", "minimum": 0 },
         "last_timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["last_file", "last_offset", "last_timestamp"]
+      "required": ["last_file", "last_timestamp"]
     },
     "updated_at": {
       "type": "string",

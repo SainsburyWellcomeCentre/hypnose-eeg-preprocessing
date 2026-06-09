@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
-from .source_adapter import EEGChunk, SourceAdapter, SourceCursor, utc_now
+from .source_adapter import EEGRecording, SourceAdapter, SourceCursor, utc_now
 
 
 class MountedEdfSourceAdapter(SourceAdapter):
@@ -20,12 +20,10 @@ class MountedEdfSourceAdapter(SourceAdapter):
         source_id: str,
         source_dir: str,
         pattern: str = "**/*.edf",
-        epoch_seconds: float = 2.0,
     ) -> None:
         self._source_id = source_id
         self._source_dir = Path(source_dir)
         self._pattern = pattern
-        self._epoch_seconds = epoch_seconds
 
     @property
     def source_id(self) -> str:
@@ -40,7 +38,7 @@ class MountedEdfSourceAdapter(SourceAdapter):
     def close(self) -> None:
         return None
 
-    def stream(self, start_cursor: Optional[SourceCursor]) -> Iterator[tuple[EEGChunk, SourceCursor]]:
+    def recordings(self, start_cursor: Optional[SourceCursor]) -> Iterator[tuple[EEGRecording, SourceCursor]]:
         try:
             import mne
         except ImportError as exc:
@@ -49,46 +47,38 @@ class MountedEdfSourceAdapter(SourceAdapter):
         files = sorted(self._source_dir.glob(self._pattern))
 
         resume_file = start_cursor.last_file if start_cursor else ""
-        resume_sample = start_cursor.last_offset if start_cursor else 0
 
         for edf_path in files:
             file_key = str(edf_path.relative_to(self._source_dir))
-            if resume_file and file_key < resume_file:
+            if resume_file and file_key <= resume_file:
                 continue
 
             raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
             sample_rate_hz = int(raw.info["sfreq"])
-            epoch_samples = max(1, int(self._epoch_seconds * sample_rate_hz))
-            start_sample = resume_sample if file_key == resume_file else 0
             base_timestamp = _recording_start(raw.info.get("meas_date"))
             source_metadata = _path_metadata(edf_path)
+            data = raw.get_data()
 
-            for start in range(start_sample, raw.n_times, epoch_samples):
-                stop = min(start + epoch_samples, raw.n_times)
-                data = raw.get_data(start=start, stop=stop)
-                timestamp = base_timestamp + timedelta(seconds=start / sample_rate_hz)
-
-                chunk = EEGChunk(
-                    source_id=self.source_id,
-                    session_id=source_metadata["session_id"],
-                    timestamp_utc=timestamp,
-                    sample_rate_hz=sample_rate_hz,
-                    channels=list(raw.ch_names),
-                    samples=data.tolist(),
-                    metadata={
-                        **source_metadata,
-                        "source_file": file_key,
-                        "source_path": str(edf_path),
-                        "start_sample": start,
-                        "stop_sample": stop,
-                    },
-                )
-                next_cursor = SourceCursor(
-                    last_file=file_key,
-                    last_offset=stop,
-                    last_timestamp=timestamp.isoformat(),
-                )
-                yield chunk, next_cursor
+            recording = EEGRecording(
+                source_id=self.source_id,
+                session_id=source_metadata["session_id"],
+                timestamp_utc=base_timestamp,
+                sample_rate_hz=sample_rate_hz,
+                channels=list(raw.ch_names),
+                samples=data.tolist(),
+                metadata={
+                    **source_metadata,
+                    "source_file": file_key,
+                    "source_path": str(edf_path),
+                    "n_samples": raw.n_times,
+                    "duration_seconds": raw.n_times / sample_rate_hz,
+                },
+            )
+            next_cursor = SourceCursor(
+                last_file=file_key,
+                last_timestamp=base_timestamp.isoformat(),
+            )
+            yield recording, next_cursor
 
 
 def _recording_start(meas_date: object) -> datetime:

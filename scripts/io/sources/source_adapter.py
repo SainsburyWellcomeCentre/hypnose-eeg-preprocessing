@@ -7,8 +7,8 @@ from typing import Any, Dict, Iterator, Optional
 
 
 @dataclass(frozen=True)
-class EEGChunk:
-    """A single chunk emitted by a source adapter."""
+class EEGRecording:
+    """A complete EEG recording emitted by a source adapter."""
 
     source_id: str
     session_id: str
@@ -24,7 +24,6 @@ class SourceCursor:
     """Opaque source position used for resumable ingestion."""
 
     last_file: str
-    last_offset: int
     last_timestamp: str
 
 
@@ -32,7 +31,7 @@ class SourceAdapter(ABC):
     """Interface for external EEG sources.
 
     Implementations read from storage outside this repo (filesystem, S3, DB, etc.)
-    and emit EEGChunk items in order.
+    and emit complete EEG recordings in order.
     """
 
     @property
@@ -49,14 +48,14 @@ class SourceAdapter(ABC):
         """Release external connections/resources."""
 
     @abstractmethod
-    def stream(self, start_cursor: Optional[SourceCursor]) -> Iterator[tuple[EEGChunk, SourceCursor]]:
-        """Yield ordered chunks and next cursor values.
+    def recordings(self, start_cursor: Optional[SourceCursor]) -> Iterator[tuple[EEGRecording, SourceCursor]]:
+        """Yield ordered recordings and next cursor values.
 
         Args:
             start_cursor: Last committed checkpoint cursor, or None for cold start.
 
         Yields:
-            Tuples of (chunk, next_cursor). `next_cursor` is persisted only after
+            Tuples of (recording, next_cursor). `next_cursor` is persisted only after
             downstream processing and sink writes complete successfully.
         """
 
