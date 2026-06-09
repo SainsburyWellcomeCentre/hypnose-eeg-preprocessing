@@ -1,7 +1,7 @@
 # EEG Streaming Repo Arrangement (External Source/Sink)
 
 This repository contains processing and analysis code only.
-Raw and output data live outside the repo and are accessed via configurable source/sink adapters.
+Raw and processed/derivatives data live outside the repo and are accessed via configurable source/sink adapters.
 
 ## Core Principle
 - Read from external source storage.

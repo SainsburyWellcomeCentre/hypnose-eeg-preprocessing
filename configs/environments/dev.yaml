@@ -1,11 +1,12 @@
 environment: dev
 
 source:
-  kind: filesystem
-  uri: "/Volumes/eeg-lab/incoming"
-  format: "chunked-jsonl"
-  poll_interval_seconds: 1
-  glob: "*.jsonl"
+  kind: mounted-edf
+  source_id: "hypnose-eeg-raw-edf"
+  uri: "data/rawdata"
+  format: "edf"
+  glob: "**/*.edf"
+  epoch_seconds: 10.0
 
 sink:
   kind: filesystem

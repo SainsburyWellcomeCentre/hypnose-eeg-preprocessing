@@ -19,7 +19,7 @@ preprocessing:
   notch_hz: 50
   highpass_hz: 1.0
   lowpass_hz: 45.0
-  window_seconds: 2.0
+  epoch_seconds: 2.0
   hop_seconds: 0.5
 
 features:
