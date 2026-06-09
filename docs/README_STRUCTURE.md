@@ -13,11 +13,19 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
 - `configs/`: environment and pipeline runtime settings.
 - `data/`: contains raw and processed data processed in the repo.
 - `notebooks/`: exploratory jupyter notebooks for development.
-- `src`: scripts containing major processing modules of repo.
-- `scripts`: developed scripts for easy run and collaborative use.
-- `tests/`: fixtures and integration tests.
+- `src/`: scripts containing major processing modules of repo.
+- `scripts/`: developed scripts for easy run and execution points.
+- `tests/`: fixtures and integration tests for quality control.
 - `docs/`: contracts and operations runbooks.
 - `cache/`: optional ephemeral local staging.
+
+### src level folders
+- `io/`: scripts for inputting and outputting data.
+- `preprocessing/`: any processing which needs to be initially done to the raw data.
+- `sleep_scoring/`: automated sleep scoring using somnotate analysis.
+- `spectral`: scripts for spectral analysis.
+- `visualisation`: any scripts required for visualising data.
+- `utils`: small helper functions.
 
 ## Sections for inclusion
 - `io/`: source and sink connectors, contracts, checkpoint helpers.
