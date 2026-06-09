@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gc
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ class ConcatenationResult:
     n_samples: int | None = None
     duration_seconds: float | None = None
     existing_outputs: list[str] | None = None
+    error: str | None = None
 
 
 class EdfSessionConcatenator:
@@ -76,10 +78,10 @@ class EdfSessionConcatenator:
         files = sorted(files)
         relative_session_dir = session_dir.relative_to(self.source_dir)
         edf_output_path, fif_output_path = self.output_paths(session_dir, files)
-        existing_outputs = [path for path in (edf_output_path, fif_output_path) if path.exists()]
+        existing_outputs = self._existing_output_paths(edf_output_path, fif_output_path)
         boundary_markers = self._boundary_marker_descriptions(files)
 
-        if existing_outputs and not self.overwrite:
+        if not self.overwrite and edf_output_path.exists() and fif_output_path.exists():
             return ConcatenationResult(
                 session_path=str(relative_session_dir),
                 edf_output_path=str(edf_output_path),
@@ -91,10 +93,71 @@ class EdfSessionConcatenator:
                 existing_outputs=[str(path) for path in existing_outputs],
             )
 
+        if not self.overwrite and fif_output_path.exists() and not edf_output_path.exists():
+            raw = mne.io.read_raw_fif(fif_output_path, preload=False, verbose=True)
+            self._export_raw_edf(raw, edf_output_path)
+            result = self._completed_from_existing_result(
+                status="completed_from_existing_fif",
+                relative_session_dir=relative_session_dir,
+                edf_output_path=edf_output_path,
+                fif_output_path=fif_output_path,
+                n_recordings=len(files),
+                recordings=[file.name for file in files],
+                boundary_markers=boundary_markers,
+                raw=raw,
+                existing_outputs=existing_outputs,
+            )
+            del raw
+            gc.collect()
+            return result
+
+        if not self.overwrite and edf_output_path.exists() and not fif_output_path.exists():
+            raw = mne.io.read_raw_edf(edf_output_path, preload=False, infer_types=True, verbose=True)
+            raw.save(fif_output_path, overwrite=False)
+            result = self._completed_from_existing_result(
+                status="completed_from_existing_edf",
+                relative_session_dir=relative_session_dir,
+                edf_output_path=edf_output_path,
+                fif_output_path=fif_output_path,
+                n_recordings=len(files),
+                recordings=[file.name for file in files],
+                boundary_markers=boundary_markers,
+                raw=raw,
+                existing_outputs=existing_outputs,
+            )
+            del raw
+            gc.collect()
+            return result
+
+        if existing_outputs and not self.overwrite:
+            return ConcatenationResult(
+                session_path=str(relative_session_dir),
+                edf_output_path=str(edf_output_path),
+                fif_output_path=str(fif_output_path),
+                n_recordings=len(files),
+                recordings=[file.name for file in files],
+                boundary_markers=boundary_markers,
+                status="partial_outputs_exist",
+                existing_outputs=[str(path) for path in existing_outputs],
+            )
+
         raws = [
-            mne.io.read_raw_edf(file, preload=True, infer_types=True, verbose=True)
+            mne.io.read_raw_edf(file, preload=False, infer_types=True, verbose=True)
             for file in files
         ]
+        info_error = self._raw_info_mismatch(raws, files)
+        if info_error is not None:
+            return ConcatenationResult(
+                session_path=str(relative_session_dir),
+                edf_output_path=str(edf_output_path),
+                fif_output_path=str(fif_output_path),
+                n_recordings=len(files),
+                recordings=[file.name for file in files],
+                boundary_markers=boundary_markers,
+                status="failed_info_mismatch",
+                error=info_error,
+            )
+
         boundary_onsets = self._boundary_onsets(raws)
         concatenated = mne.concatenate_raws(raws)
         self._add_boundary_annotations(concatenated, boundary_onsets, boundary_markers)
@@ -102,8 +165,9 @@ class EdfSessionConcatenator:
         edf_output_path.parent.mkdir(parents=True, exist_ok=True)
         concatenated.save(fif_output_path, overwrite=self.overwrite)
         self._export_raw_edf(concatenated, edf_output_path)
+        gc.collect()
 
-        return ConcatenationResult(
+        result = ConcatenationResult(
             session_path=str(relative_session_dir),
             edf_output_path=str(edf_output_path),
             fif_output_path=str(fif_output_path),
@@ -116,13 +180,21 @@ class EdfSessionConcatenator:
             duration_seconds=concatenated.n_times / float(concatenated.info["sfreq"]),
             status="written",
         )
+        del concatenated, raws
+        gc.collect()
+        return result
 
     def concatenate_all(self) -> list[ConcatenationResult]:
         sessions = self.find_multi_recording_sessions()
-        return [
-            self.concatenate_session(session_dir, files)
-            for session_dir, files in sorted(sessions.items(), key=lambda item: str(item[0]))
-        ]
+        results = []
+
+        for session_dir, files in sorted(sessions.items(), key=lambda item: str(item[0])):
+            try:
+                results.append(self.concatenate_session(session_dir, files))
+            except Exception as exc:
+                results.append(self._failed_result(session_dir, files, exc))
+
+        return results
 
     def concatenate_first(self) -> ConcatenationResult:
         sessions = self.find_multi_recording_sessions()
@@ -171,6 +243,7 @@ class EdfSessionConcatenator:
             "n_samples",
             "duration_seconds",
             "existing_outputs",
+            "error",
         ]
 
         with manifest.open("w", newline="") as csv_file:
@@ -224,6 +297,91 @@ class EdfSessionConcatenator:
         except RuntimeError as exc:
             raise RuntimeError("EDF export requires the edfio package: pip install edfio") from exc
 
+    def _raw_info_mismatch(self, raws: list[Any], files: list[Path]) -> str | None:
+        if not raws:
+            return None
+
+        reference = raws[0]
+        problems = []
+
+        for raw, file in zip(raws[1:], files[1:]):
+            if raw.info["nchan"] != reference.info["nchan"]:
+                problems.append(
+                    f"{file.name} has {raw.info['nchan']} channels; "
+                    f"{files[0].name} has {reference.info['nchan']} channels"
+                )
+                continue
+
+            if raw.ch_names != reference.ch_names:
+                missing = sorted(set(reference.ch_names) - set(raw.ch_names))
+                extra = sorted(set(raw.ch_names) - set(reference.ch_names))
+                problems.append(
+                    f"{file.name} channel names/order differ from {files[0].name}; "
+                    f"missing={missing}; extra={extra}"
+                )
+
+        return "; ".join(problems) if problems else None
+
+    def _existing_output_paths(self, edf_output_path: Path, fif_output_path: Path) -> list[Path]:
+        paths = []
+        if edf_output_path.exists():
+            paths.append(edf_output_path)
+        paths.extend(self._fif_output_paths(fif_output_path))
+        return paths
+
+    def _fif_output_paths(self, fif_output_path: Path) -> list[Path]:
+        paths = []
+        if fif_output_path.exists():
+            paths.append(fif_output_path)
+        paths.extend(sorted(fif_output_path.parent.glob(f"{fif_output_path.stem}-*.fif")))
+        return paths
+
+    def _completed_from_existing_result(
+        self,
+        status: str,
+        relative_session_dir: Path,
+        edf_output_path: Path,
+        fif_output_path: Path,
+        n_recordings: int,
+        recordings: list[str],
+        boundary_markers: list[str],
+        raw: Any,
+        existing_outputs: list[Path],
+    ) -> ConcatenationResult:
+        return ConcatenationResult(
+            session_path=str(relative_session_dir),
+            edf_output_path=str(edf_output_path),
+            fif_output_path=str(fif_output_path),
+            n_recordings=n_recordings,
+            recordings=recordings,
+            boundary_markers=boundary_markers,
+            n_channels=len(raw.ch_names),
+            sample_rate_hz=float(raw.info["sfreq"]),
+            n_samples=raw.n_times,
+            duration_seconds=raw.n_times / float(raw.info["sfreq"]),
+            status=status,
+            existing_outputs=[str(path) for path in existing_outputs],
+        )
+
+    def _failed_result(self, session_dir: Path, files: list[Path], exc: Exception) -> ConcatenationResult:
+        files = sorted(files)
+        relative_session_dir = session_dir.relative_to(self.source_dir)
+        edf_output_path, fif_output_path = self.output_paths(session_dir, files)
+        return ConcatenationResult(
+            session_path=str(relative_session_dir),
+            edf_output_path=str(edf_output_path),
+            fif_output_path=str(fif_output_path),
+            n_recordings=len(files),
+            recordings=[file.name for file in files],
+            boundary_markers=self._boundary_marker_descriptions(files),
+            status="failed",
+            existing_outputs=[
+                str(path)
+                for path in self._existing_output_paths(edf_output_path, fif_output_path)
+            ],
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
 
 def _import_mne() -> Any:
     try:
@@ -239,6 +397,7 @@ def _result_to_row(result: ConcatenationResult) -> dict[str, Any]:
     row["recordings"] = "|".join(result.recordings)
     row["boundary_markers"] = "|".join(result.boundary_markers)
     row["existing_outputs"] = "|".join(result.existing_outputs or [])
+    row["error"] = result.error or ""
     return row
 
 
