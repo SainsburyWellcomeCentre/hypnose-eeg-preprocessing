@@ -1,0 +1,26 @@
+name: hypnose-eeg-analysis-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip=25.1
+  - pip:
+      # EDF reading and EEG analysis.
+      - mne==1.12.1
+
+      # Scientific computing and data frames used by the notebook and pipeline.
+      - numpy==2.3.3
+      - scipy==1.16.2
+      - pandas==2.3.3
+      - xarray==2026.2.0
+
+      # Notebook exploration and plotting.
+      - matplotlib==3.10.9
+      - jupyterlab==4.4.10
+      - ipywidgets==8.1.7
+      - mne-qt-browser==0.7.5
+      - PyQt6==6.10.0
+
+      # Runtime config parsing and Parquet output support.
+      - PyYAML==6.0.3
+      - pyarrow==21.0.0
