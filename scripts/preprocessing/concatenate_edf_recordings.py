@@ -13,7 +13,6 @@ from typing import Any, Iterable
 class ConcatenationResult:
     session_path: str
     edf_output_path: str
-    fif_output_path: str
     n_recordings: int
     status: str
     recordings: list[str]
@@ -63,82 +62,32 @@ class EdfSessionConcatenator:
             if len(files) > 1
         }
 
-    def output_paths(self, session_dir: Path, files: list[Path]) -> tuple[Path, Path]:
+    def output_path(self, session_dir: Path, files: list[Path]) -> Path:
         output_dir = session_dir
         if self.sink_dir is not None:
             relative_session_dir = session_dir.relative_to(self.source_dir)
             output_dir = self.sink_dir / relative_session_dir
 
         base_name = self._concatenated_base_name(files)
-        return output_dir / f"{base_name}.edf", output_dir / f"{base_name}_raw.fif"
+        return output_dir / f"{base_name}.edf"
 
     def concatenate_session(self, session_dir: Path, files: list[Path]) -> ConcatenationResult:
         mne = _import_mne()
 
         files = sorted(files)
         relative_session_dir = session_dir.relative_to(self.source_dir)
-        edf_output_path, fif_output_path = self.output_paths(session_dir, files)
-        existing_outputs = self._existing_output_paths(edf_output_path, fif_output_path)
+        edf_output_path = self.output_path(session_dir, files)
         boundary_markers = self._boundary_marker_descriptions(files)
 
-        if not self.overwrite and edf_output_path.exists() and fif_output_path.exists():
+        if not self.overwrite and edf_output_path.exists():
             return ConcatenationResult(
                 session_path=str(relative_session_dir),
                 edf_output_path=str(edf_output_path),
-                fif_output_path=str(fif_output_path),
                 n_recordings=len(files),
                 recordings=[file.name for file in files],
                 boundary_markers=boundary_markers,
                 status="skipped_exists",
-                existing_outputs=[str(path) for path in existing_outputs],
-            )
-
-        if not self.overwrite and fif_output_path.exists() and not edf_output_path.exists():
-            raw = mne.io.read_raw_fif(fif_output_path, preload=False, verbose=True)
-            self._export_raw_edf(raw, edf_output_path)
-            result = self._completed_from_existing_result(
-                status="completed_from_existing_fif",
-                relative_session_dir=relative_session_dir,
-                edf_output_path=edf_output_path,
-                fif_output_path=fif_output_path,
-                n_recordings=len(files),
-                recordings=[file.name for file in files],
-                boundary_markers=boundary_markers,
-                raw=raw,
-                existing_outputs=existing_outputs,
-            )
-            del raw
-            gc.collect()
-            return result
-
-        if not self.overwrite and edf_output_path.exists() and not fif_output_path.exists():
-            raw = mne.io.read_raw_edf(edf_output_path, preload=False, infer_types=True, verbose=True)
-            raw.save(fif_output_path, overwrite=False)
-            result = self._completed_from_existing_result(
-                status="completed_from_existing_edf",
-                relative_session_dir=relative_session_dir,
-                edf_output_path=edf_output_path,
-                fif_output_path=fif_output_path,
-                n_recordings=len(files),
-                recordings=[file.name for file in files],
-                boundary_markers=boundary_markers,
-                raw=raw,
-                existing_outputs=existing_outputs,
-            )
-            del raw
-            gc.collect()
-            return result
-
-        if existing_outputs and not self.overwrite:
-            return ConcatenationResult(
-                session_path=str(relative_session_dir),
-                edf_output_path=str(edf_output_path),
-                fif_output_path=str(fif_output_path),
-                n_recordings=len(files),
-                recordings=[file.name for file in files],
-                boundary_markers=boundary_markers,
-                status="partial_outputs_exist",
-                existing_outputs=[str(path) for path in existing_outputs],
+                existing_outputs=[str(edf_output_path)],
             )
 
         raws = [
@@ -150,7 +99,6 @@ class EdfSessionConcatenator:
             return ConcatenationResult(
                 session_path=str(relative_session_dir),
                 edf_output_path=str(edf_output_path),
-                fif_output_path=str(fif_output_path),
                 n_recordings=len(files),
                 recordings=[file.name for file in files],
                 boundary_markers=boundary_markers,
@@ -163,14 +111,12 @@ class EdfSessionConcatenator:
         self._add_boundary_annotations(concatenated, boundary_onsets, boundary_markers)
 
         edf_output_path.parent.mkdir(parents=True, exist_ok=True)
-        concatenated.save(fif_output_path, overwrite=self.overwrite)
         self._export_raw_edf(concatenated, edf_output_path)
         gc.collect()
 
         result = ConcatenationResult(
             session_path=str(relative_session_dir),
             edf_output_path=str(edf_output_path),
-            fif_output_path=str(fif_output_path),
             n_recordings=len(files),
             recordings=[file.name for file in files],
             boundary_markers=boundary_markers,
@@ -211,12 +157,11 @@ class EdfSessionConcatenator:
         for session_dir, files in sorted(sessions.items(), key=lambda item: str(item[0])):
             files = sorted(files)
             relative_session_dir = session_dir.relative_to(self.source_dir)
-            edf_output_path, fif_output_path = self.output_paths(session_dir, files)
+            edf_output_path = self.output_path(session_dir, files)
             results.append(
                 ConcatenationResult(
                     session_path=str(relative_session_dir),
                     edf_output_path=str(edf_output_path),
-                    fif_output_path=str(fif_output_path),
                     n_recordings=len(files),
                     recordings=[file.name for file in files],
                     boundary_markers=self._boundary_marker_descriptions(files),
@@ -233,7 +178,6 @@ class EdfSessionConcatenator:
         fieldnames = [
             "session_path",
             "edf_output_path",
-            "fif_output_path",
             "n_recordings",
             "status",
             "recordings",
@@ -322,63 +266,18 @@ class EdfSessionConcatenator:
 
         return "; ".join(problems) if problems else None
 
-    def _existing_output_paths(self, edf_output_path: Path, fif_output_path: Path) -> list[Path]:
-        paths = []
-        if edf_output_path.exists():
-            paths.append(edf_output_path)
-        paths.extend(self._fif_output_paths(fif_output_path))
-        return paths
-
-    def _fif_output_paths(self, fif_output_path: Path) -> list[Path]:
-        paths = []
-        if fif_output_path.exists():
-            paths.append(fif_output_path)
-        paths.extend(sorted(fif_output_path.parent.glob(f"{fif_output_path.stem}-*.fif")))
-        return paths
-
-    def _completed_from_existing_result(
-        self,
-        status: str,
-        relative_session_dir: Path,
-        edf_output_path: Path,
-        fif_output_path: Path,
-        n_recordings: int,
-        recordings: list[str],
-        boundary_markers: list[str],
-        raw: Any,
-        existing_outputs: list[Path],
-    ) -> ConcatenationResult:
-        return ConcatenationResult(
-            session_path=str(relative_session_dir),
-            edf_output_path=str(edf_output_path),
-            fif_output_path=str(fif_output_path),
-            n_recordings=n_recordings,
-            recordings=recordings,
-            boundary_markers=boundary_markers,
-            n_channels=len(raw.ch_names),
-            sample_rate_hz=float(raw.info["sfreq"]),
-            n_samples=raw.n_times,
-            duration_seconds=raw.n_times / float(raw.info["sfreq"]),
-            status=status,
-            existing_outputs=[str(path) for path in existing_outputs],
-        )
-
     def _failed_result(self, session_dir: Path, files: list[Path], exc: Exception) -> ConcatenationResult:
         files = sorted(files)
         relative_session_dir = session_dir.relative_to(self.source_dir)
-        edf_output_path, fif_output_path = self.output_paths(session_dir, files)
+        edf_output_path = self.output_path(session_dir, files)
         return ConcatenationResult(
             session_path=str(relative_session_dir),
             edf_output_path=str(edf_output_path),
-            fif_output_path=str(fif_output_path),
             n_recordings=len(files),
             recordings=[file.name for file in files],
             boundary_markers=self._boundary_marker_descriptions(files),
             status="failed",
-            existing_outputs=[
-                str(path)
-                for path in self._existing_output_paths(edf_output_path, fif_output_path)
-            ],
+            existing_outputs=[str(edf_output_path)] if edf_output_path.exists() else [],
             error=f"{type(exc).__name__}: {exc}",
         )
 
@@ -443,7 +342,7 @@ def main() -> None:
     for result in results:
         print(
             f"{result.status}: {result.session_path} "
-            f"({result.n_recordings} recordings) -> {result.fif_output_path}"
+            f"({result.n_recordings} recordings) -> {result.edf_output_path}"
         )
     print(f"manifest: {manifest}")
 
