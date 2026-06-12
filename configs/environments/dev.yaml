@@ -10,10 +10,16 @@ source:
 sink:
   kind: filesystem
   uri: "data/derivatives"
-  format: "parquet"
+  format: "fif"
   partition_by:
     - "session_date"
     - "subject_id"
+
+preprocessing:
+  downsample:
+    target_sfreq: 128
+    output_format: "fif"
+    manifest: "data/derivatives/edf_downsample_manifest.csv"
 
 checkpoint:
   kind: local-file
