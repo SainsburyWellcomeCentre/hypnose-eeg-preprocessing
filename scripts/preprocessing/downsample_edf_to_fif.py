@@ -3,9 +3,16 @@ from __future__ import annotations
 import argparse
 import csv
 import gc
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable
+
+try:
+    from scripts.utils import coalesce, import_mne, load_config, nested_get
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from utils import coalesce, import_mne, load_config, nested_get
 
 
 @dataclass(frozen=True)
@@ -89,7 +96,7 @@ class EdfDownsampler:
         ]
 
     def downsample_file(self, edf_path: Path) -> DownsampleResult:
-        mne = _import_mne()
+        mne = import_mne()
         edf_path = Path(edf_path)
         output_path = self.output_path(edf_path)
         relative_source_path = edf_path.relative_to(self.source_dir)
@@ -178,101 +185,6 @@ class EdfDownsampler:
         return str(self.target_sample_rate_hz).replace(".", "p")
 
 
-def _import_mne() -> Any:
-    try:
-        import mne
-    except ImportError as exc:
-        raise ImportError("Install MNE first: pip install mne") from exc
-
-    return mne
-
-
-def _load_config(config_path: str | Path | None) -> dict[str, Any]:
-    if config_path is None:
-        return {}
-
-    path = Path(config_path)
-    try:
-        import yaml
-    except ImportError:
-        return _load_simple_yaml_config(path)
-
-    with path.open() as config_file:
-        config = yaml.safe_load(config_file) or {}
-
-    if not isinstance(config, dict):
-        raise ValueError(f"Config must contain a YAML mapping: {path}")
-
-    return config
-
-
-def _load_simple_yaml_config(config_path: Path) -> dict[str, Any]:
-    """Fallback parser for the simple nested mappings used by project configs."""
-    config: dict[str, Any] = {}
-    stack: list[tuple[int, dict[str, Any]]] = [(-1, config)]
-
-    with config_path.open() as config_file:
-        for raw_line in config_file:
-            if not raw_line.strip() or raw_line.lstrip().startswith("#"):
-                continue
-            if raw_line.lstrip().startswith("- "):
-                continue
-
-            indent = len(raw_line) - len(raw_line.lstrip(" "))
-            line = raw_line.strip()
-            if ":" not in line:
-                continue
-
-            key, raw_value = line.split(":", 1)
-            key = key.strip()
-            raw_value = raw_value.strip()
-
-            while stack and indent <= stack[-1][0]:
-                stack.pop()
-
-            parent = stack[-1][1]
-            if raw_value == "":
-                child: dict[str, Any] = {}
-                parent[key] = child
-                stack.append((indent, child))
-            else:
-                parent[key] = _parse_simple_yaml_scalar(raw_value)
-
-    return config
-
-
-def _parse_simple_yaml_scalar(value: str) -> Any:
-    value = value.split(" #", 1)[0].strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        return value[1:-1]
-    if value.lower() in {"true", "false"}:
-        return value.lower() == "true"
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        return value
-
-
-def _nested_get(config: Mapping[str, Any], keys: tuple[str, ...], default: Any = None) -> Any:
-    value: Any = config
-    for key in keys:
-        if not isinstance(value, Mapping) or key not in value:
-            return default
-        value = value[key]
-    return value
-
-
-def _coalesce(*values: Any) -> Any:
-    for value in values:
-        if value is not None:
-            return value
-    return None
-
-
 def _result_to_row(result: DownsampleResult) -> dict[str, Any]:
     row = result.__dict__.copy()
     row["error"] = result.error or ""
@@ -306,25 +218,25 @@ def main() -> None:
         help="CSV manifest path.",
     )
     args = parser.parse_args()
-    config = _load_config(args.config)
+    config = load_config(args.config)
 
-    source_dir = _coalesce(args.source_dir, _nested_get(config, ("source", "uri")), "data/rawdata")
-    sink_dir = _coalesce(args.sink_dir, _nested_get(config, ("sink", "uri")), "data/derivatives")
-    edf_pattern = _coalesce(args.edf_pattern, _nested_get(config, ("source", "glob")), "**/*.edf")
+    source_dir = coalesce(args.source_dir, nested_get(config, ("source", "uri")), "data/rawdata")
+    sink_dir = coalesce(args.sink_dir, nested_get(config, ("sink", "uri")), "data/derivatives")
+    edf_pattern = coalesce(args.edf_pattern, nested_get(config, ("source", "glob")), "**/*.edf")
     target_sfreq = float(
-        _coalesce(
+        coalesce(
             args.target_sfreq,
-            _nested_get(config, ("preprocessing", "downsample", "target_sfreq")),
+            nested_get(config, ("preprocessing", "downsample", "target_sfreq")),
             128.0,
         )
     )
-    manifest = _coalesce(
+    manifest = coalesce(
         args.manifest,
-        _nested_get(config, ("preprocessing", "downsample", "manifest")),
+        nested_get(config, ("preprocessing", "downsample", "manifest")),
         "data/derivatives/edf_downsample_manifest.csv",
     )
     output_format = str(
-        _coalesce(_nested_get(config, ("preprocessing", "downsample", "output_format")), "fif")
+        coalesce(nested_get(config, ("preprocessing", "downsample", "output_format")), "fif")
     ).lower()
     if output_format != "fif":
         raise ValueError(f"Unsupported downsample output_format: {output_format!r}. Expected 'fif'.")

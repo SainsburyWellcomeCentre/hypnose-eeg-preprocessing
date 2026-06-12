@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+
+try:
+    from scripts.utils import coalesce, export_raw_edf, import_mne, load_config, nested_get
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from utils import coalesce, export_raw_edf, import_mne, load_config, nested_get
 
 
 def inspect_edf(
@@ -14,7 +21,7 @@ def inspect_edf(
     write_trimmed: bool = False,
     overwrite: bool = False,
 ) -> Path | None:
-    mne = _import_mne()
+    mne = import_mne()
     edf_path = Path(edf_path)
     if not edf_path.exists():
         raise FileNotFoundError(f"EDF file not found: {edf_path}")
@@ -99,109 +106,7 @@ def _default_output_path(edf_path: Path, output_suffix: str) -> Path:
 
 
 def _export_raw_edf(raw: Any, output_path: Path, overwrite: bool) -> None:
-    try:
-        raw.export(output_path, fmt="edf", overwrite=overwrite, physical_range="auto")
-    except TypeError:
-        raw.export(output_path, fmt="edf", overwrite=overwrite)
-    except RuntimeError as exc:
-        raise RuntimeError("EDF export requires the edfio package: pip install edfio") from exc
-
-
-def _import_mne() -> Any:
-    try:
-        import mne
-    except ImportError as exc:
-        raise ImportError("Install MNE first: pip install mne") from exc
-
-    return mne
-
-
-def _load_config(config_path: str | Path | None) -> dict[str, Any]:
-    if config_path is None:
-        return {}
-
-    path = Path(config_path)
-    try:
-        import yaml
-    except ImportError:
-        return _load_simple_yaml_config(path)
-
-    with path.open() as config_file:
-        config = yaml.safe_load(config_file) or {}
-
-    if not isinstance(config, dict):
-        raise ValueError(f"Config must contain a YAML mapping: {path}")
-
-    return config
-
-
-def _load_simple_yaml_config(config_path: Path) -> dict[str, Any]:
-    """Fallback parser for the simple nested mappings used by project configs."""
-    config: dict[str, Any] = {}
-    stack: list[tuple[int, dict[str, Any]]] = [(-1, config)]
-
-    with config_path.open() as config_file:
-        for raw_line in config_file:
-            if not raw_line.strip() or raw_line.lstrip().startswith("#"):
-                continue
-            if raw_line.lstrip().startswith("- "):
-                continue
-
-            indent = len(raw_line) - len(raw_line.lstrip(" "))
-            line = raw_line.strip()
-            if ":" not in line:
-                continue
-
-            key, raw_value = line.split(":", 1)
-            key = key.strip()
-            raw_value = raw_value.strip()
-
-            while stack and indent <= stack[-1][0]:
-                stack.pop()
-
-            parent = stack[-1][1]
-            if raw_value == "":
-                child: dict[str, Any] = {}
-                parent[key] = child
-                stack.append((indent, child))
-            else:
-                parent[key] = _parse_simple_yaml_scalar(raw_value)
-
-    return config
-
-
-def _parse_simple_yaml_scalar(value: str) -> Any:
-    value = value.split(" #", 1)[0].strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        return value[1:-1]
-    if value.lower() in {"true", "false"}:
-        return value.lower() == "true"
-    if value.lower() in {"null", "none"}:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        return value
-
-
-def _nested_get(config: Mapping[str, Any], keys: tuple[str, ...], default: Any = None) -> Any:
-    value: Any = config
-    for key in keys:
-        if not isinstance(value, Mapping) or key not in value:
-            return default
-        value = value[key]
-    return value
-
-
-def _coalesce(*values: Any) -> Any:
-    for value in values:
-        if value is not None:
-            return value
-    return None
+    export_raw_edf(raw, output_path, overwrite=overwrite)
 
 
 def main() -> None:
@@ -243,18 +148,18 @@ def main() -> None:
     )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output EDF if it exists.")
     args = parser.parse_args()
-    config = _load_config(args.config)
+    config = load_config(args.config)
 
     n_samples = int(
-        _coalesce(args.n_samples, _nested_get(config, ("preprocessing", "trim_channels", "n_samples")), 100)
+        coalesce(args.n_samples, nested_get(config, ("preprocessing", "trim_channels", "n_samples")), 100)
     )
     keep_first = int(
-        _coalesce(args.keep_first, _nested_get(config, ("preprocessing", "trim_channels", "keep_first")), 3)
+        coalesce(args.keep_first, nested_get(config, ("preprocessing", "trim_channels", "keep_first")), 3)
     )
     output_suffix = str(
-        _coalesce(
+        coalesce(
             args.output_suffix,
-            _nested_get(config, ("preprocessing", "trim_channels", "output_suffix")),
+            nested_get(config, ("preprocessing", "trim_channels", "output_suffix")),
             "_trimmed",
         )
     )
