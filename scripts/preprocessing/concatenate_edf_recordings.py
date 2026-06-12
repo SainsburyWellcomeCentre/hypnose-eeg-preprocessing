@@ -56,11 +56,35 @@ class EdfSessionConcatenator:
         for edf_path in recording_files:
             sessions.setdefault(edf_path.parent, []).append(edf_path)
 
-        return {
-            session_dir: files
-            for session_dir, files in sessions.items()
-            if len(files) > 1
-        }
+        selected_sessions = {}
+        for session_dir, files in sessions.items():
+            selected_files = self._prefer_trimmed_recordings(files)
+            if len(selected_files) > 1:
+                selected_sessions[session_dir] = selected_files
+
+        return selected_sessions
+
+    def _prefer_trimmed_recordings(self, files: list[Path]) -> list[Path]:
+        files_by_recording: dict[str, list[Path]] = {}
+        for file in files:
+            files_by_recording.setdefault(self._recording_key(file), []).append(file)
+
+        selected = []
+        for recording_files in files_by_recording.values():
+            trimmed_files = [
+                file
+                for file in recording_files
+                if file.stem.lower().endswith("_trimmed")
+            ]
+            selected.append(sorted(trimmed_files or recording_files)[0])
+
+        return sorted(selected)
+
+    def _recording_key(self, file: Path) -> str:
+        stem = file.stem
+        if stem.lower().endswith("_trimmed"):
+            return stem[: -len("_trimmed")]
+        return stem
 
     def output_path(self, session_dir: Path, files: list[Path]) -> Path:
         output_dir = session_dir
