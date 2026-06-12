@@ -6,7 +6,7 @@ import gc
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 
 @dataclass(frozen=True)
@@ -291,6 +291,94 @@ def _import_mne() -> Any:
     return mne
 
 
+def _load_config(config_path: str | Path | None) -> dict[str, Any]:
+    if config_path is None:
+        return {}
+
+    path = Path(config_path)
+    try:
+        import yaml
+    except ImportError:
+        return _load_simple_yaml_config(path)
+
+    with path.open() as config_file:
+        config = yaml.safe_load(config_file) or {}
+
+    if not isinstance(config, dict):
+        raise ValueError(f"Config must contain a YAML mapping: {path}")
+
+    return config
+
+
+def _load_simple_yaml_config(config_path: Path) -> dict[str, Any]:
+    """Fallback parser for the simple nested mappings used by project configs."""
+    config: dict[str, Any] = {}
+    stack: list[tuple[int, dict[str, Any]]] = [(-1, config)]
+
+    with config_path.open() as config_file:
+        for raw_line in config_file:
+            if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+                continue
+            if raw_line.lstrip().startswith("- "):
+                continue
+
+            indent = len(raw_line) - len(raw_line.lstrip(" "))
+            line = raw_line.strip()
+            if ":" not in line:
+                continue
+
+            key, raw_value = line.split(":", 1)
+            key = key.strip()
+            raw_value = raw_value.strip()
+
+            while stack and indent <= stack[-1][0]:
+                stack.pop()
+
+            parent = stack[-1][1]
+            if raw_value == "":
+                child: dict[str, Any] = {}
+                parent[key] = child
+                stack.append((indent, child))
+            else:
+                parent[key] = _parse_simple_yaml_scalar(raw_value)
+
+    return config
+
+
+def _parse_simple_yaml_scalar(value: str) -> Any:
+    value = value.split(" #", 1)[0].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    if value.lower() in {"true", "false"}:
+        return value.lower() == "true"
+    if value.lower() in {"null", "none"}:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _nested_get(config: Mapping[str, Any], keys: tuple[str, ...], default: Any = None) -> Any:
+    value: Any = config
+    for key in keys:
+        if not isinstance(value, Mapping) or key not in value:
+            return default
+        value = value[key]
+    return value
+
+
+def _coalesce(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _result_to_row(result: ConcatenationResult) -> dict[str, Any]:
     row = result.__dict__.copy()
     row["recordings"] = "|".join(result.recordings)
@@ -304,7 +392,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Concatenate sessions that contain multiple EDF recording files."
     )
-    parser.add_argument("--source-dir", default="data/rawdata", help="Mounted raw EDF root.")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="YAML config path. CLI values override config values.",
+    )
+    parser.add_argument("--source-dir", default=None, help="Mounted raw EDF root.")
     parser.add_argument(
         "--sink-dir",
         default=None,
@@ -313,21 +406,31 @@ def main() -> None:
             "beside their source EDF files."
         ),
     )
-    parser.add_argument("--edf-pattern", default="**/*.edf", help="Glob used below source-dir.")
+    parser.add_argument("--edf-pattern", default=None, help="Glob used below source-dir.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs.")
     parser.add_argument("--first", action="store_true", help="Concatenate only the first matching session.")
     parser.add_argument("--dry-run", action="store_true", help="Preview matching sessions without writing files.")
     parser.add_argument(
         "--manifest",
-        default="data/rawdata/edf_concatenation_manifest.csv",
+        default=None,
         help="CSV manifest path.",
     )
     args = parser.parse_args()
+    config = _load_config(args.config)
+
+    source_dir = _coalesce(args.source_dir, _nested_get(config, ("source", "uri")), "data/rawdata")
+    sink_dir = _coalesce(args.sink_dir, _nested_get(config, ("preprocessing", "concatenate", "sink_dir")))
+    edf_pattern = _coalesce(args.edf_pattern, _nested_get(config, ("source", "glob")), "**/*.edf")
+    manifest = _coalesce(
+        args.manifest,
+        _nested_get(config, ("preprocessing", "concatenate", "manifest")),
+        "data/derivatives/edf_concatenation_manifest.csv",
+    )
 
     concatenator = EdfSessionConcatenator(
-        source_dir=args.source_dir,
-        sink_dir=args.sink_dir,
-        edf_pattern=args.edf_pattern,
+        source_dir=source_dir,
+        sink_dir=sink_dir,
+        edf_pattern=edf_pattern,
         overwrite=args.overwrite,
     )
 
@@ -338,13 +441,13 @@ def main() -> None:
     else:
         results = concatenator.concatenate_all()
 
-    manifest = concatenator.write_manifest(results, args.manifest)
+    manifest_path = concatenator.write_manifest(results, manifest)
     for result in results:
         print(
             f"{result.status}: {result.session_path} "
             f"({result.n_recordings} recordings) -> {result.edf_output_path}"
         )
-    print(f"manifest: {manifest}")
+    print(f"manifest: {manifest_path}")
 
 
 if __name__ == "__main__":

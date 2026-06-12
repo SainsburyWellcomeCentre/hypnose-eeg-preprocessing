@@ -16,6 +16,9 @@ sink:
     - "subject_id"
 
 preprocessing:
+  concatenate:
+    sink_dir: null
+    manifest: "data/rawdata/edf_concatenation_manifest.csv"
   downsample:
     target_sfreq: 128
     output_format: "fif"
