@@ -23,6 +23,10 @@ preprocessing:
     target_sfreq: 128
     output_format: "fif"
     manifest: "data/derivatives/edf_downsample_manifest.csv"
+  trim_channels:
+    n_samples: 100
+    keep_first: 3
+    output_suffix: "_trimmed"
 
 checkpoint:
   kind: local-file
