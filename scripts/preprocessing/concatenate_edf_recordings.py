@@ -86,6 +86,106 @@ class EdfSessionConcatenator:
             return stem[: -len("_trimmed")]
         return stem
 
+    def select_recordings(
+        self,
+        session_dir: str | Path,
+        recording_selectors: list[str],
+    ) -> tuple[Path, list[Path]]:
+        resolved_session_dir = self._resolve_session_dir(session_dir)
+        available_files = sorted(
+            path
+            for path in resolved_session_dir.glob("*.edf")
+            if path.is_file()
+            and "_recording" in path.name
+            and "_recording-concat" not in path.name
+            and path.suffix.lower() == ".edf"
+        )
+
+        selected_files = [
+            self._select_recording(resolved_session_dir, available_files, selector)
+            for selector in recording_selectors
+        ]
+        if len(selected_files) < 2:
+            raise ValueError("Select at least two EDF recordings to concatenate.")
+
+        return resolved_session_dir, selected_files
+
+    def preview_selected(
+        self,
+        session_dir: str | Path,
+        recording_selectors: list[str],
+    ) -> ConcatenationResult:
+        resolved_session_dir, files = self.select_recordings(session_dir, recording_selectors)
+        relative_session_dir = resolved_session_dir.relative_to(self.source_dir)
+        edf_output_path = self.output_path(resolved_session_dir, files)
+        return ConcatenationResult(
+            session_path=str(relative_session_dir),
+            edf_output_path=str(edf_output_path),
+            n_recordings=len(files),
+            recordings=[file.name for file in files],
+            boundary_markers=self._boundary_marker_descriptions(files),
+            status="dry_run",
+        )
+
+    def concatenate_selected(
+        self,
+        session_dir: str | Path,
+        recording_selectors: list[str],
+    ) -> ConcatenationResult:
+        resolved_session_dir, files = self.select_recordings(session_dir, recording_selectors)
+        return self.concatenate_session(resolved_session_dir, files, sort_files=False)
+
+    def _resolve_session_dir(self, session_dir: str | Path) -> Path:
+        path = Path(session_dir)
+        if not path.is_absolute():
+            path = self.source_dir / path
+        if not path.exists():
+            raise FileNotFoundError(f"Session directory not found: {path}")
+        if not path.is_dir():
+            raise NotADirectoryError(f"Session path is not a directory: {path}")
+        try:
+            path.relative_to(self.source_dir)
+            return path
+        except ValueError:
+            pass
+
+        try:
+            relative_path = path.resolve().relative_to(self.source_dir.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Session directory must be inside source_dir: {self.source_dir}") from exc
+        return self.source_dir / relative_path
+
+    def _select_recording(
+        self,
+        session_dir: Path,
+        available_files: list[Path],
+        selector: str,
+    ) -> Path:
+        selector_path = Path(selector)
+        if selector_path.suffix.lower() == ".edf":
+            exact_path = session_dir / selector_path
+            if exact_path.exists() and exact_path.is_file():
+                return exact_path
+            raise FileNotFoundError(f"Selected EDF not found in session: {selector}")
+
+        recording_key_matches = [
+            file
+            for file in available_files
+            if self._recording_key(file) == selector
+        ]
+        if recording_key_matches:
+            return self._prefer_trimmed_recordings(recording_key_matches)[0]
+
+        exact_stem_matches = [
+            file
+            for file in available_files
+            if file.stem == selector
+        ]
+        if exact_stem_matches:
+            return self._prefer_trimmed_recordings(exact_stem_matches)[0]
+
+        raise FileNotFoundError(f"Selected recording not found in session: {selector}")
+
     def output_path(self, session_dir: Path, files: list[Path]) -> Path:
         output_dir = session_dir
         if self.sink_dir is not None:
@@ -95,10 +195,15 @@ class EdfSessionConcatenator:
         base_name = self._concatenated_base_name(files)
         return output_dir / f"{base_name}.edf"
 
-    def concatenate_session(self, session_dir: Path, files: list[Path]) -> ConcatenationResult:
+    def concatenate_session(
+        self,
+        session_dir: Path,
+        files: list[Path],
+        sort_files: bool = True,
+    ) -> ConcatenationResult:
         mne = _import_mne()
 
-        files = sorted(files)
+        files = sorted(files) if sort_files else list(files)
         relative_session_dir = session_dir.relative_to(self.source_dir)
         edf_output_path = self.output_path(session_dir, files)
         boundary_markers = self._boundary_marker_descriptions(files)
@@ -431,6 +536,23 @@ def main() -> None:
         ),
     )
     parser.add_argument("--edf-pattern", default=None, help="Glob used below source-dir.")
+    parser.add_argument(
+        "--session-dir",
+        default=None,
+        help=(
+            "Session/ephys directory to concatenate within. May be absolute or "
+            "relative to source-dir."
+        ),
+    )
+    parser.add_argument(
+        "--recordings",
+        nargs="+",
+        default=None,
+        help=(
+            "Explicit EDF filenames or stems to concatenate within --session-dir, "
+            "in the order provided."
+        ),
+    )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs.")
     parser.add_argument("--first", action="store_true", help="Concatenate only the first matching session.")
     parser.add_argument("--dry-run", action="store_true", help="Preview matching sessions without writing files.")
@@ -458,7 +580,15 @@ def main() -> None:
         overwrite=args.overwrite,
     )
 
-    if args.dry_run:
+    if (args.session_dir is None) != (args.recordings is None):
+        raise ValueError("--session-dir and --recordings must be used together.")
+
+    if args.session_dir is not None and args.recordings is not None:
+        if args.dry_run:
+            results = [concatenator.preview_selected(args.session_dir, args.recordings)]
+        else:
+            results = [concatenator.concatenate_selected(args.session_dir, args.recordings)]
+    elif args.dry_run:
         results = concatenator.preview()
     elif args.first:
         results = [concatenator.concatenate_first()]
