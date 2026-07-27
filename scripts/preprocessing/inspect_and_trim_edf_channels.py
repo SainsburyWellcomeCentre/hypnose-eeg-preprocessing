@@ -1,3 +1,25 @@
+"""Inspect an EDF recording and optionally standardize its channel count.
+
+Some EEG recording sessions contain unexpected auxiliary or duplicate channels.
+Those files can be incompatible with later operations—particularly concatenation,
+which requires the recordings in a session to have matching channel layouts. This
+utility makes those discrepancies visible and, when appropriate, creates a reduced
+EDF containing only the leading EEG channels expected by the pipeline.
+
+By default the script is read-only. It opens one EDF without loading the complete
+recording into memory, reports its channel names, sample rate, duration, and first
+few samples, and marks which channels would be retained. Passing ``--write-trimmed``
+loads the selected channels and writes a new EDF; it does not alter the source file.
+The default output keeps the first three channels and adds ``_trimmed`` to the
+filename, but the channel count, output suffix, and output path are configurable.
+
+Channels are selected by their order in the EDF, not by name. The operator should
+therefore inspect the printed channel list before writing a trimmed copy and confirm
+that the leading channels are the intended EEG signals. This script is a corrective
+tool for recordings with inconsistent channel layouts, not a mandatory processing
+step for EDF files that already match the expected schema.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -111,7 +133,8 @@ def _export_raw_edf(raw: Any, output_path: Path, overwrite: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Inspect one EDF file and optionally write a first-N-channel trimmed EDF."
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("edf_path", help="Path to the EDF file to inspect.")
     parser.add_argument(
