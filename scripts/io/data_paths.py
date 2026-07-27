@@ -93,7 +93,7 @@ def get_active() -> str | None:
 def set_active(name: str) -> None:
     _configs_dir().mkdir(parents=True, exist_ok=True)
     local_path().write_text(
-        "# Per-machine selection; set with scripts/io/set_data_location.py\n"
+        "# Per-machine selection; set with src/set_data_location.py\n"
         + f"active: {name}\n"
     )
     reload()
@@ -111,7 +111,7 @@ def _active_profile() -> dict[str, str]:
     if not name:
         raise RuntimeError(
             "No EEG data-location profile is active. Run "
-            "'python scripts/io/set_data_location.py --list', then select one."
+            "'python src/set_data_location.py --list', then select one."
         )
     profile = load_profiles().get(name)
     if not isinstance(profile, dict) or not profile.get("rawdata"):

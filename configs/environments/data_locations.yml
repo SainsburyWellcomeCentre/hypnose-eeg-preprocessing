@@ -1,5 +1,5 @@
 # Shared data-location profiles. Select one per checkout with:
-#   python scripts/io/set_data_location.py <profile>
+#   python src/set_data_location.py <profile>
 default_active: null
 
 profiles:

@@ -19,9 +19,9 @@ The shared profiles live in `configs/environments/data_locations.yml`. Select a
 profile once for each checkout:
 
 ```bash
-python scripts/io/set_data_location.py --list
-python scripts/io/set_data_location.py server-linux   # or server-mac / server-windows
-python scripts/io/set_data_location.py --show
+python src/set_data_location.py --list
+python src/set_data_location.py server-linux   # or server-mac / server-windows
+python src/set_data_location.py --show
 ```
 
 The selection is written to `configs/environments/data_locations.local.yml`,

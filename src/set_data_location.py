@@ -19,7 +19,7 @@ try:
         set_active,
     )
 except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from scripts.io.data_paths import (
         get_active,
         get_derivatives_root,
