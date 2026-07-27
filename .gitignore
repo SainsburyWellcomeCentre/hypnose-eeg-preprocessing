@@ -2,8 +2,13 @@
 __pycache__/
 *.pyc
 
+# Agent artifacts
+.agents/
+.codex/
+
 # Local runtime state and caches
 data/
+configs/environments/data_locations.local.yml
 state/*.json
 cache/
 outputs/reports/

@@ -1,161 +1,54 @@
-Mounting an SMB share and creating a repo symlink
-================================================
+# Hypnose EEG Analysis
 
-Example remote SMB location:
-  smb://ceph-gw02.hpc.swc.ucl.ac.uk/harris
+Tools and notebooks for inspecting, concatenating, and downsampling Hypnose EEG
+recordings.
 
-Example Linux mount target:
-  /mnt/harris
+## Environment
 
-Example repo symlink:
-  data/harris
+```bash
+conda env create -f environment.yml
+conda activate hypnose-eeg-analysis-env
+```
 
-Replace these example paths with the server, share, mount location, and
-symlink name for your own setup.
+## Data location
 
+Data stays outside this repository and is referenced through a named,
+machine-specific profile. No repository symlink is required.
 
-1. Prerequisites
-----------------
+The shared profiles live in `configs/environments/data_locations.yml`. Select a
+profile once for each checkout:
 
-You need:
+```bash
+python scripts/io/set_data_location.py --list
+python scripts/io/set_data_location.py server-linux   # or server-mac / server-windows
+python scripts/io/set_data_location.py --show
+```
 
-  - Network access to the SMB server, for example through the university,
-    institute, or VPN network.
-  - Permission to access the share.
-  - Your username, password, and domain if the server uses one.
-  - A local folder where the share will be mounted.
+The selection is written to `configs/environments/data_locations.local.yml`,
+which is ignored by git. Add another named profile to the shared config when a
+machine uses a different mount or local copy.
 
-For the Harris share, the domain may be:
+For temporary overrides (for example CI or a one-off local run), set:
 
-  AD
+```bash
+export HYPNOSE_EEG_RAWDATA_ROOT=/path/to/rawdata
+export HYPNOSE_EEG_DERIVATIVES_ROOT=/path/to/derivatives
+```
 
+Environment variables take precedence over the active profile. CLI arguments
+such as `--source-dir` and `--sink-dir` take precedence over both.
 
-2. Mount on Linux
------------------
+## Running preprocessing
 
-Linux command-line mounts usually use CIFS syntax:
+The development pipeline config leaves source and sink locations unset so they
+are supplied by the active data-location profile:
 
-  //server/share
+```bash
+python scripts/preprocessing/concatenate_edf_recordings.py \
+  --config configs/environments/dev.yaml --dry-run
 
-not browser-style SMB syntax:
+python scripts/preprocessing/downsample_edf_to_fif.py \
+  --config configs/environments/dev.yaml --dry-run
+```
 
-  smb://server/share
-
-For the Harris share:
-
-  sudo mkdir -p /mnt/harris
-
-  sudo mount -t cifs //ceph-gw02.hpc.swc.ucl.ac.uk/harris /mnt/harris \
-    -o username=YOUR_USERNAME,domain=AD,vers=3.0,sec=ntlmssp,uid=$(id -u),gid=$(id -g)
-
-Replace YOUR_USERNAME with your own username. The command should prompt for
-your password.
-
-3. Mount on macOS
------------------
-
-In Finder:
-
-  1. Open Finder.
-  2. Choose Go > Connect to Server.
-  3. Enter the SMB address, for example:
-
-       smb://ceph-gw02.hpc.swc.ucl.ac.uk/harris
-
-  4. Enter your username, password, and domain if prompted.
-
-From Terminal, macOS mounts usually appear under /Volumes after connecting
-through Finder.
-
-Check the mount:
-
-  ls /Volumes
-
-
-4. Mount on Windows
--------------------
-
-In File Explorer:
-
-  1. Open File Explorer.
-  2. Choose Map network drive.
-  3. Enter the UNC path, for example:
-
-       \\ceph-gw02.hpc.swc.ucl.ac.uk\harris
-
-  4. Choose a drive letter.
-  5. Enter your username, password, and domain if prompted.
-
-The mounted share should then appear as a drive such as H: or Z:.
-
-
-5. Create a symlink from this repo to the mounted folder
--------------------------------------------------------
-
-After the share is mounted, create a link from this repository to the mounted
-location. This lets project code use a stable repo-local path while the large
-or remote data stays outside git.
-
-Linux example:
-
-  mkdir -p data
-  ln -s /mnt/harris data/harris
-
-macOS example:
-
-  mkdir -p data
-  ln -s /Volumes/harris data/harris
-
-Windows PowerShell example:
-
-  New-Item -ItemType SymbolicLink -Path data\harris -Target Z:\
-
-Replace Z:\ with the drive letter or mounted location for your system.
-
-Check the symlink:
-
-  ls -l data/harris
-  ls /mnt/harris
-
-On Windows PowerShell:
-
-  Get-Item data\harris
-
-The order matters on Linux and macOS:
-
-  ln -s TARGET LINK_NAME
-
-So this:
-
-  ln -s /mnt/harris data/harris
-
-means data/harris points to /mnt/harris.
-
-
-6. If the symlink already exists
---------------------------------
-
-Remove only the symlink, then recreate it.
-
-Linux or macOS:
-
-  rm data/harris
-  ln -s /mnt/harris data/harris
-
-Be careful not to add a trailing slash when removing the symlink.
-
-Windows PowerShell:
-
-  Remove-Item data\harris
-  New-Item -ItemType SymbolicLink -Path data\harris -Target Z:\
-
-
-7. After restarting the computer
---------------------------------
-
-Manual mounts usually do not survive a restart. After rebooting, mount the
-remote share again before using the symlink.
-
-If the symlink exists but the share is not mounted, the repo-local link will
-point to an empty or unavailable location until the remote share is mounted
-again.
+Use `--help` on either command for selection, output, and overwrite options.

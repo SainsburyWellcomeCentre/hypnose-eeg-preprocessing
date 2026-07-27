@@ -1,0 +1,16 @@
+# Shared data-location profiles. Select one per checkout with:
+#   python scripts/io/set_data_location.py <profile>
+default_active: null
+
+profiles:
+  server-linux:
+    rawdata: /mnt/harris/hypnose/hypnose_eeg/rawdata
+    derivatives: /mnt/harris/hypnose/hypnose_eeg/derivatives
+
+  server-mac:
+    rawdata: /Volumes/harris/hypnose/hypnose_eeg/rawdata
+    derivatives: /Volumes/harris/hypnose/hypnose_eeg/derivatives
+
+  server-windows:
+    rawdata: '\\ceph-gw02.hpc.swc.ucl.ac.uk\harris\hypnose\hypnose_eeg\rawdata'
+    derivatives: '\\ceph-gw02.hpc.swc.ucl.ac.uk\harris\hypnose\hypnose_eeg\derivatives'

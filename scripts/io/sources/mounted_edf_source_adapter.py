@@ -8,11 +8,10 @@ from .source_adapter import EEGRecording, SourceAdapter, SourceCursor, utc_now
 
 
 class MountedEdfSourceAdapter(SourceAdapter):
-    """Read EDF recordings from a mounted folder or repo-local symlink.
+    """Read EDF recordings from a resolved mounted folder.
 
-    The adapter keeps the mounted path behind a source interface, so pipeline
-    config can use a stable path such as `data/rawdata` while each machine maps
-    that symlink to its own mount location.
+    The data-location profile resolves the machine-specific mount before this
+    adapter is constructed, keeping storage details outside the adapter.
     """
 
     def __init__(

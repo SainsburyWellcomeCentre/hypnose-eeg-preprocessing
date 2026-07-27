@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 try:
+    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils import coalesce, import_mne, load_config, nested_get
 except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from utils import coalesce, import_mne, load_config, nested_get
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
+    from scripts.utils import coalesce, import_mne, load_config, nested_get
 
 
 @dataclass(frozen=True)
@@ -220,8 +222,8 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
 
-    source_dir = coalesce(args.source_dir, nested_get(config, ("source", "uri")), "data/rawdata")
-    sink_dir = coalesce(args.sink_dir, nested_get(config, ("sink", "uri")), "data/derivatives")
+    source_dir = coalesce(args.source_dir, nested_get(config, ("source", "uri")), get_rawdata_root())
+    sink_dir = coalesce(args.sink_dir, nested_get(config, ("sink", "uri")), get_derivatives_root())
     edf_pattern = coalesce(args.edf_pattern, nested_get(config, ("source", "glob")), "**/*.edf")
     target_sfreq = float(
         coalesce(
@@ -233,7 +235,7 @@ def main() -> None:
     manifest = coalesce(
         args.manifest,
         nested_get(config, ("preprocessing", "downsample", "manifest")),
-        "data/derivatives/edf_downsample_manifest.csv",
+        get_derivatives_root() / "edf_downsample_manifest.csv",
     )
     output_format = str(
         coalesce(nested_get(config, ("preprocessing", "downsample", "output_format")), "fif")

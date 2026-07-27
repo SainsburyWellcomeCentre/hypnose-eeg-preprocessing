@@ -10,8 +10,7 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
 - Keep cursor/checkpoint state for restart-safe recording processing.
 
 ## Top-level folders
-- `configs/`: environment and pipeline runtime settings.
-- `data/`: contains raw and processed data processed in the repo.
+- `configs/`: environment/data referencing and pipeline runtime settings.
 - `notebooks/`: exploratory jupyter notebooks for development.
 - `src/`: scripts containing major processing modules of repo.
 - `scripts/`: developed scripts for easy run and execution points.

@@ -3,13 +3,13 @@ environment: dev
 source:
   kind: mounted-edf
   source_id: "hypnose-eeg-raw-edf"
-  uri: "data/rawdata"
+  uri: null  # resolved from the active data-location profile
   format: "edf"
   glob: "**/*.edf"
 
 sink:
   kind: filesystem
-  uri: "data/derivatives"
+  uri: null  # resolved from the active data-location profile
   format: "fif"
   partition_by:
     - "session_date"
@@ -18,11 +18,11 @@ sink:
 preprocessing:
   concatenate:
     sink_dir: null
-    manifest: "data/rawdata/edf_concatenation_manifest.csv"
+    manifest: null
   downsample:
     target_sfreq: 128
     output_format: "fif"
-    manifest: "data/derivatives/edf_downsample_manifest.csv"
+    manifest: null
   trim_channels:
     n_samples: 100
     keep_first: 3

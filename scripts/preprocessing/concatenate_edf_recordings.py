@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 try:
+    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils import coalesce, export_raw_edf, import_mne, load_config, nested_get
 except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from utils import coalesce, export_raw_edf, import_mne, load_config, nested_get
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
+    from scripts.utils import coalesce, export_raw_edf, import_mne, load_config, nested_get
 
 
 @dataclass(frozen=True)
@@ -469,13 +471,13 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
 
-    source_dir = coalesce(args.source_dir, nested_get(config, ("source", "uri")), "data/rawdata")
+    source_dir = coalesce(args.source_dir, nested_get(config, ("source", "uri")), get_rawdata_root())
     sink_dir = coalesce(args.sink_dir, nested_get(config, ("preprocessing", "concatenate", "sink_dir")))
     edf_pattern = coalesce(args.edf_pattern, nested_get(config, ("source", "glob")), "**/*.edf")
     manifest = coalesce(
         args.manifest,
         nested_get(config, ("preprocessing", "concatenate", "manifest")),
-        "data/derivatives/edf_concatenation_manifest.csv",
+        get_derivatives_root() / "edf_concatenation_manifest.csv",
     )
 
     concatenator = EdfSessionConcatenator(
