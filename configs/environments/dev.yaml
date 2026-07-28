@@ -28,6 +28,10 @@ preprocessing:
     keep_first: 3
     output_suffix: "_trimmed"
 
+epoching:
+  duration_seconds: 4
+  overlap_seconds: 2
+
 checkpoint:
   kind: local-file
   uri: "state/checkpoint_dev.json"

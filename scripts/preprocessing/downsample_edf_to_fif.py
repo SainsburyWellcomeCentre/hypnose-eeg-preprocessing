@@ -37,7 +37,7 @@ class EdfDownsampler:
         self,
         source_dir: str | Path,
         sink_dir: str | Path,
-        target_sample_rate_hz: float = 128.0,
+        target_sample_rate_hz: float,
         edf_pattern: str = "**/*.edf",
         overwrite: bool = False,
     ) -> None:
@@ -225,13 +225,16 @@ def main() -> None:
     source_dir = coalesce(args.source_dir, nested_get(config, ("source", "uri")), get_rawdata_root())
     sink_dir = coalesce(args.sink_dir, nested_get(config, ("sink", "uri")), get_derivatives_root())
     edf_pattern = coalesce(args.edf_pattern, nested_get(config, ("source", "glob")), "**/*.edf")
-    target_sfreq = float(
-        coalesce(
-            args.target_sfreq,
-            nested_get(config, ("preprocessing", "downsample", "target_sfreq")),
-            128.0,
-        )
+    configured_target_sfreq = coalesce(
+        args.target_sfreq,
+        nested_get(config, ("preprocessing", "downsample", "target_sfreq")),
     )
+    if configured_target_sfreq is None:
+        parser.error(
+            "target sample frequency is required; set "
+            "preprocessing.downsample.target_sfreq in the config or pass --target-sfreq"
+        )
+    target_sfreq = float(configured_target_sfreq)
     manifest = coalesce(
         args.manifest,
         nested_get(config, ("preprocessing", "downsample", "manifest")),
