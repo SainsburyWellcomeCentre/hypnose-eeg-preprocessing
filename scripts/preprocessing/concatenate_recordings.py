@@ -1,3 +1,13 @@
+"""Combine multiple recording parts from the same session into one timeline.
+
+Long EEG sessions may be split into several acquisition files. This script finds
+sessions containing multiple parts, checks that their channel layouts are
+compatible, concatenates them in filename or explicitly supplied order, and adds
+annotations at every join so downstream analyses can identify the boundaries.
+It writes a combined recording and a CSV manifest describing successes, skips,
+and failures. Existing outputs are preserved unless overwrite is requested.
+"""
+
 from __future__ import annotations
 
 import argparse

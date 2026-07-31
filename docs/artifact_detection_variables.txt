@@ -1,0 +1,156 @@
+ARTIFACT DETECTION VARIABLES
+============================
+
+Configuration file
+------------------
+Default path: configs/pipelines/artifact_detection.yaml
+
+The script scripts/preprocessing/detect_artifacts.py reads the variables below
+from the artifact_detection section of this YAML file. Command-line arguments
+override the indicated configuration values for a single run.
+
+ARTIFACT THRESHOLDS
+-------------------
+
+artifact_detection.thresholds.robust_z
+  Type: positive float
+  Default: 5.0
+  CLI: --robust-z-threshold
+  Purpose: Moderate robust upper-Z threshold. EEG and EMG scores are calculated
+  separately for each channel and sleep state.
+
+artifact_detection.thresholds.extreme_z
+  Type: positive float
+  Default: 8.0
+  CLI: --extreme-z-threshold
+  Purpose: Extreme robust upper-Z threshold. One EEG feature above this value is
+  sufficient to flag its EEG channel-epoch pair.
+
+artifact_detection.thresholds.minimum_standard_deviation_uv
+  Type: nonnegative float
+  Default: 0.1
+  Units: microvolts
+  CLI: --min-std-uv
+  Purpose: Epochs below this EEG standard deviation are treated as flatlines.
+  This hard-failure rule is not sleep-state dependent.
+
+artifact_detection.thresholds.maximum_edge_fraction
+  Type: fraction from 0 to 1
+  Default: 0.02
+  CLI: --max-edge-fraction
+  Purpose: Maximum allowed fraction of samples equal to the epoch's exact
+  minimum or maximum. Larger values indicate clipping or repeated edge values.
+  This hard-failure rule is not sleep-state dependent.
+
+artifact_detection.thresholds.robust_mad_scale
+  Type: positive float
+  Default: 1.4826
+  Purpose: Scale applied to median absolute deviation so it approximates
+  standard deviation for normally distributed data.
+
+artifact_detection.thresholds.soft_features_required
+  Type: positive integer
+  Default: 2
+  Purpose: Number of moderately abnormal EEG features required to flag an EEG
+  channel-epoch pair when no single feature exceeds extreme_z.
+
+artifact_detection.thresholds.emg_soft_features_required
+  Type: positive integer
+  Default: 2
+  Purpose: Number of moderately abnormal EMG features required to classify an
+  EMG channel-epoch pair as extreme when no EMG feature exceeds extreme_z.
+
+artifact_detection.thresholds.emg_supported_eeg_features_required
+  Type: positive integer
+  Default: 1
+  Purpose: Number of moderately abnormal EEG features required for extreme EMG
+  to contribute to EEG artifact rejection. Extreme EMG alone does not reject an
+  epoch, which avoids treating normal wake muscle tone as an EEG artifact.
+
+
+EEG FEATURES USED BY THE ALGORITHM
+----------------------------------
+
+peak_to_peak_uv
+  Epoch maximum minus minimum, in microvolts. Sensitive to large deflections,
+  movement, and electrode pops.
+
+rms_uv
+  Root-mean-square EEG amplitude, in microvolts.
+
+max_derivative_uv_per_sample
+  Largest absolute sample-to-sample voltage change in the epoch.
+
+std_uv
+  EEG standard deviation, in microvolts. Used by the state-independent flatline
+  check rather than robust outlier scoring.
+
+edge_fraction
+  Larger of the fractions at the exact epoch minimum and maximum. Used by the
+  state-independent clipping/repeated-edge check.
+
+high_frequency_power_uv2
+  Welch PSD integral over high_frequency_band_hz, in microvolts squared.
+
+line_noise_power_uv2
+  Welch PSD integral over line_noise_band_hz, in microvolts squared.
+
+nonfinite
+  True when the epoch contains NaN or infinite EEG samples. This is an immediate
+  state-independent hard failure.
+
+The robust EEG score is calculated for peak_to_peak_uv, rms_uv,
+max_derivative_uv_per_sample, high_frequency_power_uv2, and
+line_noise_power_uv2. Each reference distribution is specific to
+EEG channel x sleep state.
+
+
+EMG FEATURES USED BY THE ALGORITHM
+----------------------------------
+
+emg_peak_to_peak_uv
+  EMG epoch maximum minus minimum, in microvolts.
+
+emg_rms_uv
+  Root-mean-square EMG amplitude, in microvolts.
+
+emg_max_derivative_uv_per_sample
+  Largest absolute sample-to-sample EMG voltage change.
+
+emg_nonfinite
+  True when the EMG epoch contains NaN or infinite samples.
+
+Each EMG reference distribution is specific to EMG channel x sleep state. EMG
+checks are disabled when the FIF file contains no channel typed as EMG.
+
+
+ROBUST SCORE
+------------
+
+Positive-valued scored features are transformed with log10 before thresholding:
+
+  robust_z =
+      (log10(feature) - median(log10(feature)))
+      / (robust_mad_scale * MAD(log10(feature)))
+
+where MAD is the median absolute deviation within the relevant channel and sleep
+state. When MAD is zero, finite values receive a robust score of zero.
+
+
+FINAL ARTIFACT DECISION
+-----------------------
+
+An EEG channel-epoch pair is marked as an artifact when any of the following is
+true:
+
+1. EEG contains nonfinite values.
+2. EEG standard deviation is below minimum_standard_deviation_uv.
+3. EEG edge fraction is above maximum_edge_fraction.
+4. At least soft_features_required EEG features exceed robust_z.
+5. Any EEG feature exceeds extreme_z.
+6. EMG is extreme and at least emg_supported_eeg_features_required EEG features
+   exceed robust_z.
+
+An epoch is marked as an artifact when any EEG channel is marked as an artifact.
+The artifact_features output column records the responsible channel-qualified
+features and hard-failure reasons.

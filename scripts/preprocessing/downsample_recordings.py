@@ -1,3 +1,13 @@
+"""Resample recordings for efficient downstream EEG analysis.
+
+This script selects source recordings, preferring a session's concatenated file
+when multiple parts are present, and resamples each signal to a configured target
+frequency with MNE. It preserves the source directory structure under the
+derivative output root, writes an MNE FIF recording, and records processing
+status and signal metadata in a CSV manifest. Reducing the sample rate lowers
+storage and computation while retaining frequencies below the new Nyquist limit.
+"""
+
 from __future__ import annotations
 
 import argparse

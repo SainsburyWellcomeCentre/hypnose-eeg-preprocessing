@@ -40,15 +40,23 @@ such as `--source-dir` and `--sink-dir` take precedence over both.
 
 ## Running preprocessing
 
+Run processing stages in this order:
+
+1. **Concatenate recordings** — `scripts/preprocessing/concatenate_recordings.py`
+2. **Inspect and trim channels** — `scripts/preprocessing/inspect_and_trim_channels.py`
+3. **Downsample recordings** — `scripts/preprocessing/downsample_recordings.py`
+4. **Sleep scoring** — generate the sleep-scored parquet for the recording
+5. **Detect artifacts** — `scripts/preprocessing/detect_artifacts.py`
+
 The development pipeline config leaves source and sink locations unset so they
 are supplied by the active data-location profile:
 
 ```bash
-python scripts/preprocessing/concatenate_edf_recordings.py \
+python scripts/preprocessing/concatenate_recordings.py \
   --config configs/environments/dev.yaml --dry-run
 
-python scripts/preprocessing/downsample_edf_to_fif.py \
+python scripts/preprocessing/downsample_recordings.py \
   --config configs/environments/dev.yaml --dry-run
 ```
 
-Use `--help` on either command for selection, output, and overwrite options.
+Use `--help` on a command for selection, output, and overwrite options.

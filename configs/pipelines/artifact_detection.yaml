@@ -1,0 +1,37 @@
+name: state_dependent_artifact_detection
+
+artifact_detection:
+  epoch_seconds: 4.0
+
+  sleep_scoring:
+    time_column: "time_s"
+    state_column: "label"
+    unscored_numeric_state: -1
+    unscored_text_state: "unscored"
+
+  chunking:
+    target_memory_mb: 128.0
+    working_array_factor: 8
+    max_chunk_epochs: 2048
+
+  welch:
+    segment_seconds: 2.0
+    minimum_frequency_hz: 1.0
+    maximum_frequency_hz: 55.0
+    high_frequency_band_hz: [20.0, 45.0]
+    line_noise_band_hz: [49.0, 51.0]
+
+  thresholds:
+    robust_z: 5.0
+    extreme_z: 8.0
+    minimum_standard_deviation_uv: 0.1
+    maximum_edge_fraction: 0.02
+    robust_mad_scale: 1.4826
+    soft_features_required: 2
+    emg_soft_features_required: 2
+    emg_supported_eeg_features_required: 1
+
+  output:
+    remove_from_stem: "somnotate_predictions"
+    suffix: "artifact_epochs"
+    overwrite: false
