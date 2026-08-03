@@ -1,4 +1,4 @@
-name: hypnose-eeg-analysis-env
+name: hypnose-eeg-env
 channels:
   - conda-forge
 dependencies:
@@ -10,10 +10,20 @@ dependencies:
       - mne==1.12.1
 
       # Scientific computing and data frames used by the notebook and pipeline.
-      - numpy==2.3.3
+      # Somnotate's pomegranate<1 dependency is not compatible with NumPy 2.
+      - numpy==1.26.4
       - scipy==1.16.2
       - pandas==2.3.3
       - xarray==2026.2.0
+
+      # Somnotate scoring. Keep scikit-learn aligned with the version used to
+      # pickle the trained LDA models. pomegranate builds from source and needs
+      # a working C/C++ compiler.
+      - scikit-learn==1.6.1
+      - pomegranate<1.0.0
+      - pyedflib
+      - six
+      - lspopt
 
       # Notebook exploration and plotting.
       - matplotlib==3.10.9
@@ -24,3 +34,11 @@ dependencies:
 
       # Runtime config parsing and Parquet output support.
       - PyYAML==6.0.3
+
+      # The scoring package is developed in a sibling checkout. Its package
+      # metadata supplies the hypnose-somnotate distribution imported as
+      # hypnose_somnotate.
+      - -e ../hypnose-somnotate
+
+      # Install this script-only project and validate its dependency metadata.
+      - -e .

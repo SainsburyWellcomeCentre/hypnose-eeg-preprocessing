@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hypnose-eeg-analysis"
+version = "0.1.0"
+description = "Tools and analysis scripts for Hypnose EEG recordings."
+readme = "readme.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "hypnose-somnotate>=1.0,<2",
+    "numpy>=1.26,<2",
+    "scipy>=1.16,<2",
+    "pandas>=2.3,<3",
+    "xarray>=2026.2,<2027",
+    "pyarrow>=20",
+    "matplotlib>=3.10,<4",
+    "mne>=1.12,<1.13",
+    "PyYAML>=6,<7",
+    # Scoring models pickle a scikit-learn LDA transformer at this version.
+    "scikit-learn==1.6.1",
+    # The vendored Somnotate API uses pomegranate's pre-1.0 interface.
+    "pomegranate<1.0.0",
+    "pyedflib",
+    "six",
+    "lspopt",
+]
+
+[project.optional-dependencies]
+notebook = [
+    "jupyterlab>=4.4,<5",
+    "ipywidgets>=8.1,<9",
+    "mne-qt-browser>=0.7,<0.8",
+    "PyQt6>=6.10,<7",
+]
+
+# This repository currently exposes executable scripts rather than an importable
+# Python package. Explicitly disable automatic package discovery while retaining
+# standard project metadata and dependency installation via `pip install -e .`.
+[tool.setuptools]
+packages = []

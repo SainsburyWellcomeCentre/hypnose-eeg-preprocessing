@@ -7,8 +7,13 @@ recordings.
 
 ```bash
 conda env create -f environment.yml
-conda activate hypnose-eeg-analysis-env
+conda activate hypnose-eeg-env
 ```
+
+The environment expects the `hypnose-somnotate` repository in a sibling checkout
+at `../hypnose-somnotate` and installs it in editable mode. Somnotate's legacy
+`pomegranate` dependency builds from source, so a working C/C++ compiler is also
+required.
 
 ## Data location
 
