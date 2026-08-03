@@ -1,0 +1,28 @@
+name: somnotate_sleep_scoring
+
+sleep_scoring:
+  # Required. Accepts subject numbers (66), zero-padded IDs (066), or sub-066.
+  subjids: []
+
+  # Optional selectors. Set either dates or date_range, never both.
+  dates: null
+  date_range: null  # Example: [20260707, 20260718]
+
+  # Required. An absolute path, a path relative to the derivatives root, or a
+  # model name resolved as derivatives/somnotate_training/<name>/model.pickle.
+  model_path: null
+
+  # Normally resolved from configs/environments/data_locations*.yml. Set these
+  # only when this scoring pipeline needs an explicit override.
+  rawdata_root: null
+  derivatives_root: null
+  repo_root: null
+
+  # These must match the raw EDF and the model's training assumptions.
+  sampling_rate_hz: 512
+  channel_labels:
+    - "EEG EEG1A-B"
+    - "EEG EEG2A-B"
+    - "EMG EMG"
+
+  export_visbrain: true

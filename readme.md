@@ -50,7 +50,7 @@ Run processing stages in this order:
 1. **Concatenate recordings** — `scripts/preprocessing/concatenate_recordings.py`
 2. **Inspect and trim channels** — `scripts/preprocessing/inspect_and_trim_channels.py`
 3. **Downsample recordings** — `scripts/preprocessing/downsample_recordings.py`
-4. **Sleep scoring** — generate the sleep-scored parquet for the recording
+4. **Sleep scoring** — `scripts/sleep_scoring/score_recordings.py`
 5. **Detect artifacts** — `scripts/preprocessing/detect_artifacts.py`
 
 The development pipeline config leaves source and sink locations unset so they
@@ -63,5 +63,18 @@ python scripts/preprocessing/concatenate_recordings.py \
 python scripts/preprocessing/downsample_recordings.py \
   --config configs/environments/dev.yaml --dry-run
 ```
+
+Configure a Somnotate model and subjects in
+`configs/pipelines/sleep_scoring.yaml`, or override them from the command line:
+
+```bash
+python scripts/sleep_scoring/score_recordings.py \
+  --model my-model --subject 66 --date 20260717
+```
+
+The model name resolves below
+`derivatives/somnotate_training/<model>/model.pickle`; absolute paths are also
+accepted. Raw-data and derivatives roots come from the active data-location
+profile unless explicitly overridden.
 
 Use `--help` on a command for selection, output, and overwrite options.

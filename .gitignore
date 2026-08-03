@@ -12,6 +12,7 @@ configs/environments/data_locations.local.yml
 state/*.json
 cache/
 outputs/reports/
+*.egg-info/
 
 # OS files
 .DS_Store
