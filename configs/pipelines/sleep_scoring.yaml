@@ -26,3 +26,18 @@ sleep_scoring:
     - "EMG EMG"
 
   export_visbrain: true
+
+# Interactive visual quality check for predictions already written by scoring.
+# subject/date fall back to sleep_scoring.subjids/dates when each contains one
+# value. Set them here to inspect a different single session.
+sleep_scoring_view:
+  subject: null
+  date: null
+  recording_index: 0
+  eeg_channel: 0       # 0=EEG1, 1=EEG2
+  view_length_s: 120.0
+
+  # Normally inherited from sleep_scoring and the active data profile.
+  rawdata_root: null
+  derivatives_root: null
+  repo_root: null

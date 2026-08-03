@@ -77,4 +77,15 @@ The model name resolves below
 accepted. Raw-data and derivatives roots come from the active data-location
 profile unless explicitly overridden.
 
+Visually inspect the raw signals and predicted states for one scored session:
+
+```bash
+python scripts/sleep_scoring/view_scored_recording.py \
+  --subject 66 --date 20260717
+```
+
+Viewer defaults live in the `sleep_scoring_view` section of the same pipeline
+config. This is an interactive visual quality check, not a numerical accuracy
+measurement; numerical performance requires matching manual ground-truth labels.
+
 Use `--help` on a command for selection, output, and overwrite options.
