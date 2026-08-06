@@ -5,6 +5,17 @@ dependencies:
   - python=3.12
   - pip=25.1
   - pyarrow=21.0.0
+
+  # Qt and its Linux XCB runtime belong in Conda so remote viewer sessions do
+  # not depend on distribution-specific system packages. These provide the
+  # native libraries used by PyQt's xcb platform plugin over SSH/X11.
+  - "pyqt>=6.10,<7"
+  - xcb-util-cursor
+  - xcb-util-image
+  - xcb-util-keysyms
+  - xcb-util-renderutil
+  - xcb-util-wm
+
   - pip:
       # EDF reading and EEG analysis.
       - mne==1.12.1
@@ -30,7 +41,6 @@ dependencies:
       - jupyterlab==4.4.10
       - ipywidgets==8.1.7
       - mne-qt-browser==0.7.5
-      - PyQt6==6.10.0
 
       # Runtime config parsing and Parquet output support.
       - PyYAML==6.0.3

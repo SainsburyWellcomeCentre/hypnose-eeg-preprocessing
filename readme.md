@@ -87,5 +87,8 @@ python scripts/sleep_scoring/view_scored_recording.py \
 Viewer defaults live in the `sleep_scoring_view` section of the same pipeline
 config. This is an interactive visual quality check, not a numerical accuracy
 measurement; numerical performance requires matching manual ground-truth labels.
+For remote Linux execution with the window displayed on a local Mac through
+XQuartz—including VS Code Remote SSH—follow
+[`docs/remote_visualization.md`](docs/remote_visualization.md).
 
 Use `--help` on a command for selection, output, and overwrite options.

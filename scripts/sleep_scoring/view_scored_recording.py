@@ -12,7 +12,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 try:
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root, get_repo_root
@@ -24,6 +24,7 @@ except ModuleNotFoundError:
 
 
 DEFAULT_CONFIG_PATH = get_repo_root() / "configs" / "pipelines" / "sleep_scoring.yaml"
+REMOTE_VIEWER_DOC = get_repo_root() / "docs" / "remote_visualization.md"
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,18 @@ def _import_view_main() -> Callable[[list[str]], int]:
     return view_main
 
 
+def _require_graphical_display(environment: Mapping[str, str]) -> None:
+    """Fail clearly before Qt aborts when an SSH session has no display tunnel."""
+    if sys.platform.startswith("linux") and not (
+        environment.get("DISPLAY") or environment.get("WAYLAND_DISPLAY")
+    ):
+        raise RuntimeError(
+            "No graphical display is available. Connect with SSH X11 forwarding "
+            "and confirm that echo $DISPLAY is non-empty before launching the viewer. "
+            f"See {REMOTE_VIEWER_DOC}."
+        )
+
+
 def run_view(
     settings: ScoringViewSettings,
     view_function: Callable[[list[str]], int] | None = None,
@@ -162,6 +175,8 @@ def run_view(
         raise FileNotFoundError(f"Raw-data root not found: {settings.rawdata_root}")
     if not settings.derivatives_root.is_dir():
         raise FileNotFoundError(f"Derivatives root not found: {settings.derivatives_root}")
+
+    _require_graphical_display(os.environ)
 
     os.environ["HYPNOSE_EEG_RAWDATA_ROOT"] = str(settings.rawdata_root)
     os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"] = str(settings.derivatives_root)
@@ -189,7 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         settings = settings_from_args(args)
         return run_view(settings)
-    except (ImportError, OSError, ValueError) as exc:
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
 
 
