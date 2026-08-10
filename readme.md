@@ -118,3 +118,76 @@ XQuartz—including VS Code Remote SSH—follow
 [`docs/remote_visualization.md`](docs/remote_visualization.md).
 
 Use `--help` on a command for selection, output, and overwrite options.
+
+## Recording integrity checks
+
+With an active data-location profile, select a recording using its subject and
+either session date or session number; rawdata and derivatives paths are resolved
+automatically:
+
+```bash
+python scripts/quality_control/recording_integrity.py \
+  --subject 66 --date 20260717
+
+python scripts/quality_control/recording_integrity.py \
+  --subject 66 --session 1
+```
+
+Compare one raw EDF with its derivative FIF, scanning only the EDF for gaps and
+opening the FIF only for duration metadata:
+
+```bash
+python scripts/quality_control/recording_integrity.py \
+  --edf /path/to/rawdata/session/recording.edf \
+  --fif /path/to/derivatives/session/recording_resampled-128hz_raw.fif
+```
+
+Omit `--edf` and `--fif` to automatically pair recordings beneath the active
+rawdata and derivatives roots. Use `--edf-pattern` and `--fif-pattern` to narrow
+the batch selection:
+
+```bash
+python scripts/quality_control/recording_integrity.py \
+  --edf-pattern "sub-066/**/*.edf" \
+  --fif-pattern "sub-066/**/*_raw.fif"
+```
+
+The command prints the duration of every constant/non-finite interval and
+gap-like EDF annotation in seconds. The default 30-minute chunks reduce reader
+and network overhead while keeping memory bounded. It does not write files by default. Add
+`--gaps /path/to/recording_integrity_gaps.csv` to save full gap details or
+`--summary /path/to/recording_integrity.csv` to save duration comparisons and
+pass/review status. Defaults are a one-second duration tolerance and a one-second
+minimum gap; override them with `--duration-tolerance` and `--min-gap`. A
+recording requiring review causes a non-zero command exit status.
+
+## Sleep-state power spectra
+
+Plot the mean EEG power spectral density for Wake, NREM, and REM for one
+subject and either a session date or session number:
+
+```bash
+python scripts/quality_control/plot_spectra.py \
+  --subject 66 --date 20260717
+
+python scripts/quality_control/plot_spectra.py \
+  --subject 66 --session 1
+```
+
+The script resolves the derivative FIF and matching Somnotate prediction file
+from the active data-location profile. It reads the FIF in bounded chunks rather
+than preloading the complete recording, uses four-second analysis epochs by
+default, and plots one panel per EEG channel. Matching artifact epochs are
+excluded automatically when an `*_artifact_epochs.parquet` file is available;
+use `--include-artifacts` to retain them.
+
+Save plots without opening an interactive window with:
+
+```bash
+python scripts/quality_control/plot_spectra.py \
+  --subject 66 --date 20260717 \
+  --save-dir /path/to/plots --no-show
+```
+
+Use `--fmin`, `--fmax`, `--epoch-seconds`, `--welch-seconds`, and
+`--chunk-epochs` to adjust the spectrum calculation and memory/runtime tradeoff.
