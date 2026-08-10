@@ -36,6 +36,11 @@ sleep_scoring_view:
   recording_index: 0
   eeg_channel: 0       # 0=EEG1, 1=EEG2
   view_length_s: 120.0
+  hours: null           # Optional [start, end] elapsed hours, e.g. [3, 6]
+  # Alternative real-time range, e.g. ["20260717 03:00:00", "20260717 06:00:00"]
+  time_range: null
+  display_rate_hz: null # Optional display downsampling, e.g. 128
+  show_artifacts: false # Shade regions flagged by artifact_epochs.parquet
 
   # Normally inherited from sleep_scoring and the active data profile.
   rawdata_root: null

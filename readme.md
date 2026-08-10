@@ -81,7 +81,33 @@ Visually inspect the raw signals and predicted states for one scored session:
 
 ```bash
 python scripts/sleep_scoring/view_scored_recording.py \
-  --subject 66 --date 20260717
+  --subject 66 --date 20260717 --hours 3 6
+```
+
+`--hours START END` limits EDF loading and the viewer to an elapsed-hour range
+measured from the start of the recording. Omit it to load the complete recording.
+Alternatively, select real timestamps from the EDF clock. When `--date` is
+omitted, the viewer searches the subject's EDF headers and selects the recording
+whose real-time span contains the requested start. This supports multi-day
+recordings where the selected range begins after the recording's calendar date:
+
+```bash
+python scripts/sleep_scoring/view_scored_recording.py \
+  --subject 66 \
+  --time-range "20260718 03:00:00" "20260718 06:00:00"
+```
+
+`--hours` and `--time-range` are mutually exclusive.
+
+For faster rendering, downsample the selected interval to 128 Hz. Artifact
+regions from the matching `*_artifact_epochs.parquet` beside the scoring output
+can also be shaded and labelled:
+
+```bash
+python scripts/sleep_scoring/view_scored_recording.py \
+  --subject 66 \
+  --time-range "20260718 03:00:00" "20260718 06:00:00" \
+  --display-rate 128 --show-artifacts
 ```
 
 Viewer defaults live in the `sleep_scoring_view` section of the same pipeline

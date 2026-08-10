@@ -1,20 +1,152 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+import types
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
+
 from scripts.sleep_scoring.view_scored_recording import (
     ScoringViewSettings,
+    _artifact_regions,
+    _downsample_signals,
+    _edf_contains_time,
+    _elapsed_range,
     _require_graphical_display,
     _single_value,
+    build_parser,
     run_view,
+    settings_from_args,
 )
 
 
 class SleepScoringViewTests(unittest.TestCase):
+    def test_hours_are_parsed_and_validated(self) -> None:
+        args = build_parser().parse_args(
+            ["--subject", "66", "--date", "20260717", "--hours", "3", "6"]
+        )
+        settings = settings_from_args(args)
+        self.assertEqual(settings.hours, (3.0, 6.0))
+
+        args.hours = [6.0, 3.0]
+        with self.assertRaisesRegex(ValueError, "END must be greater"):
+            settings_from_args(args)
+
+    def test_display_rate_and_artifact_overlay_options(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "--subject", "66",
+                "--date", "20260717",
+                "--display-rate", "128",
+                "--show-artifacts",
+            ]
+        )
+        settings = settings_from_args(args)
+        self.assertEqual(settings.display_rate_hz, 128.0)
+        self.assertTrue(settings.show_artifacts)
+
+    def test_display_downsampling_reduces_samples(self) -> None:
+        import numpy as np
+
+        signals = np.arange(512 * 3, dtype=float).reshape(512, 3)
+        scipy_module = types.ModuleType("scipy")
+        signal_module = types.ModuleType("scipy.signal")
+        signal_module.resample_poly = (
+            lambda values, up, down, axis: values[:: down // up]
+        )
+        scipy_module.signal = signal_module
+        with patch.dict(
+            sys.modules, {"scipy": scipy_module, "scipy.signal": signal_module}
+        ):
+            downsampled = _downsample_signals(signals, 512.0, 128.0)
+        self.assertEqual(downsampled.shape, (128, 3))
+
+    def test_artifact_regions_are_clipped_and_merged_for_selected_range(self) -> None:
+        table = pd.DataFrame(
+            {
+                "time_s": [8.0, 12.0, 16.0, 20.0, 24.0],
+                "artifact": [True, True, True, False, True],
+            }
+        )
+        self.assertEqual(
+            _artifact_regions(table, selected_start_s=10.0, selected_end_s=26.0),
+            [(0.0, 10.0), (14.0, 16.0)],
+        )
+
+    def test_real_time_range_does_not_assume_its_start_is_the_session_date(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "--subject", "66",
+                "--time-range", "20260717 23:00:00", "20260718 02:00:00",
+            ]
+        )
+        settings = settings_from_args(args)
+        self.assertIsNone(settings.date)
+        self.assertEqual(
+            settings.time_range,
+            (
+                datetime(2026, 7, 17, 23, 0, 0),
+                datetime(2026, 7, 18, 2, 0, 0),
+            ),
+        )
+
+        args.time_range = ["20260718 02:00:00", "20260717 23:00:00"]
+        with self.assertRaisesRegex(ValueError, "END must be later"):
+            settings_from_args(args)
+
+    def test_real_times_are_converted_relative_to_edf_start(self) -> None:
+        settings = ScoringViewSettings(
+            subject="66",
+            date="20260717",
+            repo_root=Path("."),
+            rawdata_root=Path("."),
+            derivatives_root=Path("."),
+            recording_index=0,
+            eeg_channel=0,
+            view_length_s=120.0,
+            time_range=(
+                datetime(2026, 7, 17, 23, 0, 0),
+                datetime(2026, 7, 18, 2, 0, 0),
+            ),
+        )
+        start_s, end_s, _description, _title = _elapsed_range(
+            settings, datetime(2026, 7, 17, 22, 30, 0)
+        )
+        self.assertEqual((start_s, end_s), (1800.0, 12600.0))
+
+    def test_edf_lookup_finds_timestamp_on_following_day(self) -> None:
+        class FakeReader:
+            def __init__(self, _path: str) -> None:
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args) -> None:
+                pass
+
+            def getStartdatetime(self) -> datetime:
+                return datetime(2026, 7, 17, 20, 0, 0)
+
+            def getNSamples(self) -> list[int]:
+                return [36 * 3600]
+
+            def getSampleFrequency(self, _index: int) -> float:
+                return 1.0
+
+        self.assertTrue(
+            _edf_contains_time(
+                Path("recording.edf"),
+                datetime(2026, 7, 18, 3, 0, 0),
+                FakeReader,
+            )
+        )
+
     def test_single_value_rejects_ambiguous_selection(self) -> None:
         with self.assertRaisesRegex(ValueError, "exactly one subject"):
             _single_value([66, 67], option_name="subject")
@@ -66,6 +198,35 @@ class SleepScoringViewTests(unittest.TestCase):
                         "--repo-root", str(root),
                     ],
                 )
+
+    def test_run_view_uses_range_loader_when_hours_are_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            rawdata.mkdir()
+            derivatives.mkdir()
+            settings = ScoringViewSettings(
+                subject="66",
+                date="20260717",
+                repo_root=root,
+                rawdata_root=rawdata,
+                derivatives_root=derivatives,
+                recording_index=0,
+                eeg_channel=0,
+                view_length_s=120.0,
+                hours=(3.0, 6.0),
+            )
+
+            with (
+                patch.dict(os.environ, {"DISPLAY": "localhost:10.0"}),
+                patch(
+                    "scripts.sleep_scoring.view_scored_recording._run_custom_view",
+                    return_value=0,
+                ) as range_view,
+            ):
+                self.assertEqual(run_view(settings), 0)
+                range_view.assert_called_once_with(settings)
 
 
 if __name__ == "__main__":
