@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-from scripts.quality_control.plot_spectra import build_parser
+from scripts.quality_control.plot_spectra import build_parser, plot_state_emg_rms
 from scripts.utils.power_spectra import (
     artifact_epoch_ids,
+    compute_state_emg_rms,
     compute_state_spectra,
     epoch_sleep_states,
 )
@@ -22,6 +25,38 @@ from scripts.utils.recording_paths import (
 class SleepStateSpectraTests(unittest.TestCase):
     def test_spectrum_computation_is_available_from_utils(self) -> None:
         self.assertTrue(callable(compute_state_spectra))
+        self.assertTrue(callable(compute_state_emg_rms))
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("matplotlib"), "Matplotlib is not installed"
+    )
+    def test_emg_rms_plot_has_one_histogram_per_sleep_state(self) -> None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        rms_by_state = {
+            0: np.array([[1.0], [2.0]]),
+            1: np.array([[0.5], [0.75]]),
+            2: np.array([[0.2], [0.3]]),
+        }
+        figure = plot_state_emg_rms(rms_by_state, ["EMG"], title="test")
+        try:
+            self.assertEqual(
+                [axis.get_title() for axis in figure.axes],
+                [
+                    "EMG — Wake\n2 epochs",
+                    "EMG — NREM\n2 epochs",
+                    "EMG — REM\n2 epochs",
+                ],
+            )
+            self.assertTrue(
+                all(axis.get_xlabel() == "EMG RMS (µV)" for axis in figure.axes)
+            )
+            self.assertEqual(figure.axes[0].get_ylabel(), "Epoch count")
+        finally:
+            import matplotlib.pyplot as plt
+
+            plt.close(figure)
 
     def test_cli_selects_subject_by_date_or_session(self) -> None:
         by_date = build_parser().parse_args(

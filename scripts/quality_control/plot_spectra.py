@@ -13,13 +13,19 @@ import numpy as np
 try:
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
-    from scripts.utils.power_spectra import compute_state_spectra
+    from scripts.utils.power_spectra import (
+        compute_state_emg_rms,
+        compute_state_spectra,
+    )
     from scripts.utils.recording_paths import artifact_path, scoring_path
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
-    from scripts.utils.power_spectra import compute_state_spectra
+    from scripts.utils.power_spectra import (
+        compute_state_emg_rms,
+        compute_state_spectra,
+    )
     from scripts.utils.recording_paths import artifact_path, scoring_path
 
 
@@ -64,6 +70,53 @@ def plot_state_spectra(
     axes[-1, 0].set_xlabel("Frequency (Hz)")
     fig.suptitle(title)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
+    return fig
+
+
+def plot_state_emg_rms(
+    rms_by_state: dict[int, np.ndarray],
+    channel_names: list[str],
+    *,
+    title: str,
+):
+    """Plot one EMG RMS histogram per sleep state and EMG channel."""
+    import matplotlib.pyplot as plt
+
+    states = [state for state in STATE_NAMES if state in rms_by_state]
+    fig, axes = plt.subplots(
+        len(channel_names),
+        len(states),
+        figsize=(5 * len(states), max(4, 3.2 * len(channel_names))),
+        sharex="row",
+        sharey="row",
+        squeeze=False,
+    )
+    for channel_index, channel_name in enumerate(channel_names):
+        combined = np.concatenate(
+            [rms_by_state[state][:, channel_index] for state in states]
+        )
+        bin_edges = np.histogram_bin_edges(combined, bins="auto")
+        for column_index, state in enumerate(states):
+            axis = axes[channel_index, column_index]
+            values = rms_by_state[state][:, channel_index]
+            axis.hist(
+                values,
+                bins=bin_edges,
+                color=STATE_COLORS[state],
+                alpha=0.75,
+                edgecolor="black",
+                linewidth=0.4,
+            )
+            axis.set_title(
+                f"{channel_name} — {STATE_NAMES[state]}\n"
+                f"{len(values):,} epochs"
+            )
+            axis.set_xlabel("EMG RMS (µV)")
+            if column_index == 0:
+                axis.set_ylabel("Epoch count")
+            axis.grid(True, axis="y", alpha=0.25)
+    fig.suptitle(title)
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
     return fig
 
 
@@ -151,12 +204,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             title=f"{args.subject} — {args.date or args.session} — sleep-state spectra",
         )
         figures.append(fig)
+        emg_rms, emg_channels = compute_state_emg_rms(
+            fif_path,
+            scores,
+            artifact_path=artifacts,
+            epoch_seconds=args.epoch_seconds,
+            chunk_epochs=args.chunk_epochs,
+        )
+        emg_fig = None
+        if emg_channels and emg_rms:
+            emg_fig = plot_state_emg_rms(
+                emg_rms,
+                emg_channels,
+                title=(
+                    f"{args.subject} — {args.date or args.session} — "
+                    "EMG RMS by sleep state"
+                ),
+            )
+            figures.append(emg_fig)
+        else:
+            print("EMG RMS: skipped (no EMG channels or scored finite epochs)")
         if args.save_dir is not None:
             save_dir = Path(args.save_dir)
             save_dir.mkdir(parents=True, exist_ok=True)
             output_path = save_dir / f"{edf_path.stem}_sleep_state_power_spectra.png"
             fig.savefig(output_path, dpi=200, bbox_inches="tight")
             print(f"Saved: {output_path}")
+            if emg_fig is not None:
+                emg_output_path = save_dir / f"{edf_path.stem}_sleep_state_emg_rms.png"
+                emg_fig.savefig(emg_output_path, dpi=200, bbox_inches="tight")
+                print(f"Saved: {emg_output_path}")
 
     if not args.no_show:
         import matplotlib.pyplot as plt

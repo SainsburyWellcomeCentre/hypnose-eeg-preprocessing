@@ -177,9 +177,13 @@ python scripts/quality_control/plot_spectra.py \
 The script resolves the derivative FIF and matching Somnotate prediction file
 from the active data-location profile. It reads the FIF in bounded chunks rather
 than preloading the complete recording, uses four-second analysis epochs by
-default, and plots one panel per EEG channel. Matching artifact epochs are
-excluded automatically when an `*_artifact_epochs.parquet` file is available;
-use `--include-artifacts` to retain them.
+default, and plots one PSD panel per EEG channel. It also creates three separate
+histograms of per-epoch EMG RMS amplitude in µV—one each for Wake, NREM, and
+REM—when the FIF contains channels typed as EMG. Matching artifact epochs are excluded
+automatically when an `*_artifact_epochs.parquet` file is available; use
+`--include-artifacts` to retain them. When plots are saved, the EEG and EMG
+figures use the suffixes `_sleep_state_power_spectra.png` and
+`_sleep_state_emg_rms.png`, respectively.
 
 Save plots without opening an interactive window with:
 
