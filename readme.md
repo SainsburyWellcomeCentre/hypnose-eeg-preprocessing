@@ -195,3 +195,28 @@ python scripts/quality_control/plot_spectra.py \
 
 Use `--fmin`, `--fmax`, `--epoch-seconds`, `--welch-seconds`, and
 `--chunk-epochs` to adjust the spectrum calculation and memory/runtime tradeoff.
+
+## Sleep-state channel correlation
+
+Plot the distribution of epoch-wise Pearson correlation for every EEG/EMG
+channel pair, separated into Wake, NREM, and REM:
+
+```bash
+python scripts/quality_control/plot_channel_correlations.py \
+  --subject 66 --date 20260717
+
+python scripts/quality_control/plot_channel_correlations.py \
+  --subject 66 --session 1
+```
+
+The command reads the derivative FIF in bounded chunks, uses four-second epochs
+by default, and automatically excludes gaps, undefined sleep states, non-finite
+or constant channel pairs, and epochs marked in the matching artifact parquet.
+Each histogram shows the percentage of valid epochs for its sleep state on the
+common Pearson range from −1 to +1; the dashed line marks the median. Use
+`--include-artifacts` to retain flagged epochs, `--bins` to change histogram
+resolution, or `--save-dir /path/to/plots --no-show` for non-interactive output.
+The terminal also reports counts above the default review thresholds of
+`|r| > 0.90` for EEG–EEG pairs and `|r| > 0.50` for EEG–EMG pairs, including a
+de-duplicated total of flagged recording epochs. Override these with
+`--eeg-eeg-threshold` and `--eeg-emg-threshold`.
