@@ -224,3 +224,25 @@ The terminal also reports counts above the default review thresholds of
 `|r| > 0.90` for EEG–EEG pairs and `|r| > 0.50` for EEG–EMG pairs, including a
 de-duplicated total of flagged recording epochs. Override these with
 `--eeg-eeg-threshold` and `--eeg-emg-threshold`.
+
+## Artifact burden report
+
+Report artifact counts, duration, percentage per recording hour, sleep-state
+breakdown, and longest contiguous artifact period separately by channel:
+
+```bash
+python scripts/quality_control/report_artifacts.py \
+  --subject 66 --date 20260717
+
+python scripts/quality_control/report_artifacts.py \
+  --subject 66 --session 1
+```
+
+The report uses the matching `*_artifact_epochs.parquet`, infers its epoch
+duration from `time_s`, and supports both `artifact_channels` and legacy
+channel-prefixed `artifact_features`. EMG-supported artifact epochs are reported
+as `EMG (combined)` when the stored reason identifies an EMG-supported EEG
+outlier. Nothing is saved by default;
+add `--save-dir /path/to/reports` to write separate overall, hourly, and
+sleep-state CSV tables. Use `--epoch-seconds` only when the duration cannot be
+reliably inferred from the artifact file.

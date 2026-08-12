@@ -9,8 +9,10 @@ from typing import Any
 
 __all__ = [
     "SLEEP_STATE_CODES",
+    "ArtifactReport",
     "artifact_path",
     "artifact_epoch_ids",
+    "build_artifact_report",
     "coalesce",
     "compute_state_emg_rms",
     "compute_state_channel_correlations",
@@ -41,6 +43,8 @@ _EXPORT_MODULES = {
     "artifact_path": ".recording_paths",
     "scoring_path": ".recording_paths",
     "session_derivatives_dir": ".recording_paths",
+    "ArtifactReport": ".artifact_reporting",
+    "build_artifact_report": ".artifact_reporting",
 }
 
 
