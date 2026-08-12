@@ -1,5 +1,6 @@
 # Shared data-location profiles. Select one per checkout with:
 #   python src/set_data_location.py <profile>
+env_prefix: HYPNOSE_EEG
 default_active: null
 
 profiles:

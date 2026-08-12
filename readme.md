@@ -10,17 +10,19 @@ conda env create -f environment.yml
 conda activate hypnose-eeg-env
 ```
 
-The environment expects the `hypnose-somnotate` repository in a sibling checkout
-at `../hypnose-somnotate` and installs it in editable mode. Somnotate's legacy
+The environment expects the `hypnose-helpers` and `hypnose-somnotate` repositories
+in sibling checkouts and installs them in editable mode. Somnotate's legacy
 `pomegranate` dependency builds from source, so a working C/C++ compiler is also
 required.
 
 ## Data location
 
 Data stays outside this repository and is referenced through a named,
-machine-specific profile. No repository symlink is required.
+machine-specific profile. Profile resolution and selection are provided by
+`hypnose_helpers`; this repository supplies the EEG-specific config directory
+and `HYPNOSE_EEG` environment-variable prefix. No repository symlink is required.
 
-The shared profiles live in `configs/environments/data_locations.yml`. Select a
+The shared profiles live in `configs/data_locations.yml`. Select a
 profile once for each checkout:
 
 ```bash
@@ -29,7 +31,7 @@ python src/set_data_location.py server-linux   # or server-mac / server-windows
 python src/set_data_location.py --show
 ```
 
-The selection is written to `configs/environments/data_locations.local.yml`,
+The selection is written to `configs/data_locations.local.yml`,
 which is ignored by git. Add another named profile to the shared config when a
 machine uses a different mount or local copy.
 
@@ -181,9 +183,10 @@ default, and plots one PSD panel per EEG channel. It also creates three separate
 histograms of per-epoch EMG RMS amplitude in µV—one each for Wake, NREM, and
 REM—when the FIF contains channels typed as EMG. Matching artifact epochs are excluded
 automatically when an `*_artifact_epochs.parquet` file is available; use
-`--include-artifacts` to retain them. When plots are saved, the EEG and EMG
-figures use the suffixes `_sleep_state_power_spectra.png` and
-`_sleep_state_emg_rms.png`, respectively.
+`--include-artifacts` to retain them. Plots use the shared `hypnose_helpers`
+figure style. When saved, the EEG and EMG figures are provenance-tagged PDFs
+named with the `_sleep_state_power_spectra` and `_sleep_state_emg_rms` labels,
+respectively.
 
 Save plots without opening an interactive window with:
 
@@ -215,7 +218,8 @@ or constant channel pairs, and epochs marked in the matching artifact parquet.
 Each histogram shows the percentage of valid epochs for its sleep state on the
 common Pearson range from −1 to +1; the dashed line marks the median. Use
 `--include-artifacts` to retain flagged epochs, `--bins` to change histogram
-resolution, or `--save-dir /path/to/plots --no-show` for non-interactive output.
+resolution, or `--save-dir /path/to/plots --no-show` for non-interactive,
+provenance-tagged PDF output using the shared figure style.
 The terminal also reports counts above the default review thresholds of
 `|r| > 0.90` for EEG–EEG pairs and `|r| > 0.50` for EEG–EMG pairs, including a
 de-duplicated total of flagged recording epochs. Override these with

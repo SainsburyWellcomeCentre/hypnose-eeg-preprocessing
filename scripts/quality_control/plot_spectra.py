@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
+from hypnose_helpers.io.selectors import parse_subject
+from hypnose_helpers.viz.save import save_figure
+from hypnose_helpers.viz.styles import ensure_style
 
 try:
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
@@ -41,6 +44,7 @@ def plot_state_spectra(
     *,
     title: str,
 ):
+    ensure_style()
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(
@@ -80,6 +84,7 @@ def plot_state_emg_rms(
     title: str,
 ):
     """Plot one EMG RMS histogram per sleep state and EMG channel."""
+    ensure_style()
     import matplotlib.pyplot as plt
 
     states = [state for state in STATE_NAMES if state in rms_by_state]
@@ -138,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include artifact epochs instead of excluding the matching artifact parquet.",
     )
-    parser.add_argument("--save-dir", default=None, help="Optionally save PNG plots here.")
+    parser.add_argument("--save-dir", default=None, help="Optionally save PDF plots here.")
     parser.add_argument("--no-show", action="store_true", help="Do not open plot windows.")
     return parser
 
@@ -225,14 +230,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print("EMG RMS: skipped (no EMG channels or scored finite epochs)")
         if args.save_dir is not None:
-            save_dir = Path(args.save_dir)
-            save_dir.mkdir(parents=True, exist_ok=True)
-            output_path = save_dir / f"{edf_path.stem}_sleep_state_power_spectra.png"
-            fig.savefig(output_path, dpi=200, bbox_inches="tight")
+            output_path = save_figure(
+                fig,
+                f"{edf_path.stem}_sleep_state_power_spectra",
+                fig_dir=args.save_dir,
+                subjids=parse_subject(args.subject),
+                dates=args.date,
+            )
             print(f"Saved: {output_path}")
             if emg_fig is not None:
-                emg_output_path = save_dir / f"{edf_path.stem}_sleep_state_emg_rms.png"
-                emg_fig.savefig(emg_output_path, dpi=200, bbox_inches="tight")
+                emg_output_path = save_figure(
+                    emg_fig,
+                    f"{edf_path.stem}_sleep_state_emg_rms",
+                    fig_dir=args.save_dir,
+                    subjids=parse_subject(args.subject),
+                    dates=args.date,
+                )
                 print(f"Saved: {emg_output_path}")
 
     if not args.no_show:

@@ -9,6 +9,7 @@ description = "Tools and analysis scripts for Hypnose EEG recordings."
 readme = "readme.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "hypnose-helpers>=0.1,<0.2",
     "hypnose-somnotate>=1.0,<2",
     "numpy>=1.26,<2",
     "scipy>=1.16,<2",

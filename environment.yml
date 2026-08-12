@@ -45,9 +45,9 @@ dependencies:
       # Runtime config parsing and Parquet output support.
       - PyYAML==6.0.3
 
-      # The scoring package is developed in a sibling checkout. Its package
-      # metadata supplies the hypnose-somnotate distribution imported as
-      # hypnose_somnotate.
+      # Shared paths/visualisation and scoring are developed in sibling
+      # checkouts and installed in editable mode.
+      - -e ../hypnose-helpers
       - -e ../hypnose-somnotate
 
       # Install this script-only project and validate its dependency metadata.
