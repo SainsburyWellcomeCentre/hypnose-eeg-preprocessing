@@ -16,6 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from hypnose_helpers.io.layout import SessionLayout
+from hypnose_helpers.io.selectors import parse_sessions
+
 try:
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
     from scripts.utils.config import coalesce, load_config, nested_get
@@ -36,6 +39,7 @@ class SleepScoringSettings:
     rawdata_root: Path
     derivatives_root: Path
     dates: list[str] | None
+    sessions: list[int] | None
     date_range: tuple[str, str] | None
     channel_labels: list[str] | None
     export_visbrain: bool
@@ -111,7 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Subject identifiers; accepts spaces or comma-separated values.",
     )
-    parser.add_argument(
+    selector = parser.add_mutually_exclusive_group()
+    selector.add_argument(
         "--date",
         "--dates",
         dest="dates",
@@ -119,12 +124,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional recording dates; accepts spaces or comma-separated values.",
     )
-    parser.add_argument(
+    selector.add_argument(
         "--date-range",
         nargs=2,
         metavar=("START", "END"),
         default=None,
-        help="Inclusive date range. Cannot be combined with --date.",
+        help="Inclusive date range; mutually exclusive with date and session selectors.",
+    )
+    selector.add_argument(
+        "--session",
+        "--sessions",
+        dest="sessions",
+        nargs="+",
+        default=None,
+        help="Session numbers; accepts values such as 1, ses-1, or comma-separated lists.",
     )
     parser.add_argument(
         "--model",
@@ -164,10 +177,22 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     if not subjids:
         raise ValueError("at least one subject is required in the config or via --subject")
 
-    dates = _as_list(coalesce(args.dates, scoring.get("dates")), option_name="dates")
-    date_range = _as_date_range(coalesce(args.date_range, scoring.get("date_range")))
-    if dates and date_range:
-        raise ValueError("dates and date_range are mutually exclusive")
+    cli_selector_used = any(
+        value is not None for value in (args.dates, args.date_range, args.sessions)
+    )
+    if cli_selector_used:
+        dates_value = args.dates
+        date_range_value = args.date_range
+        sessions_value = args.sessions
+    else:
+        dates_value = scoring.get("dates")
+        date_range_value = scoring.get("date_range")
+        sessions_value = scoring.get("sessions")
+    dates = _as_list(dates_value, option_name="dates")
+    date_range = _as_date_range(date_range_value)
+    sessions = parse_sessions(sessions_value) or None
+    if sum(value is not None for value in (dates, date_range, sessions)) > 1:
+        raise ValueError("dates, date_range, and sessions are mutually exclusive")
 
     rawdata_root = Path(
         coalesce(args.rawdata_root, scoring.get("rawdata_root"), get_rawdata_root())
@@ -204,6 +229,7 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
         rawdata_root=rawdata_root,
         derivatives_root=derivatives_root,
         dates=dates,
+        sessions=sessions,
         date_range=date_range,
         channel_labels=channel_labels,
         export_visbrain=export_visbrain,
@@ -223,6 +249,33 @@ def _import_score_recordings() -> Callable[..., list[Path]]:
     return score_recordings
 
 
+def _relocate_scoring_outputs(output_paths: Sequence[str | Path]) -> list[Path]:
+    """Move Somnotate's native outputs from saved_results into sleep_scoring."""
+    relocated: list[Path] = []
+    prediction_suffix = "_somnotate_predictions.parquet"
+    for value in output_paths:
+        prediction = Path(value)
+        if (
+            prediction.parent.name != "saved_results"
+            or not prediction.name.endswith(prediction_suffix)
+        ):
+            relocated.append(prediction)
+            continue
+
+        destination_dir = prediction.parent.parent / "sleep_scoring"
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        recording_stem = prediction.name.removesuffix(prediction_suffix)
+        for source in sorted(prediction.parent.glob(f"{recording_stem}_somnotate_*")):
+            source.replace(destination_dir / source.name)
+        try:
+            prediction.parent.rmdir()
+        except OSError:
+            # Preserve the directory when it contains legacy or unrelated outputs.
+            pass
+        relocated.append(destination_dir / prediction.name)
+    return relocated
+
+
 def run_scoring(
     settings: SleepScoringSettings,
     score_function: Callable[..., list[Path]] | None = None,
@@ -240,16 +293,36 @@ def run_scoring(
     os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"] = str(settings.derivatives_root)
 
     scorer = score_function or _import_score_recordings()
-    return scorer(
-        subjids=settings.subjids,
-        model_path=settings.model_path,
-        repo_root=settings.repo_root,
-        dates=settings.dates,
-        date_range=settings.date_range,
-        channel_labels=settings.channel_labels,
-        export_visbrain=settings.export_visbrain,
-        sampling_rate_hz=settings.sampling_rate_hz,
-    )
+    common_arguments = {
+        "model_path": settings.model_path,
+        "repo_root": settings.repo_root,
+        "date_range": settings.date_range,
+        "channel_labels": settings.channel_labels,
+        "export_visbrain": settings.export_visbrain,
+        "sampling_rate_hz": settings.sampling_rate_hz,
+    }
+    if settings.sessions is None:
+        output_paths = scorer(
+            subjids=settings.subjids,
+            dates=settings.dates,
+            **common_arguments,
+        )
+    else:
+        layout = SessionLayout(settings.rawdata_root, name="rawdata")
+        output_paths = []
+        for subject in settings.subjids:
+            dates = [
+                layout.find_session(subject, ses=session).date
+                for session in settings.sessions
+            ]
+            output_paths.extend(
+                scorer(
+                    subjids=[subject],
+                    dates=dates,
+                    **common_arguments,
+                )
+            )
+    return _relocate_scoring_outputs(output_paths)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

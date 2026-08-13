@@ -27,10 +27,17 @@ from scripts.sleep_scoring.view_scored_recording import (
 
 
 class SleepScoringViewTests(unittest.TestCase):
+    def test_session_number_is_an_alternative_to_date(self) -> None:
+        args = build_parser().parse_args(["--subject", "66", "--session", "ses-2"])
+        settings = settings_from_args(args)
+
+        self.assertEqual(settings.session, 2)
+        self.assertIsNone(settings.date)
+
     def test_artifact_file_prefers_dedicated_session_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             session_dir = Path(directory)
-            scoring_dir = session_dir / "saved_results"
+            scoring_dir = session_dir / "sleep_scoring"
             artifact_dir = session_dir / "artifacts"
             scoring_dir.mkdir()
             artifact_dir.mkdir()

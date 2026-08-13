@@ -12,7 +12,7 @@ from hypnose_helpers.io.layout import (
 
 
 OUTPUT_GROUPS = {
-    "somnotate_sleep_scoring",
+    "sleep_scoring",
     "artifacts",
     "quality_control",
 }
@@ -126,7 +126,7 @@ def sleep_scoring_output_path(
         recording_path,
         rawdata_root,
         derivatives_root,
-        "somnotate_sleep_scoring",
+        "sleep_scoring",
     )
 
 

@@ -8,7 +8,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.quality_control.spectra import build_parser, plot_state_emg_rms
+from scripts.quality_control.spectra import (
+    build_parser,
+    build_spectral_quality_report,
+    plot_state_emg_rms,
+)
 from scripts.analysis.emg import compute_state_emg_rms
 from scripts.analysis.power_spectra import compute_state_spectra
 from scripts.io.input_paths import (
@@ -25,6 +29,57 @@ from scripts.utils.epochs import artifact_epoch_ids, epoch_sleep_states
 
 
 class SleepStateSpectraTests(unittest.TestCase):
+    def test_quality_report_checks_expected_sleep_state_patterns(self) -> None:
+        frequencies = np.array(
+            [0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 20, 25, 30],
+            dtype=float,
+        )
+        wake = np.ones((2, len(frequencies)))
+        nrem = np.ones((2, len(frequencies)))
+        rem = np.ones((2, len(frequencies)))
+        wake[:, (frequencies >= 12) & (frequencies <= 30)] = 6.0
+        nrem[:, frequencies <= 4] = 8.0
+        rem[:, (frequencies >= 4) & (frequencies <= 8)] = 8.0
+        report = build_spectral_quality_report(
+            frequencies,
+            {0: wake, 1: nrem, 2: rem},
+            {0: 10, 1: 10, 2: 10},
+            ["EEG1", "EEG2"],
+            {
+                0: np.array([[3.0], [4.0]]),
+                1: np.array([[2.0], [2.5]]),
+                2: np.array([[1.0], [1.5]]),
+            },
+            ["EMG"],
+        ).set_index("sleep_state")
+
+        self.assertEqual(report.loc["Wake", "quality_status"], "PASS")
+        self.assertEqual(report.loc["NREM", "quality_status"], "PASS")
+        self.assertEqual(report.loc["REM", "quality_status"], "PASS")
+        self.assertTrue(report["frequency_expectation_met"].all())
+        self.assertTrue(report["emg_expectation_met"].all())
+        self.assertEqual(report.loc["Wake", "emg_rms_median_uv"], 3.5)
+        self.assertEqual(report.loc["Wake", "eeg_epoch_count"], 10)
+        self.assertTrue((report["recording_quality_status"] == "PASS").all())
+
+    def test_invalid_spectrum_fails_quality_report(self) -> None:
+        frequencies = np.arange(0.5, 30.5, 0.5)
+        valid = np.ones((1, len(frequencies)))
+        invalid = valid.copy()
+        invalid[0, 0] = np.nan
+        report = build_spectral_quality_report(
+            frequencies,
+            {0: valid, 1: invalid},
+            {0: 5, 1: 5, 2: 0},
+            ["EEG1"],
+            {0: np.array([[3.0]]), 1: np.array([[2.0]])},
+            ["EMG"],
+        ).set_index("sleep_state")
+
+        self.assertEqual(report.loc["NREM", "spectral_quality_status"], "FAIL")
+        self.assertEqual(report.loc["REM", "spectral_quality_status"], "REVIEW")
+        self.assertTrue((report["recording_quality_status"] == "FAIL").all())
+
     def test_spectrum_computation_is_available_from_analysis(self) -> None:
         self.assertTrue(callable(compute_state_spectra))
         self.assertTrue(callable(compute_state_emg_rms))
@@ -76,15 +131,18 @@ class SleepStateSpectraTests(unittest.TestCase):
             rawdata = root / "rawdata"
             derivatives = root / "derivatives"
             edf = rawdata / "sub-066" / "ses-1_date-20260717" / "ephys" / "recording.edf"
-            saved = derivatives / "sub-066" / "ses-1_date-20260717" / "saved_results"
+            session = derivatives / "sub-066" / "ses-1_date-20260717"
+            scoring_dir = session / "sleep_scoring"
+            artifact_dir = session / "artifacts"
             edf.parent.mkdir(parents=True)
-            saved.mkdir(parents=True)
-            scoring = saved / "recording_somnotate_predictions.parquet"
-            artifact = saved / "recording_artifact_epochs.parquet"
+            scoring_dir.mkdir(parents=True)
+            artifact_dir.mkdir()
+            scoring = scoring_dir / "recording_somnotate_predictions.parquet"
+            artifact = artifact_dir / "recording_artifact_epochs.parquet"
             scoring.touch()
             artifact.touch()
             self.assertEqual(
-                session_derivatives_dir(edf, rawdata, derivatives), saved.parent
+                session_derivatives_dir(edf, rawdata, derivatives), session
             )
             self.assertEqual(scoring_path(edf, rawdata, derivatives), scoring)
             self.assertEqual(artifact_path(edf, rawdata, derivatives), artifact)
@@ -92,21 +150,19 @@ class SleepStateSpectraTests(unittest.TestCase):
                 quality_control_output_path(
                     "qc_summary.csv", edf, rawdata, derivatives
                 ),
-                saved.parent / "quality_control" / "qc_summary.csv",
+                session / "quality_control" / "qc_summary.csv",
             )
             self.assertEqual(
                 sleep_scoring_output_path(
                     "somnotate_scoring_summary.csv", edf, rawdata, derivatives
                 ),
-                saved.parent
-                / "somnotate_sleep_scoring"
-                / "somnotate_scoring_summary.csv",
+                session / "sleep_scoring" / "somnotate_scoring_summary.csv",
             )
             self.assertEqual(
                 artifact_output_path(
                     "recording_artifact_report", edf, rawdata, derivatives
                 ),
-                saved.parent / "artifacts" / "recording_artifact_report",
+                session / "artifacts" / "recording_artifact_report",
             )
 
     def test_generic_artifact_filename_is_supported(self) -> None:

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
+import pandas as pd
 from hypnose_helpers.io.selectors import parse_subject
 from hypnose_helpers.viz.save import save_figure
 from hypnose_helpers.viz.styles import ensure_style
@@ -32,6 +33,218 @@ except ModuleNotFoundError:
 
 STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM"}
 STATE_COLORS = {0: "red", 1: "royalblue", 2: "goldenrod"}
+QUALITY_ORDER = {"PASS": 0, "REVIEW": 1, "FAIL": 2}
+FREQUENCY_BANDS_HZ = {
+    "delta": (0.5, 4.0),
+    "theta": (4.0, 8.0),
+    "alpha": (8.0, 12.0),
+    "beta": (12.0, 30.0),
+}
+
+
+def _integrated_power(
+    spectrum: np.ndarray,
+    frequencies: np.ndarray,
+    low_hz: float,
+    high_hz: float,
+) -> np.ndarray:
+    mask = (frequencies >= low_hz) & (frequencies <= high_hz)
+    if mask.sum() < 2:
+        return np.full(spectrum.shape[0], np.nan)
+    return np.trapz(spectrum[:, mask], frequencies[mask], axis=-1)
+
+
+def build_spectral_quality_report(
+    frequencies: np.ndarray,
+    spectra: dict[int, np.ndarray],
+    eeg_counts: dict[int, int],
+    eeg_channels: list[str],
+    emg_rms: dict[int, np.ndarray],
+    emg_channels: list[str],
+) -> pd.DataFrame:
+    """Assess state-wise EEG band-power expectations and EMG RMS ordering."""
+    rows: list[dict[str, object]] = []
+    state_metrics: dict[int, dict[str, float | bool | int]] = {}
+    for state, state_name in STATE_NAMES.items():
+        eeg_epoch_count = int(eeg_counts.get(state, 0))
+        spectrum = spectra.get(state)
+        spectrum_finite = bool(
+            spectrum is not None
+            and spectrum.size
+            and np.all(np.isfinite(spectrum))
+        )
+        channel_power = np.array([], dtype=float)
+        relative_band_power = {band: math.nan for band in FREQUENCY_BANDS_HZ}
+        if spectrum_finite and len(frequencies) > 1:
+            channel_power = np.trapz(spectrum, frequencies, axis=-1)
+            for band, (low_hz, high_hz) in FREQUENCY_BANDS_HZ.items():
+                power = _integrated_power(spectrum, frequencies, low_hz, high_hz)
+                valid = np.isfinite(power) & np.isfinite(channel_power) & (channel_power > 0)
+                if np.any(valid):
+                    relative_band_power[band] = float(
+                        np.median(power[valid] / channel_power[valid])
+                    )
+        total_power_median = (
+            float(np.median(channel_power)) if channel_power.size else math.nan
+        )
+
+        state_rms = emg_rms.get(state)
+        emg_epoch_count = int(len(state_rms)) if state_rms is not None else 0
+        rms_values = (
+            np.asarray(state_rms, dtype=float).reshape(-1)
+            if state_rms is not None
+            else np.array([], dtype=float)
+        )
+        rms_finite = rms_values[np.isfinite(rms_values)]
+        emg_finite_fraction = (
+            float(len(rms_finite) / len(rms_values)) if len(rms_values) else math.nan
+        )
+        emg_median = float(np.median(rms_finite)) if len(rms_finite) else math.nan
+
+        state_metrics[state] = {
+            "eeg_epoch_count": eeg_epoch_count,
+            "spectrum_finite": spectrum_finite,
+            "total_power_median": total_power_median,
+            "emg_epoch_count": emg_epoch_count,
+            "emg_finite_fraction": emg_finite_fraction,
+            "emg_median": emg_median,
+            **relative_band_power,
+        }
+
+        rows.append(
+            {
+                "sleep_state": state_name,
+                "sleep_state_code": state,
+                "eeg_epoch_count": eeg_epoch_count,
+                "eeg_channel_count": len(eeg_channels),
+                "eeg_spectrum_finite": spectrum_finite,
+                "eeg_total_power_median_uv2": total_power_median,
+                **{
+                    f"eeg_{band}_relative_power": relative_band_power[band]
+                    for band in FREQUENCY_BANDS_HZ
+                },
+                "eeg_theta_delta_ratio": (
+                    relative_band_power["theta"] / relative_band_power["delta"]
+                    if relative_band_power["delta"] > 0
+                    else math.nan
+                ),
+                "emg_epoch_count": emg_epoch_count,
+                "emg_channel_count": len(emg_channels),
+                "emg_rms_finite_fraction": emg_finite_fraction,
+                "emg_rms_mean_uv": (
+                    float(np.mean(rms_finite)) if len(rms_finite) else math.nan
+                ),
+                "emg_rms_median_uv": emg_median,
+                "emg_rms_p05_uv": (
+                    float(np.quantile(rms_finite, 0.05))
+                    if len(rms_finite)
+                    else math.nan
+                ),
+                "emg_rms_p95_uv": (
+                    float(np.quantile(rms_finite, 0.95))
+                    if len(rms_finite)
+                    else math.nan
+                ),
+            }
+        )
+
+    report = pd.DataFrame(rows)
+    report["expected_frequency_pattern"] = [
+        "Wake beta relative power >= NREM",
+        "NREM delta relative power >= Wake and REM",
+        "REM theta/delta ratio >= NREM",
+    ]
+    wake, nrem, rem = (state_metrics[state] for state in STATE_NAMES)
+    frequency_checks = {
+        0: float(wake["beta"]) >= float(nrem["beta"]),
+        1: float(nrem["delta"]) >= max(float(wake["delta"]), float(rem["delta"])),
+        2: (
+            float(rem["theta"]) / float(rem["delta"])
+            >= float(nrem["theta"]) / float(nrem["delta"])
+            if float(rem["delta"]) > 0 and float(nrem["delta"]) > 0
+            else False
+        ),
+    }
+    emg_checks = {
+        0: float(wake["emg_median"]) >= max(
+            float(nrem["emg_median"]), float(rem["emg_median"])
+        ),
+        1: float(wake["emg_median"]) >= float(nrem["emg_median"]) >= float(rem["emg_median"]),
+        2: float(rem["emg_median"]) <= min(
+            float(wake["emg_median"]), float(nrem["emg_median"])
+        ),
+    }
+
+    statuses: list[str] = []
+    reasons: list[str] = []
+    spectral_statuses: list[str] = []
+    emg_statuses: list[str] = []
+    for state in STATE_NAMES:
+        metrics = state_metrics[state]
+        required_band_values = (
+            (metrics["beta"], nrem["beta"])
+            if state == 0
+            else (metrics["delta"], wake["delta"], rem["delta"])
+            if state == 1
+            else (metrics["theta"], metrics["delta"], nrem["theta"], nrem["delta"])
+        )
+
+        if int(metrics["eeg_epoch_count"]) == 0:
+            spectral_status = "REVIEW"
+            spectral_reason = "No analyzable EEG epochs for this sleep state"
+        elif not bool(metrics["spectrum_finite"]) or not math.isfinite(
+            float(metrics["total_power_median"])
+        ):
+            spectral_status = "FAIL"
+            spectral_reason = "EEG spectrum contains invalid values"
+        elif float(metrics["total_power_median"]) <= 0:
+            spectral_status = "FAIL"
+            spectral_reason = "EEG total power is zero or negative"
+        elif not all(math.isfinite(float(value)) for value in required_band_values):
+            spectral_status = "REVIEW"
+            spectral_reason = "Required frequency bands are outside the analyzed range"
+        elif not frequency_checks[state]:
+            spectral_status = "REVIEW"
+            spectral_reason = "Expected sleep-state frequency pattern was not present"
+        else:
+            spectral_status = "PASS"
+            spectral_reason = "Expected sleep-state frequency pattern was present"
+
+        if not emg_channels or int(metrics["emg_epoch_count"]) == 0:
+            emg_status = "REVIEW"
+            emg_reason = "No analyzable EMG RMS epochs for this sleep state"
+        elif float(metrics["emg_finite_fraction"]) < 1.0:
+            emg_status = "FAIL"
+            emg_reason = "EMG RMS contains invalid values"
+        elif float(metrics["emg_median"]) <= 0:
+            emg_status = "FAIL"
+            emg_reason = "EMG RMS is zero or negative"
+        elif not emg_checks[state]:
+            emg_status = "REVIEW"
+            emg_reason = "Expected Wake >= NREM >= REM EMG RMS ordering was not present"
+        else:
+            emg_status = "PASS"
+            emg_reason = "Expected Wake >= NREM >= REM EMG RMS ordering was present"
+
+        status = max(
+            (spectral_status, emg_status), key=lambda value: QUALITY_ORDER[value]
+        )
+        spectral_statuses.append(spectral_status)
+        emg_statuses.append(emg_status)
+        statuses.append(status)
+        reasons.append(f"EEG: {spectral_reason}; EMG: {emg_reason}")
+
+    report["frequency_expectation_met"] = [frequency_checks[state] for state in STATE_NAMES]
+    report["spectral_quality_status"] = spectral_statuses
+    report["emg_expectation_met"] = [emg_checks[state] for state in STATE_NAMES]
+    report["emg_quality_status"] = emg_statuses
+    report["quality_status"] = statuses
+    report["quality_reason"] = reasons
+    recording_status = max(
+        report["quality_status"], key=lambda status: QUALITY_ORDER[str(status)]
+    )
+    report.insert(0, "recording_quality_status", recording_status)
+    return report
 
 
 def plot_state_spectra(
@@ -146,7 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const=".",
         default=None,
-        help="Optionally save PDFs in the shared session QC directory.",
+        help="Optionally save PDFs and a quality CSV in the session QC directory.",
     )
     parser.add_argument("--no-show", action="store_true", help="Do not open plot windows.")
     return parser
@@ -233,10 +446,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             figures.append(emg_fig)
         else:
             print("EMG RMS: skipped (no EMG channels or scored finite epochs)")
+        quality_report = build_spectral_quality_report(
+            frequencies, spectra, counts, channels, emg_rms, emg_channels
+        )
+        print(
+            "Spectral quality: "
+            f"{quality_report['recording_quality_status'].iloc[0]}"
+        )
+        for row in quality_report.itertuples(index=False):
+            print(
+                f"  {row.sleep_state}: {row.quality_status} — "
+                f"{row.quality_reason}"
+            )
         if args.save_dir is not None:
             save_dir = quality_control_output_path(
                 args.save_dir, edf_path, rawdata_root, derivatives_root
             )
+            save_dir.mkdir(parents=True, exist_ok=True)
+            quality_output_path = (
+                save_dir / f"{edf_path.stem}_sleep_state_spectral_quality.csv"
+            )
+            quality_report.to_csv(quality_output_path, index=False)
+            print(f"Saved: {quality_output_path}")
             output_path = save_figure(
                 fig,
                 f"{edf_path.stem}_sleep_state_power_spectra",

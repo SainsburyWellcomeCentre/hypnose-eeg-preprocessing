@@ -17,11 +17,15 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from hypnose_helpers.io.selectors import parse_sessions
+
 try:
+    from scripts.io.input_paths import scoring_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
     from scripts.utils.config import coalesce, load_config, nested_get
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.io.input_paths import scoring_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
     from scripts.utils.config import coalesce, load_config, nested_get
 
@@ -44,6 +48,7 @@ class ScoringViewSettings:
     time_range: tuple[datetime, datetime] | None = None
     display_rate_hz: float | None = None
     show_artifacts: bool = False
+    session: int | None = None
 
 
 def _values(value: Any) -> list[str]:
@@ -119,7 +124,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pipeline YAML path (default: configs/pipelines/sleep_scoring.yaml).",
     )
     parser.add_argument("--subject", "--subjid", dest="subject", default=None)
-    parser.add_argument("--date", default=None, help="Session date in YYYYMMDD form.")
+    selector = parser.add_mutually_exclusive_group()
+    selector.add_argument("--date", default=None, help="Session date in YYYYMMDD form.")
+    selector.add_argument(
+        "--session",
+        default=None,
+        help="Session number, for example 1 or ses-1.",
+    )
     parser.add_argument("--recording-index", type=int, default=None)
     parser.add_argument("--eeg-channel", type=int, choices=(0, 1), default=None)
     parser.add_argument("--view-length", type=float, default=None, metavar="SECONDS")
@@ -197,13 +208,32 @@ def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
     )
     time_range = _parse_time_range(configured_time_range)
 
-    date = _single_value(
-        coalesce(args.date, view.get("date"), scoring.get("dates")),
-        option_name="date",
+    if args.date is not None:
+        date_value = args.date
+        session_value = None
+    elif args.session is not None:
+        date_value = None
+        session_value = args.session
+    else:
+        view_date = view.get("date")
+        view_session = view.get("session")
+        if view_date is not None or view_session is not None:
+            date_value = view_date
+            session_value = view_session
+        else:
+            date_value = scoring.get("dates")
+            session_value = scoring.get("sessions")
+    date = _single_value(date_value, option_name="date")
+    session_text = _single_value(session_value, option_name="session")
+    if date is not None and session_text is not None:
+        raise ValueError("date and session are mutually exclusive")
+    session = (
+        None if session_text is None else parse_sessions([session_text])[0]
     )
-    if date is None and time_range is None:
+    if date is None and session is None and time_range is None:
         raise ValueError(
-            "a date is required in the config or via --date (or use --time-range)"
+            "a date or session is required in the config or via --date/--session "
+            "(or use --time-range)"
         )
 
     rawdata_root = Path(
@@ -275,6 +305,7 @@ def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
         time_range=time_range,
         display_rate_hz=display_rate_hz,
         show_artifacts=show_artifacts,
+        session=session,
     )
 
 
@@ -377,7 +408,7 @@ def _label_artifacts(fig: Any, regions: list[tuple[float, float]]) -> None:
 def _run_custom_view(settings: ScoringViewSettings) -> int:
     """Display a selected/full recording with range, rate, and artifact controls."""
     from hypnose_somnotate.config import DEFAULT_CHANNEL_LABELS
-    from hypnose_somnotate.io.loading import load_somnotate_vector, prediction_path
+    from hypnose_somnotate.io.loading import load_somnotate_vector
     from hypnose_somnotate.io.paths import find_recordings
     from hypnose_somnotate.visualization import plot_detailed_comparison
     from pyedflib import EdfReader
@@ -385,9 +416,23 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
 
     dates = [settings.date] if settings.date is not None else None
     recordings = find_recordings(settings.repo_root, [settings.subject], dates=dates)
+    if settings.session is not None:
+        recordings = [
+            recording
+            for recording in recordings
+            if parse_sessions([recording.session]) == [settings.session]
+        ]
     if not recordings:
-        date_text = f" on date {settings.date}" if settings.date is not None else ""
-        raise ValueError(f"No recordings found for subject {settings.subject}{date_text}")
+        selector_text = (
+            f" on date {settings.date}"
+            if settings.date is not None
+            else f" in session {settings.session}"
+            if settings.session is not None
+            else ""
+        )
+        raise ValueError(
+            f"No recordings found for subject {settings.subject}{selector_text}"
+        )
 
     if settings.time_range is not None:
         start_time = settings.time_range[0]
@@ -397,14 +442,24 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
             if _edf_contains_time(recording.edf_path, start_time, EdfReader)
         ]
         if not recordings:
-            scope = f"session {settings.date}" if settings.date else "the subject's recordings"
+            scope = (
+                f"date {settings.date}"
+                if settings.date
+                else f"session {settings.session}"
+                if settings.session is not None
+                else "the subject's recordings"
+            )
             raise ValueError(
                 f"No EDF in {scope} contains time_range START "
                 f"({start_time:%Y%m%d %H:%M:%S})"
             )
     index = min(settings.recording_index, len(recordings) - 1)
     recording = recordings[index]
-    pred_path = prediction_path(recording)
+    pred_path = scoring_path(
+        recording.edf_path,
+        settings.rawdata_root,
+        settings.derivatives_root,
+    )
     if not pred_path.exists():
         raise FileNotFoundError(
             f"No somnotate predictions at {pred_path}. Score this recording first."
@@ -559,15 +614,7 @@ def run_view(
     os.environ["HYPNOSE_EEG_RAWDATA_ROOT"] = str(settings.rawdata_root)
     os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"] = str(settings.derivatives_root)
 
-    custom_view = any(
-        (
-            settings.hours is not None,
-            settings.time_range is not None,
-            settings.display_rate_hz is not None,
-            settings.show_artifacts,
-        )
-    )
-    if custom_view and view_function is None:
+    if view_function is None:
         return _run_custom_view(settings)
 
     arguments = [

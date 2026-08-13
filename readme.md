@@ -72,6 +72,9 @@ Configure a Somnotate model and subjects in
 ```bash
 python scripts/sleep_scoring/score_recordings.py \
   --model my-model --subject 66 --date 20260717
+
+python scripts/sleep_scoring/score_recordings.py \
+  --model my-model --subject 66 --session 1
 ```
 
 The model name resolves below
@@ -94,7 +97,7 @@ The report prints duration and percentage in Wake, NREM, REM, and Undefined,
 prediction-probability quantiles, and the number of signal epochs below the
 review threshold. Nothing is saved by default. Use `--save` for the enhanced
 epoch output or `--summary` for the state summary. Both are written beneath the
-shared derivatives session's `somnotate_sleep_scoring/` directory.
+shared derivatives session's `sleep_scoring/` directory.
 
 Run every session-level quality-control section and obtain one analysis-readiness
 decision with a unified list of epochs requiring review:
@@ -117,7 +120,7 @@ All thresholds have command-line overrides; run the command with `--help` for th
 complete list. Reports are only saved when their output options are supplied.
 Outputs are separated beneath the shared derivatives session:
 
-- Somnotate scoring reports: `somnotate_sleep_scoring/`
+- Somnotate predictions and scoring reports: `sleep_scoring/`
 - Artifact detection and reports: `artifacts/`
 - Combined QC, integrity, spectra, and correlation reports: `quality_control/`
 
@@ -129,6 +132,9 @@ Visually inspect the raw signals and predicted states for one scored session:
 ```bash
 python scripts/sleep_scoring/view_scored_recording.py \
   --subject 66 --date 20260717 --hours 3 6
+
+python scripts/sleep_scoring/view_scored_recording.py \
+  --subject 66 --session 1 --hours 3 6
 ```
 
 `--hours START END` limits EDF loading and the viewer to an elapsed-hour range
@@ -231,7 +237,13 @@ automatically when an `*_artifact_epochs.parquet` file is available; use
 `--include-artifacts` to retain them. Plots use the shared `hypnose_helpers`
 figure style. When saved, the EEG and EMG figures are provenance-tagged PDFs
 named with the `_sleep_state_power_spectra` and `_sleep_state_emg_rms` labels,
-respectively.
+respectively. Saving also writes a `_sleep_state_spectral_quality.csv` report
+with one row per sleep state. It includes analyzable EEG/EMG epoch counts,
+relative delta (0.5–4 Hz), theta (4–8 Hz), alpha (8–12 Hz), and beta
+(12–30 Hz) power, EMG RMS distribution statistics, state quality status, and
+the worst-state overall recording status. The physiological review checks expect
+Wake beta power to exceed NREM, NREM delta power to exceed Wake and REM, REM's
+theta/delta ratio to exceed NREM, and EMG RMS to follow Wake ≥ NREM ≥ REM.
 
 Save plots without opening an interactive window with:
 

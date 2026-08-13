@@ -78,7 +78,7 @@ class ArtifactDetectionTests(unittest.TestCase):
         )
 
         csv_path, parquet_path = artifact_output_paths(
-            "/derivatives/sub-066/ses-1_date-20260717/saved_results/"
+            "/derivatives/sub-066/ses-1_date-20260717/sleep_scoring/"
             "sample_somnotate_predictions.parquet",
             remove_from_stem="somnotate_predictions",
             output_suffix="artifact_epochs",

@@ -34,9 +34,12 @@ def scoring_path(
     recording = Path(recording_path)
     session_dir = session_derivatives_dir(recording, rawdata_root, derivatives_root)
     filename = f"{recording.stem}_somnotate_predictions.parquet"
-    expected = session_dir / "saved_results" / filename
+    expected = session_dir / "sleep_scoring" / filename
     if expected.is_file():
         return expected
+    legacy = session_dir / "saved_results" / filename
+    if legacy.is_file():
+        return legacy
     matches = sorted(session_dir.rglob(filename))
     if len(matches) == 1:
         return matches[0]
