@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 import numpy as np
 import pandas as pd
 
-from scripts.quality_control.plot_channel_correlations import (
+from scripts.quality_control.channel_correlations import (
     _print_review_counts,
     build_parser,
 )

@@ -23,10 +23,12 @@ import numpy as np
 try:
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
+    from scripts.io.recording_paths import quality_control_output_path
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
+    from scripts.io.recording_paths import quality_control_output_path
 
 
 GAP_ANNOTATION_TERMS = ("gap", "boundary", "discontinu", "dropout", "missing")
@@ -371,13 +373,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--summary",
+        nargs="?",
+        const="recording_integrity.csv",
         default=None,
-        help="Optionally write the recording summary to this CSV path.",
+        help="Optionally save the summary in the shared session QC directory.",
     )
     parser.add_argument(
         "--gaps",
+        nargs="?",
+        const="recording_gaps.csv",
         default=None,
-        help="Optionally write every detected gap to this CSV path.",
+        help="Optionally save gaps in the shared session QC directory.",
     )
     return parser
 
@@ -461,15 +467,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print("  Detected gaps: none")
 
+    def output_path(requested: str) -> Path:
+        path = Path(requested)
+        if path.is_absolute():
+            return path
+        if len(pairs) != 1:
+            parser.error("relative QC outputs require a single selected recording")
+        return quality_control_output_path(
+            path, pairs[0][0], rawdata_root, derivatives_root
+        )
+
     if args.summary:
-        summary_path = Path(args.summary)
+        summary_path = output_path(args.summary)
         result_rows = [asdict(result) for result in results]
         _write_csv(
             summary_path, result_rows, list(IntegrityResult.__dataclass_fields__)
         )
         print(f"Summary: {summary_path}")
     if args.gaps:
-        gaps_path = Path(args.gaps)
+        gaps_path = output_path(args.gaps)
         gap_rows = [asdict(gap) for gap in gaps]
         _write_csv(gaps_path, gap_rows, list(Gap.__dataclass_fields__))
         print(f"Gaps: {gaps_path}")

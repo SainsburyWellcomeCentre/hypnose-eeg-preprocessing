@@ -207,8 +207,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--save-dir",
+        nargs="?",
+        const=".",
         default=None,
-        help="Optionally save overall, hourly, and sleep-state CSV reports here.",
+        help="Optionally save CSV reports in the shared session QC directory.",
     )
     return parser
 
@@ -268,7 +270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
-    from scripts.io.recording_paths import artifact_path
+    from scripts.io.recording_paths import artifact_path, quality_control_output_path
 
     rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
     derivatives_root = Path(
@@ -292,7 +294,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         _print_report(report)
         if args.save_dir is not None:
-            _save_report(report, Path(args.save_dir), edf_path.stem)
+            save_dir = quality_control_output_path(
+                args.save_dir, edf_path, rawdata_root, derivatives_root
+            )
+            _save_report(report, save_dir, edf_path.stem)
     return 0
 
 

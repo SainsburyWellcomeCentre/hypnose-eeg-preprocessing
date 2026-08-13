@@ -26,9 +26,9 @@ The shared profiles live in `configs/data_locations.yml`. Select a
 profile once for each checkout:
 
 ```bash
-python scripts/io/set_data_location.py --list
-python scripts/io/set_data_location.py server-linux   # or server-mac / server-windows
-python scripts/io/set_data_location.py --show
+python scripts/io/data_paths.py --list
+python scripts/io/data_paths.py server-linux   # or server-mac / server-windows
+python scripts/io/data_paths.py --show
 ```
 
 The selection is written to `configs/data_locations.local.yml`,
@@ -78,6 +78,45 @@ The model name resolves below
 `derivatives/somnotate_training/<model>/model.pickle`; absolute paths are also
 accepted. Raw-data and derivatives roots come from the active data-location
 profile unless explicitly overridden.
+
+Inspect the stored Somnotate predictions and their per-state probabilities for
+one session without loading the EDF or rerunning the model:
+
+```bash
+python scripts/quality_control/sleep_scoring.py \
+  --subject 66 --session 1
+
+python scripts/quality_control/sleep_scoring.py \
+  --subject 66 --date 20260717 --confidence-threshold 0.80
+```
+
+The report prints duration and percentage in Wake, NREM, REM, and Undefined,
+prediction-probability quantiles, and the number of signal epochs below the
+review threshold. Nothing is saved by default. Use `--save` for the enhanced
+epoch output or `--summary` for the state summary. Both are written beneath the
+shared derivatives session's `quality_control/` directory.
+
+Run every session-level quality-control section and obtain one analysis-readiness
+decision with a unified list of epochs requiring review:
+
+```bash
+python scripts/quality_control/summary_qc.py \
+  --subject 66 --session 1 \
+  --summary \
+  --review-epochs
+```
+
+The command checks EDF/FIF integrity and gaps, Somnotate confidence and undefined
+epochs, artifact burden, EEG/EMG channel correlation, sleep-state power spectra,
+and EMG RMS availability. Results are `PASS`, `REVIEW`, or `FAIL`. A duration
+mismatch or invalid spectral result fails the recording; configurable percentage
+limits determine review status for scoring, artifacts, and correlations. Review
+rows use start/end seconds from recording onset so results from one-second
+Somnotate epochs and the default four-second signal epochs can be combined safely.
+All thresholds have command-line overrides; run the command with `--help` for the
+complete list. Reports are only saved when their output options are supplied and
+default to `<derivatives>/<subject>/<session>/quality_control/`. A relative name
+is placed below that shared location; an absolute path is an explicit override.
 
 Visually inspect the raw signals and predicted states for one scored session:
 
@@ -156,10 +195,10 @@ python scripts/quality_control/recording_integrity.py \
 
 The command prints the duration of every constant/non-finite interval and
 gap-like EDF annotation in seconds. The default 30-minute chunks reduce reader
-and network overhead while keeping memory bounded. It does not write files by default. Add
-`--gaps /path/to/recording_integrity_gaps.csv` to save full gap details or
-`--summary /path/to/recording_integrity.csv` to save duration comparisons and
-pass/review status. Defaults are a one-second duration tolerance and a one-second
+and network overhead while keeping memory bounded. It does not write files by
+default. Add `--gaps` to save full gap details or `--summary` to save duration
+comparisons and pass/review status in the shared session QC directory. Defaults
+are a one-second duration tolerance and a one-second
 minimum gap; override them with `--duration-tolerance` and `--min-gap`. A
 recording requiring review causes a non-zero command exit status.
 
@@ -169,10 +208,10 @@ Plot the mean EEG power spectral density for Wake, NREM, and REM for one
 subject and either a session date or session number:
 
 ```bash
-python scripts/quality_control/plot_spectra.py \
+python scripts/quality_control/spectra.py \
   --subject 66 --date 20260717
 
-python scripts/quality_control/plot_spectra.py \
+python scripts/quality_control/spectra.py \
   --subject 66 --session 1
 ```
 
@@ -191,9 +230,9 @@ respectively.
 Save plots without opening an interactive window with:
 
 ```bash
-python scripts/quality_control/plot_spectra.py \
+python scripts/quality_control/spectra.py \
   --subject 66 --date 20260717 \
-  --save-dir /path/to/plots --no-show
+  --save-dir --no-show
 ```
 
 Use `--fmin`, `--fmax`, `--epoch-seconds`, `--welch-seconds`, and
@@ -205,10 +244,10 @@ Plot the distribution of epoch-wise Pearson correlation for every EEG/EMG
 channel pair, separated into Wake, NREM, and REM:
 
 ```bash
-python scripts/quality_control/plot_channel_correlations.py \
+python scripts/quality_control/channel_correlations.py \
   --subject 66 --date 20260717
 
-python scripts/quality_control/plot_channel_correlations.py \
+python scripts/quality_control/channel_correlations.py \
   --subject 66 --session 1
 ```
 
@@ -218,7 +257,7 @@ or constant channel pairs, and epochs marked in the matching artifact parquet.
 Each histogram shows the percentage of valid epochs for its sleep state on the
 common Pearson range from −1 to +1; the dashed line marks the median. Use
 `--include-artifacts` to retain flagged epochs, `--bins` to change histogram
-resolution, or `--save-dir /path/to/plots --no-show` for non-interactive,
+resolution, or `--save-dir --no-show` for non-interactive,
 provenance-tagged PDF output using the shared figure style.
 The terminal also reports counts above the default review thresholds of
 `|r| > 0.90` for EEG–EEG pairs and `|r| > 0.50` for EEG–EMG pairs, including a
@@ -231,10 +270,10 @@ Report artifact counts, duration, percentage per recording hour, sleep-state
 breakdown, and longest contiguous artifact period separately by channel:
 
 ```bash
-python scripts/quality_control/report_artifacts.py \
+python scripts/quality_control/artifacts.py \
   --subject 66 --date 20260717
 
-python scripts/quality_control/report_artifacts.py \
+python scripts/quality_control/artifacts.py \
   --subject 66 --session 1
 ```
 
@@ -242,7 +281,7 @@ The report uses the matching `*_artifact_epochs.parquet`, infers its epoch
 duration from `time_s`, and supports both `artifact_channels` and legacy
 channel-prefixed `artifact_features`. EMG-supported artifact epochs are reported
 as `EMG (combined)` when the stored reason identifies an EMG-supported EEG
-outlier. Nothing is saved by default;
-add `--save-dir /path/to/reports` to write separate overall, hourly, and
-sleep-state CSV tables. Use `--epoch-seconds` only when the duration cannot be
+outlier. Nothing is saved by default; add `--save-dir` to write separate overall,
+hourly, and sleep-state CSV tables to the shared session QC directory. Use
+`--epoch-seconds` only when the duration cannot be
 reliably inferred from the artifact file.

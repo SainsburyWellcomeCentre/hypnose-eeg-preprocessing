@@ -18,13 +18,21 @@ try:
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
     from scripts.analysis.correlation import compute_state_channel_correlations
-    from scripts.io.recording_paths import artifact_path, scoring_path
+    from scripts.io.recording_paths import (
+        artifact_path,
+        quality_control_output_path,
+        scoring_path,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
     from scripts.analysis.correlation import compute_state_channel_correlations
-    from scripts.io.recording_paths import artifact_path, scoring_path
+    from scripts.io.recording_paths import (
+        artifact_path,
+        quality_control_output_path,
+        scoring_path,
+    )
 
 
 STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM"}
@@ -118,7 +126,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include artifact epochs instead of excluding the matching parquet.",
     )
-    parser.add_argument("--save-dir", default=None, help="Optionally save PDF plots here.")
+    parser.add_argument(
+        "--save-dir",
+        nargs="?",
+        const=".",
+        default=None,
+        help="Optionally save PDFs in the shared session QC directory.",
+    )
     parser.add_argument("--no-show", action="store_true", help="Do not open plot windows.")
     return parser
 
@@ -266,10 +280,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         figures.append(figure)
         if args.save_dir is not None:
+            save_dir = quality_control_output_path(
+                args.save_dir, edf_path, rawdata_root, derivatives_root
+            )
             output_path = save_figure(
                 figure,
                 f"{edf_path.stem}_sleep_state_correlations",
-                fig_dir=args.save_dir,
+                fig_dir=save_dir,
                 subjids=parse_subject(args.subject),
                 dates=args.date,
             )

@@ -8,11 +8,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.quality_control.plot_spectra import build_parser, plot_state_emg_rms
+from scripts.quality_control.spectra import build_parser, plot_state_emg_rms
 from scripts.analysis.emg import compute_state_emg_rms
 from scripts.analysis.power_spectra import compute_state_spectra
 from scripts.io.recording_paths import (
     artifact_path,
+    quality_control_output_path,
     scoring_path,
     session_derivatives_dir,
 )
@@ -83,6 +84,12 @@ class SleepStateSpectraTests(unittest.TestCase):
             )
             self.assertEqual(scoring_path(edf, rawdata, derivatives), scoring)
             self.assertEqual(artifact_path(edf, rawdata, derivatives), artifact)
+            self.assertEqual(
+                quality_control_output_path(
+                    "qc_summary.csv", edf, rawdata, derivatives
+                ),
+                saved.parent / "quality_control" / "qc_summary.csv",
+            )
 
     def test_generic_artifact_filename_is_supported(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

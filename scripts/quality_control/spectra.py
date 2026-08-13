@@ -18,14 +18,22 @@ try:
     from scripts.quality_control.recording_integrity import select_recordings
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra
-    from scripts.io.recording_paths import artifact_path, scoring_path
+    from scripts.io.recording_paths import (
+        artifact_path,
+        quality_control_output_path,
+        scoring_path,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra
-    from scripts.io.recording_paths import artifact_path, scoring_path
+    from scripts.io.recording_paths import (
+        artifact_path,
+        quality_control_output_path,
+        scoring_path,
+    )
 
 
 STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM"}
@@ -139,7 +147,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include artifact epochs instead of excluding the matching artifact parquet.",
     )
-    parser.add_argument("--save-dir", default=None, help="Optionally save PDF plots here.")
+    parser.add_argument(
+        "--save-dir",
+        nargs="?",
+        const=".",
+        default=None,
+        help="Optionally save PDFs in the shared session QC directory.",
+    )
     parser.add_argument("--no-show", action="store_true", help="Do not open plot windows.")
     return parser
 
@@ -226,10 +240,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print("EMG RMS: skipped (no EMG channels or scored finite epochs)")
         if args.save_dir is not None:
+            save_dir = quality_control_output_path(
+                args.save_dir, edf_path, rawdata_root, derivatives_root
+            )
             output_path = save_figure(
                 fig,
                 f"{edf_path.stem}_sleep_state_power_spectra",
-                fig_dir=args.save_dir,
+                fig_dir=save_dir,
                 subjids=parse_subject(args.subject),
                 dates=args.date,
             )
@@ -238,7 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 emg_output_path = save_figure(
                     emg_fig,
                     f"{edf_path.stem}_sleep_state_emg_rms",
-                    fig_dir=args.save_dir,
+                    fig_dir=save_dir,
                     subjids=parse_subject(args.subject),
                     dates=args.date,
                 )
