@@ -17,14 +17,14 @@ from hypnose_helpers.viz.styles import ensure_style
 try:
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
-    from scripts.utils.correlation import compute_state_channel_correlations
-    from scripts.utils.recording_paths import artifact_path, scoring_path
+    from scripts.analysis.correlation import compute_state_channel_correlations
+    from scripts.io.recording_paths import artifact_path, scoring_path
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
-    from scripts.utils.correlation import compute_state_channel_correlations
-    from scripts.utils.recording_paths import artifact_path, scoring_path
+    from scripts.analysis.correlation import compute_state_channel_correlations
+    from scripts.io.recording_paths import artifact_path, scoring_path
 
 
 STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM"}

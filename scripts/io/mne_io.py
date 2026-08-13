@@ -1,4 +1,4 @@
-"""MNE import and recording-export helpers."""
+"""MNE import and recording-export operations."""
 
 from __future__ import annotations
 

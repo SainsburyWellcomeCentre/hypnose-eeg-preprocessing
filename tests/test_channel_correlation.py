@@ -11,7 +11,7 @@ from scripts.quality_control.plot_channel_correlations import (
     _print_review_counts,
     build_parser,
 )
-from scripts.utils.correlation import epoch_pearson_matrices
+from scripts.analysis.correlation import epoch_pearson_matrices
 
 
 class ChannelCorrelationTests(unittest.TestCase):

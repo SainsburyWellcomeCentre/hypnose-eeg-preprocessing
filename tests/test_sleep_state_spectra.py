@@ -9,21 +9,19 @@ import numpy as np
 import pandas as pd
 
 from scripts.quality_control.plot_spectra import build_parser, plot_state_emg_rms
-from scripts.utils.power_spectra import (
-    artifact_epoch_ids,
-    compute_state_emg_rms,
-    compute_state_spectra,
-    epoch_sleep_states,
-)
-from scripts.utils.recording_paths import (
+from scripts.analysis.emg import compute_state_emg_rms
+from scripts.analysis.power_spectra import compute_state_spectra
+from scripts.io.recording_paths import (
     artifact_path,
     scoring_path,
     session_derivatives_dir,
 )
+from scripts.utils.artifact import artifact_epoch_ids
+from scripts.utils.sleep_states import epoch_sleep_states
 
 
 class SleepStateSpectraTests(unittest.TestCase):
-    def test_spectrum_computation_is_available_from_utils(self) -> None:
+    def test_spectrum_computation_is_available_from_analysis(self) -> None:
         self.assertTrue(callable(compute_state_spectra))
         self.assertTrue(callable(compute_state_emg_rms))
 

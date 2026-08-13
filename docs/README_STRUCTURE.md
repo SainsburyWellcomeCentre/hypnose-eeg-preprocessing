@@ -18,18 +18,22 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
 - `docs/`: contracts and operations runbooks.
 - `cache/`: optional ephemeral local staging.
 
-### src level folders
-- `io/`: scripts for inputting and outputting data.
-- `preprocessing/`: any processing which needs to be initially done to the raw data.
-- `sleep_scoring/`: automated sleep scoring using somnotate analysis.
-- `spectral`: scripts for spectral analysis.
-- `visualisation`: any scripts required for visualising data.
-- `utils`: small helper functions.
+### `scripts/` folders
+- `analysis/`: reusable scientific calculations imported by executable scripts;
+  these modules are not command-line entry points.
+- `io/`: recording discovery, data-location configuration, and MNE file-loading
+  helpers.
+- `preprocessing/`: executable preprocessing workflows.
+- `quality_control/`: executable reporting and visualisation workflows.
+- `sleep_scoring/`: executable automated and interactive sleep-scoring workflows.
+- `utils/`: small cross-cutting helpers such as configuration, artifact, and
+  sleep-state handling.
 
 ## Sections for inclusion
 - `io/`: source and sink connectors, contracts, checkpoint helpers.
+- `analysis/`: calculations shared by multiple workflows.
 - `processing/`: realtime transforms and analysis stages.
-- `utils/`: shared config, logging/metrics, quality/time helpers.
+- `utils/`: small domain-independent helpers.
 - `state/`: local runtime state (cursor/checkpoint snapshots).
 
 

@@ -25,10 +25,12 @@ import numpy as np
 import pandas as pd
 
 try:
-    from scripts.utils import coalesce, import_mne, load_config, nested_get
+    from scripts.io.mne_io import import_mne
+    from scripts.utils.config import coalesce, load_config, nested_get
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.utils import coalesce, import_mne, load_config, nested_get
+    from scripts.io.mne_io import import_mne
+    from scripts.utils.config import coalesce, load_config, nested_get
 
 
 EEG_SCORE_FEATURES = (

@@ -1,4 +1,4 @@
-"""Resolve session directories and recording-related derivative files."""
+"""Resolve session directories and recording-related derivative paths."""
 
 from __future__ import annotations
 

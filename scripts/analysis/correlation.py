@@ -1,4 +1,4 @@
-"""Chunked cross-channel correlation utilities for scored recordings."""
+"""Reusable cross-channel correlation calculations for scored recordings."""
 
 from __future__ import annotations
 
@@ -7,12 +7,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .mne_io import import_mne
-from .power_spectra import (
-    SLEEP_STATE_CODES,
-    artifact_epoch_ids,
-    epoch_sleep_states,
-)
+from scripts.io.mne_io import import_mne
+from scripts.utils.artifact import artifact_epoch_ids
+from scripts.utils.sleep_states import SLEEP_STATE_CODES, epoch_sleep_states
 
 
 def epoch_pearson_matrices(epoch_data: np.ndarray) -> np.ndarray:

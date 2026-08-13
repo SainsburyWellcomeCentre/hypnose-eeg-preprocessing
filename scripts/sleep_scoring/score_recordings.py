@@ -18,11 +18,11 @@ from typing import Any, Callable, Sequence
 
 try:
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.utils import coalesce, load_config, nested_get
+    from scripts.utils.config import coalesce, load_config, nested_get
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.utils import coalesce, load_config, nested_get
+    from scripts.utils.config import coalesce, load_config, nested_get
 
 
 DEFAULT_CONFIG_PATH = get_repo_root() / "configs" / "pipelines" / "sleep_scoring.yaml"

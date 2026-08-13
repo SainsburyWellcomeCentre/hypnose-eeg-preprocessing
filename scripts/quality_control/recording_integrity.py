@@ -22,11 +22,11 @@ import numpy as np
 
 try:
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
-    from scripts.utils import import_mne
+    from scripts.io.mne_io import import_mne
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
-    from scripts.utils import import_mne
+    from scripts.io.mne_io import import_mne
 
 
 GAP_ANNOTATION_TERMS = ("gap", "boundary", "discontinu", "dropout", "missing")
