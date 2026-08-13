@@ -16,8 +16,7 @@ from scripts.io.recording_paths import (
     scoring_path,
     session_derivatives_dir,
 )
-from scripts.utils.artifact import artifact_epoch_ids
-from scripts.utils.sleep_states import epoch_sleep_states
+from scripts.utils.epochs import artifact_epoch_ids, epoch_sleep_states
 
 
 class SleepStateSpectraTests(unittest.TestCase):

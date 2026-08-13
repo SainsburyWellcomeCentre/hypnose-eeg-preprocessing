@@ -43,6 +43,16 @@ def coalesce(*values: Any) -> Any:
     return None
 
 
+def two_float_tuple(configured: Any, name: str) -> tuple[float, float]:
+    """Normalize a two-number config value, including simple-parser strings."""
+    if isinstance(configured, str):
+        configured = configured.strip().removeprefix("[").removesuffix("]").split(",")
+    values = tuple(float(item) for item in configured)
+    if len(values) != 2:
+        raise ValueError(f"Configured {name} must contain [low, high].")
+    return values
+
+
 def _load_simple_yaml_config(config_path: Path) -> dict[str, Any]:
     """Fallback parser for the simple nested mappings used by project configs."""
     config: dict[str, Any] = {}

@@ -8,8 +8,24 @@ import numpy as np
 import pandas as pd
 
 from scripts.io.mne_io import import_mne
-from scripts.utils.artifact import artifact_epoch_ids
-from scripts.utils.sleep_states import SLEEP_STATE_CODES, epoch_sleep_states
+from scripts.utils.epochs import (
+    SLEEP_STATE_CODES,
+    artifact_epoch_ids,
+    epoch_sleep_states,
+)
+
+
+def bandpower(
+    psd: np.ndarray,
+    frequencies: np.ndarray,
+    low_hz: float,
+    high_hz: float,
+) -> np.ndarray:
+    """Integrate a power spectral density over an inclusive frequency band."""
+    mask = (frequencies >= low_hz) & (frequencies <= high_hz)
+    if mask.sum() < 2:
+        return np.full(psd.shape[:-1], np.nan)
+    return np.trapz(psd[..., mask], frequencies[mask], axis=-1)
 
 
 def compute_state_spectra(

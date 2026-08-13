@@ -14,12 +14,25 @@ import numpy as np
 import pandas as pd
 
 try:
-    from scripts.utils.artifact import infer_epoch_seconds
-    from scripts.utils.sleep_states import sleep_state_name
+    from scripts.utils.epochs import infer_epoch_seconds
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.utils.artifact import infer_epoch_seconds
-    from scripts.utils.sleep_states import sleep_state_name
+    from scripts.utils.epochs import infer_epoch_seconds
+
+
+SLEEP_STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM", 3: "Undefined"}
+
+
+def sleep_state_name(value: object) -> str:
+    """Return a display name for a numeric or textual sleep-state value."""
+    if pd.isna(value):
+        return "Undefined"
+    try:
+        numeric = int(float(value))
+    except (TypeError, ValueError):
+        text = str(value).strip()
+        return text if text else "Undefined"
+    return SLEEP_STATE_NAMES.get(numeric, str(numeric))
 
 
 @dataclass(frozen=True)

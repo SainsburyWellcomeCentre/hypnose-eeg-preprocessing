@@ -8,8 +8,11 @@ import numpy as np
 import pandas as pd
 
 from scripts.io.mne_io import import_mne
-from scripts.utils.artifact import artifact_epoch_ids
-from scripts.utils.sleep_states import SLEEP_STATE_CODES, epoch_sleep_states
+from scripts.utils.epochs import (
+    SLEEP_STATE_CODES,
+    artifact_epoch_ids,
+    epoch_sleep_states,
+)
 
 
 def compute_state_emg_rms(

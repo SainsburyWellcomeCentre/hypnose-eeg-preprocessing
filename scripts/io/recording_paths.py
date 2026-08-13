@@ -5,6 +5,23 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def artifact_output_paths(
+    sleep_parquet_path: str | Path,
+    *,
+    remove_from_stem: str,
+    output_suffix: str,
+    output_dir: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """Return CSV and parquet destinations for artifact detection output."""
+    scoring = Path(sleep_parquet_path)
+    destination = Path(output_dir) if output_dir is not None else scoring.parent
+    stem = scoring.stem.replace(remove_from_stem, "").rstrip("_-")
+    return (
+        destination / f"{stem}_{output_suffix}.csv",
+        destination / f"{stem}_{output_suffix}.parquet",
+    )
+
+
 def session_derivatives_dir(
     recording_path: str | Path,
     rawdata_root: str | Path,

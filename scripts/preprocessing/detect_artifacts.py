@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,12 +25,36 @@ import numpy as np
 import pandas as pd
 
 try:
+    from scripts.analysis.power_spectra import bandpower
+    from scripts.analysis.statistics import robust_upper_z
     from scripts.io.mne_io import import_mne
-    from scripts.utils.config import coalesce, load_config, nested_get
+    from scripts.io.recording_paths import artifact_output_paths
+    from scripts.utils.config import load_config, nested_get, two_float_tuple
+    from scripts.utils.epochs import (
+        align_epoch_states,
+        choose_chunk_epochs,
+        complete_epoch_count,
+        epoch_batch,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.analysis.power_spectra import bandpower
+    from scripts.analysis.statistics import robust_upper_z
     from scripts.io.mne_io import import_mne
-    from scripts.utils.config import coalesce, load_config, nested_get
+    from scripts.io.recording_paths import artifact_output_paths
+    from scripts.utils.config import load_config, nested_get, two_float_tuple
+    from scripts.utils.epochs import (
+        align_epoch_states,
+        choose_chunk_epochs,
+        complete_epoch_count,
+        epoch_batch,
+    )
+
+
+DEFAULT_CONFIG_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "configs/pipelines/artifact_detection.yaml"
+)
 
 
 EEG_SCORE_FEATURES = (
@@ -45,22 +69,11 @@ EMG_SCORE_FEATURES = (
     "emg_rms_uv",
     "emg_max_derivative_uv_per_sample",
 )
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "configs/pipelines/artifact_detection.yaml"
-
-
-def _two_float_tuple(configured: Any, name: str) -> tuple[float, float]:
-    """Normalize a two-value YAML list, including the simple-parser fallback."""
-    if isinstance(configured, str):
-        configured = configured.strip().removeprefix("[").removesuffix("]").split(",")
-    values = tuple(float(item) for item in configured)
-    if len(values) != 2:
-        raise ValueError(f"Configured {name} must contain [low, high].")
-    return values
 
 
 @dataclass(frozen=True)
-class ArtifactDetectionConfig:
-    """Immutable settings shared across one or many recording pairs."""
+class ArtifactDetector:
+    """Configured artifact detector for one or many recording pairs."""
 
     epoch_seconds: float
     chunk_memory_mb: float
@@ -90,8 +103,9 @@ class ArtifactDetectionConfig:
     @classmethod
     def from_yaml(
         cls,
-        config_path: str | Path = DEFAULT_CONFIG_PATH,
-    ) -> "ArtifactDetectionConfig":
+        config_path: str | Path,
+        **overrides: object,
+    ) -> "ArtifactDetector":
         """Load a reusable detector configuration from the pipeline YAML."""
         config = load_config(config_path)
         root = ("artifact_detection",)
@@ -104,14 +118,14 @@ class ArtifactDetectionConfig:
                 )
             return configured
 
-        high_band = _two_float_tuple(
+        high_band = two_float_tuple(
             value(("welch", "high_frequency_band_hz")), "high-frequency band"
         )
-        line_band = _two_float_tuple(
+        line_band = two_float_tuple(
             value(("welch", "line_noise_band_hz")), "line-noise band"
         )
 
-        return cls(
+        settings: dict[str, object] = dict(
             epoch_seconds=float(value(("epoch_seconds",))),
             chunk_memory_mb=float(value(("chunking", "target_memory_mb"))),
             chunk_working_array_factor=int(value(("chunking", "working_array_factor"))),
@@ -139,65 +153,40 @@ class ArtifactDetectionConfig:
             output_suffix=str(value(("output", "suffix"))),
             overwrite=bool(value(("output", "overwrite"))),
         )
-
-
-@dataclass(frozen=True)
-class ArtifactDetectionResult:
-    """Outcome of processing one recording and sleep-score pair."""
-
-    fif_path: str
-    sleep_parquet_path: str
-    status: str
-    csv_path: str | None = None
-    parquet_path: str | None = None
-    n_epochs: int | None = None
-    n_artifact_epochs: int | None = None
-    artifact_fraction: float | None = None
-    error: str | None = None
-
-
-class ArtifactDetector:
-    """Orchestrate repeatable artifact detection for one or many input pairs.
-
-    Numerical feature extraction and classification remain standalone functions;
-    this class owns shared configuration, output orchestration, and batch error
-    handling.
-    """
-
-    def __init__(self, config: ArtifactDetectionConfig) -> None:
-        self.config = config
+        settings.update({key: value for key, value in overrides.items() if value is not None})
+        return cls(**settings)
 
     def process(
         self,
         fif_path: str | Path,
         sleep_parquet_path: str | Path,
         output_dir: str | Path | None = None,
-    ) -> ArtifactDetectionResult:
-        artifact_epochs, csv_path, parquet_path = detect_fif_artifacts(
+    ) -> dict[str, object]:
+        artifact_epochs, csv_path, parquet_path = _detect_fif_artifacts(
             fif_path,
             sleep_parquet_path,
             output_dir=output_dir,
-            **asdict(self.config),
+            detector=self,
         )
         n_epochs = len(artifact_epochs)
         n_artifacts = int(artifact_epochs["artifact"].sum())
-        return ArtifactDetectionResult(
-            fif_path=str(fif_path),
-            sleep_parquet_path=str(sleep_parquet_path),
-            status="written",
-            csv_path=str(csv_path),
-            parquet_path=str(parquet_path),
-            n_epochs=n_epochs,
-            n_artifact_epochs=n_artifacts,
-            artifact_fraction=n_artifacts / n_epochs if n_epochs else 0.0,
-        )
+        return {
+            "fif_path": str(fif_path),
+            "sleep_parquet_path": str(sleep_parquet_path),
+            "status": "written",
+            "csv_path": str(csv_path),
+            "parquet_path": str(parquet_path),
+            "n_epochs": n_epochs,
+            "n_artifact_epochs": n_artifacts,
+            "artifact_fraction": n_artifacts / n_epochs if n_epochs else 0.0,
+        }
 
     def process_many(
         self,
         pairs: list[tuple[str | Path, str | Path]],
         output_dir: str | Path | None = None,
         continue_on_error: bool = True,
-    ) -> list[ArtifactDetectionResult]:
+    ) -> list[dict[str, object]]:
         """Process pairs sequentially and optionally retain failures as results."""
         results = []
         for fif_path, sleep_parquet_path in pairs:
@@ -207,106 +196,14 @@ class ArtifactDetector:
                 if not continue_on_error:
                     raise
                 results.append(
-                    ArtifactDetectionResult(
-                        fif_path=str(fif_path),
-                        sleep_parquet_path=str(sleep_parquet_path),
-                        status="failed",
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
+                    {
+                        "fif_path": str(fif_path),
+                        "sleep_parquet_path": str(sleep_parquet_path),
+                        "status": "failed",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
                 )
         return results
-
-
-def _majority_state(values: pd.Series) -> Any:
-    modes = values.mode()
-    return modes.iloc[0] if not modes.empty else np.nan
-
-
-def align_sleep_states(
-    parquet_path: str | Path,
-    n_epochs: int,
-    epoch_seconds: float,
-    time_column: str,
-    state_column: str,
-    unscored_numeric_state: int,
-    unscored_text_state: str,
-) -> pd.DataFrame:
-    """Return one sleep-state row for every selected epoch."""
-    parquet_path = Path(parquet_path)
-    sleep_df = pd.read_parquet(parquet_path)
-    missing = {time_column, state_column}.difference(sleep_df.columns)
-    if missing:
-        raise ValueError(f"Sleep-scoring parquet is missing columns: {sorted(missing)}")
-
-    scores = sleep_df[[time_column, state_column]].dropna().copy()
-    scores = scores.loc[
-        (scores[time_column] >= 0)
-        & (scores[time_column] < n_epochs * epoch_seconds)
-    ].copy()
-    scores["epoch_id"] = np.floor(scores[time_column] / epoch_seconds).astype("int64")
-
-    epoch_states = scores.groupby("epoch_id", as_index=False).agg(
-        sleep_state=(state_column, _majority_state),
-        sleep_score_count=(state_column, "size"),
-    )
-    selected_epochs = pd.DataFrame({"epoch_id": np.arange(n_epochs, dtype=np.int64)})
-    epoch_states = selected_epochs.merge(epoch_states, on="epoch_id", how="left")
-
-    if pd.api.types.is_numeric_dtype(scores[state_column]):
-        unscored_state: int | str = unscored_numeric_state
-        epoch_states["sleep_state"] = pd.to_numeric(
-            epoch_states["sleep_state"]
-        ).fillna(unscored_state)
-    else:
-        unscored_state = unscored_text_state
-        epoch_states["sleep_state"] = (
-            epoch_states["sleep_state"].astype("string").fillna(unscored_state)
-        )
-    epoch_states["sleep_score_count"] = (
-        epoch_states["sleep_score_count"].fillna(0).astype(int)
-    )
-    return epoch_states
-
-
-def _bandpower(
-    psd: np.ndarray,
-    frequencies: np.ndarray,
-    low: float,
-    high: float,
-) -> np.ndarray:
-    mask = (frequencies >= low) & (frequencies <= high)
-    if mask.sum() < 2:
-        return np.full(psd.shape[:-1], np.nan)
-    return np.trapezoid(psd[..., mask], frequencies[mask], axis=-1)
-
-
-def choose_chunk_epochs(
-    sfreq: float,
-    epoch_seconds: float,
-    n_channels: int,
-    target_memory_mb: float,
-    working_array_factor: int,
-    max_chunk_epochs: int,
-) -> int:
-    """Choose an epoch chunk size from signal dimensions and a memory budget.
-
-    The working-array factor accounts for the input batch, cleaned copies,
-    derivatives, Welch PSD output, and temporary arrays used during extraction.
-    """
-    if any(value <= 0 for value in (
-        sfreq, epoch_seconds, n_channels, target_memory_mb,
-        working_array_factor, max_chunk_epochs,
-    )):
-        raise ValueError(
-            "sfreq, epoch_seconds, n_channels, and target_memory_mb must be positive."
-        )
-    epoch_samples = int(round(sfreq * epoch_seconds))
-    estimated_bytes_per_epoch = (
-        epoch_samples * n_channels * np.dtype(np.float64).itemsize
-        * working_array_factor
-    )
-    target_bytes = int(target_memory_mb * 1024**2)
-    return max(1, min(max_chunk_epochs, target_bytes // estimated_bytes_per_epoch))
 
 
 def extract_features(
@@ -355,8 +252,9 @@ def extract_features(
         epoch_count = last_epoch - first_epoch
 
         samples = eeg.get_data(start=start, stop=stop)
-        batch = samples.reshape(len(eeg.ch_names), epoch_count, epoch_samples)
-        batch = np.moveaxis(batch, 1, 0) * 1e6
+        batch = epoch_batch(
+            samples, epoch_count=epoch_count, epoch_samples=epoch_samples
+        ) * 1e6
         nonfinite = ~np.isfinite(batch).all(axis=-1)
         clean = np.nan_to_num(batch, nan=0.0, posinf=0.0, neginf=0.0)
         peak_to_peak = np.ptp(clean, axis=-1)
@@ -379,21 +277,22 @@ def extract_features(
             n_overlap=n_overlap,
             verbose=False,
         )
-        high_frequency_power = _bandpower(
+        high_frequency_power = bandpower(
             psd, frequencies, high_frequency_band_hz[0],
             min(high_frequency_band_hz[1], psd_fmax)
         )
-        line_noise_power = _bandpower(
+        line_noise_power = bandpower(
             psd, frequencies, line_noise_band_hz[0],
             min(line_noise_band_hz[1], psd_fmax)
         )
 
         if emg is not None:
             emg_samples = emg.get_data(start=start, stop=stop)
-            emg_batch = emg_samples.reshape(
-                len(emg.ch_names), epoch_count, epoch_samples
-            )
-            emg_batch = np.moveaxis(emg_batch, 1, 0) * 1e6
+            emg_batch = epoch_batch(
+                emg_samples,
+                epoch_count=epoch_count,
+                epoch_samples=epoch_samples,
+            ) * 1e6
             emg_nonfinite = ~np.isfinite(emg_batch).all(axis=-1)
             emg_clean = np.nan_to_num(
                 emg_batch, nan=0.0, posinf=0.0, neginf=0.0
@@ -455,21 +354,6 @@ def extract_features(
     )
 
 
-def _robust_upper_z(values: pd.Series, mad_scale: float) -> np.ndarray:
-    array = values.to_numpy(dtype=float)
-    transformed = np.log10(np.clip(array, np.finfo(float).tiny, None))
-    finite = np.isfinite(transformed)
-    result = np.full(transformed.shape, np.nan)
-    if not finite.any():
-        return result
-    median = np.median(transformed[finite])
-    mad = np.median(np.abs(transformed[finite] - median))
-    result[finite] = (
-        0.0 if mad == 0 else (transformed[finite] - median) / (mad_scale * mad)
-    )
-    return result
-
-
 def classify_artifacts(
     eeg_features: pd.DataFrame,
     emg_features: pd.DataFrame,
@@ -495,7 +379,9 @@ def classify_artifacts(
         for feature in EMG_SCORE_FEATURES:
             emg_features[f"z_{feature}"] = emg_features.groupby(
                 ["emg_channel", "sleep_state"]
-            )[feature].transform(lambda values: _robust_upper_z(values, robust_mad_scale))
+            )[feature].transform(
+                lambda values: robust_upper_z(values, robust_mad_scale)
+            )
         emg_z_columns = [f"z_{feature}" for feature in EMG_SCORE_FEATURES]
         emg_features["emg_soft_feature_count"] = (
             emg_features[emg_z_columns] > robust_z_threshold
@@ -528,7 +414,9 @@ def classify_artifacts(
     for feature in EEG_SCORE_FEATURES:
         eeg_features[f"z_{feature}"] = eeg_features.groupby(
             ["channel", "sleep_state"]
-        )[feature].transform(lambda values: _robust_upper_z(values, robust_mad_scale))
+        )[feature].transform(
+            lambda values: robust_upper_z(values, robust_mad_scale)
+        )
     z_columns = [f"z_{feature}" for feature in EEG_SCORE_FEATURES]
     eeg_features["soft_feature_count"] = (
         eeg_features[z_columns] > robust_z_threshold
@@ -603,50 +491,12 @@ def classify_artifacts(
     return artifact_epochs
 
 
-def output_paths(
-    sleep_parquet_path: str | Path,
-    remove_from_stem: str,
-    output_suffix: str,
-    output_dir: str | Path | None = None,
-) -> tuple[Path, Path]:
-    sleep_parquet_path = Path(sleep_parquet_path)
-    destination = Path(output_dir) if output_dir is not None else sleep_parquet_path.parent
-    stem = sleep_parquet_path.stem.replace(remove_from_stem, "").rstrip("_-")
-    return (
-        destination / f"{stem}_{output_suffix}.csv",
-        destination / f"{stem}_{output_suffix}.parquet",
-    )
-
-
-def detect_fif_artifacts(
+def _detect_fif_artifacts(
     fif_path: str | Path,
     sleep_parquet_path: str | Path,
     *,
-    epoch_seconds: float,
-    chunk_memory_mb: float,
-    chunk_working_array_factor: int,
-    max_chunk_epochs: int,
-    time_column: str,
-    state_column: str,
-    unscored_numeric_state: int,
-    unscored_text_state: str,
-    welch_segment_seconds: float,
-    psd_minimum_frequency_hz: float,
-    psd_maximum_frequency_hz: float,
-    high_frequency_band_hz: tuple[float, float],
-    line_noise_band_hz: tuple[float, float],
-    robust_z_threshold: float,
-    extreme_z_threshold: float,
-    min_std_uv: float,
-    max_edge_fraction: float,
-    robust_mad_scale: float,
-    soft_features_required: int,
-    emg_soft_features_required: int,
-    emg_supported_eeg_features_required: int,
-    remove_from_stem: str,
-    output_suffix: str,
+    detector: ArtifactDetector,
     output_dir: str | Path | None = None,
-    overwrite: bool = False,
 ) -> tuple[pd.DataFrame, Path, Path]:
     """Run detection and write epoch-level CSV and parquet outputs."""
     mne = import_mne()
@@ -660,69 +510,71 @@ def detect_fif_artifacts(
         raise FileNotFoundError(f"Sleep-scoring parquet not found: {sleep_parquet_path}")
     if sleep_parquet_path.suffix.lower() not in {".parquet", ".pq"}:
         raise ValueError(f"Expected a parquet sleep-scoring file: {sleep_parquet_path}")
-    if epoch_seconds <= 0 or chunk_memory_mb <= 0:
+    if detector.epoch_seconds <= 0 or detector.chunk_memory_mb <= 0:
         raise ValueError("epoch_seconds and chunk_memory_mb must be positive.")
 
-    csv_path, parquet_path = output_paths(
-        sleep_parquet_path, remove_from_stem, output_suffix, output_dir
+    csv_path, parquet_path = artifact_output_paths(
+        sleep_parquet_path,
+        remove_from_stem=detector.remove_from_stem,
+        output_suffix=detector.output_suffix,
+        output_dir=output_dir,
     )
     existing = [path for path in (csv_path, parquet_path) if path.exists()]
-    if existing and not overwrite:
+    if existing and not detector.overwrite:
         paths = ", ".join(str(path) for path in existing)
         raise FileExistsError(f"Output exists: {paths}. Pass --overwrite to replace it.")
 
     raw = mne.io.read_raw_fif(fif_path, preload=False, verbose="ERROR")
     sfreq = float(raw.info["sfreq"])
-    epoch_samples = int(round(epoch_seconds * sfreq))
-    total_complete_epochs = raw.n_times // epoch_samples
-    n_epochs = total_complete_epochs
+    n_epochs = complete_epoch_count(raw.n_times, sfreq, detector.epoch_seconds)
     if n_epochs == 0:
         raise ValueError("The recording does not contain one complete analysis epoch.")
 
     print(f"FIF: {fif_path}")
     print(f"Sleep scores: {sleep_parquet_path}")
     print(f"Analyzing all {n_epochs:,} complete epochs")
-    epoch_states = align_sleep_states(
-        sleep_parquet_path,
-        n_epochs,
-        epoch_seconds,
-        time_column,
-        state_column,
-        unscored_numeric_state,
-        unscored_text_state,
+    scores = pd.read_parquet(sleep_parquet_path)
+    epoch_states = align_epoch_states(
+        scores,
+        n_epochs=n_epochs,
+        epoch_seconds=detector.epoch_seconds,
+        time_column=detector.time_column,
+        state_column=detector.state_column,
+        unscored_numeric_state=detector.unscored_numeric_state,
+        unscored_text_state=detector.unscored_text_state,
     )
     eeg_features, emg_features, eeg_channels, emg_channels, chunk_epochs = extract_features(
         raw,
         n_epochs,
-        epoch_seconds,
-        chunk_memory_mb,
-        chunk_working_array_factor,
-        max_chunk_epochs,
-        welch_segment_seconds,
-        psd_minimum_frequency_hz,
-        psd_maximum_frequency_hz,
-        high_frequency_band_hz,
-        line_noise_band_hz,
+        detector.epoch_seconds,
+        detector.chunk_memory_mb,
+        detector.chunk_working_array_factor,
+        detector.max_chunk_epochs,
+        detector.welch_segment_seconds,
+        detector.psd_minimum_frequency_hz,
+        detector.psd_maximum_frequency_hz,
+        detector.high_frequency_band_hz,
+        detector.line_noise_band_hz,
     )
     print(f"EEG channels: {eeg_channels}")
     print(f"EMG channels: {emg_channels or 'none (EMG checks disabled)'}")
     print(
         f"Automatic chunk size: {chunk_epochs:,} epochs "
-        f"(target working memory: {chunk_memory_mb:g} MiB)"
+        f"(target working memory: {detector.chunk_memory_mb:g} MiB)"
     )
     artifact_epochs = classify_artifacts(
         eeg_features,
         emg_features,
         epoch_states,
         n_epochs,
-        robust_z_threshold,
-        extreme_z_threshold,
-        min_std_uv,
-        max_edge_fraction,
-        robust_mad_scale,
-        soft_features_required,
-        emg_soft_features_required,
-        emg_supported_eeg_features_required,
+        detector.robust_z_threshold,
+        detector.extreme_z_threshold,
+        detector.min_std_uv,
+        detector.max_edge_fraction,
+        detector.robust_mad_scale,
+        detector.soft_features_required,
+        detector.emg_soft_features_required,
+        detector.emg_supported_eeg_features_required,
     )
 
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -743,7 +595,9 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("fif_path", help="Input MNE FIF recording.")
-    parser.add_argument("sleep_parquet_path", help="Matching sleep-scoring parquet file.")
+    parser.add_argument(
+        "sleep_parquet_path", help="Matching sleep-scoring parquet file."
+    )
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
@@ -773,49 +627,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    config = load_config(args.config)
-    config_root = ("artifact_detection",)
-
-    def setting(path: tuple[str, ...]) -> Any:
-        value = nested_get(config, config_root + path)
-        if value is None:
-            raise ValueError(f"Missing artifact detection config value: {'.'.join(config_root + path)}")
-        return value
-
-    high_frequency_band = _two_float_tuple(
-        setting(("welch", "high_frequency_band_hz")), "high-frequency band"
+    detector = ArtifactDetector.from_yaml(
+        args.config,
+        epoch_seconds=args.epoch_seconds,
+        chunk_memory_mb=args.chunk_memory_mb,
+        time_column=args.time_column,
+        state_column=args.state_column,
+        robust_z_threshold=args.robust_z_threshold,
+        extreme_z_threshold=args.extreme_z_threshold,
+        min_std_uv=args.min_std_uv,
+        max_edge_fraction=args.max_edge_fraction,
+        overwrite=args.overwrite,
     )
-    line_noise_band = _two_float_tuple(
-        setting(("welch", "line_noise_band_hz")), "line-noise band"
-    )
-
-    detector_config = ArtifactDetectionConfig(
-        epoch_seconds=float(coalesce(args.epoch_seconds, setting(("epoch_seconds",)))),
-        chunk_memory_mb=float(coalesce(args.chunk_memory_mb, setting(("chunking", "target_memory_mb")))),
-        chunk_working_array_factor=int(setting(("chunking", "working_array_factor"))),
-        max_chunk_epochs=int(setting(("chunking", "max_chunk_epochs"))),
-        time_column=str(coalesce(args.time_column, setting(("sleep_scoring", "time_column")))),
-        state_column=str(coalesce(args.state_column, setting(("sleep_scoring", "state_column")))),
-        unscored_numeric_state=int(setting(("sleep_scoring", "unscored_numeric_state"))),
-        unscored_text_state=str(setting(("sleep_scoring", "unscored_text_state"))),
-        welch_segment_seconds=float(setting(("welch", "segment_seconds"))),
-        psd_minimum_frequency_hz=float(setting(("welch", "minimum_frequency_hz"))),
-        psd_maximum_frequency_hz=float(setting(("welch", "maximum_frequency_hz"))),
-        high_frequency_band_hz=high_frequency_band,
-        line_noise_band_hz=line_noise_band,
-        robust_z_threshold=float(coalesce(args.robust_z_threshold, setting(("thresholds", "robust_z")))),
-        extreme_z_threshold=float(coalesce(args.extreme_z_threshold, setting(("thresholds", "extreme_z")))),
-        min_std_uv=float(coalesce(args.min_std_uv, setting(("thresholds", "minimum_standard_deviation_uv")))),
-        max_edge_fraction=float(coalesce(args.max_edge_fraction, setting(("thresholds", "maximum_edge_fraction")))),
-        robust_mad_scale=float(setting(("thresholds", "robust_mad_scale"))),
-        soft_features_required=int(setting(("thresholds", "soft_features_required"))),
-        emg_soft_features_required=int(setting(("thresholds", "emg_soft_features_required"))),
-        emg_supported_eeg_features_required=int(setting(("thresholds", "emg_supported_eeg_features_required"))),
-        remove_from_stem=str(setting(("output", "remove_from_stem"))),
-        output_suffix=str(setting(("output", "suffix"))),
-        overwrite=bool(coalesce(args.overwrite, setting(("output", "overwrite")))),
-    )
-    detector = ArtifactDetector(detector_config)
     detector.process(args.fif_path, args.sleep_parquet_path, args.output_dir)
 
 
