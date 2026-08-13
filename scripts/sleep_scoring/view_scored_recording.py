@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 try:
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root, get_repo_root
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
     from scripts.utils.config import coalesce, load_config, nested_get
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root, get_repo_root
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
     from scripts.utils.config import coalesce, load_config, nested_get
 
 
@@ -134,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--show-artifacts",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Shade epochs flagged in the colocated artifact_epochs.parquet file.",
+        help="Shade epochs flagged in the session artifacts directory.",
     )
     ranges = parser.add_mutually_exclusive_group()
     ranges.add_argument(
@@ -294,22 +294,27 @@ def _downsample_signals(raw_signals: Any, source_hz: float, target_hz: float):
 
 
 def _artifact_file(recording: Any) -> Path:
-    """Resolve the artifact parquet written beside one scoring result."""
-    output_dir = Path(recording.output_dir)
-    exact = output_dir / f"{recording.edf_path.stem}_artifact_epochs.parquet"
-    if exact.is_file():
-        return exact
-    generic = output_dir / "artifact_epochs.parquet"
-    if generic.is_file():
-        return generic
-    matches = sorted(output_dir.glob("*artifact_epochs.parquet"))
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        raise ValueError(
-            f"Multiple artifact epoch files found in {output_dir}; expected {exact.name}"
-        )
-    raise FileNotFoundError(f"No artifact_epochs.parquet file found in {output_dir}")
+    """Resolve artifacts from the dedicated directory, with legacy fallback."""
+    scoring_dir = Path(recording.output_dir)
+    directories = (scoring_dir.parent / "artifacts", scoring_dir)
+    exact_name = f"{recording.edf_path.stem}_artifact_epochs.parquet"
+    for directory in directories:
+        exact = directory / exact_name
+        if exact.is_file():
+            return exact
+        generic = directory / "artifact_epochs.parquet"
+        if generic.is_file():
+            return generic
+        matches = sorted(directory.glob("*artifact_epochs.parquet"))
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f"Multiple artifact epoch files found in {directory}; "
+                f"expected {exact_name}"
+            )
+    searched = ", ".join(str(path) for path in directories)
+    raise FileNotFoundError(f"No artifact_epochs.parquet file found in {searched}")
 
 
 def _artifact_regions(

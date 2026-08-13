@@ -1,4 +1,4 @@
-"""Resolve, select, and inspect this repository's data-location profiles."""
+"""Resolve repository paths and machine-specific data locations."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from hypnose_helpers.io.paths import DataLocations
 
 
 def get_repo_root() -> Path:
+    """Return the root of this repository checkout."""
     return Path(__file__).resolve().parents[2]
 
 
@@ -19,15 +20,15 @@ _locations = DataLocations(
     env_prefix="HYPNOSE_EEG",
 )
 
-# Keep the project-facing API small while profile parsing, precedence rules,
-# caching, and validation remain owned by hypnose_helpers.
+# Profile parsing, precedence, caching, and validation remain owned by
+# hypnose_helpers; this module exposes only the repository-facing API.
 get_rawdata_root = _locations.get_rawdata_root
 get_derivatives_root = _locations.get_derivatives_root
 reload = _locations.reload
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the data-location profile selection command for this repository."""
+    """Run data-location profile selection for this repository."""
     forwarded = list(sys.argv[1:] if argv is None else argv)
     return locations_cli_main(
         [

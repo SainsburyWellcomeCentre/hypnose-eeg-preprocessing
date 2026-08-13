@@ -13,6 +13,7 @@ import pandas as pd
 
 from scripts.sleep_scoring.view_scored_recording import (
     ScoringViewSettings,
+    _artifact_file,
     _artifact_regions,
     _downsample_signals,
     _edf_contains_time,
@@ -26,6 +27,24 @@ from scripts.sleep_scoring.view_scored_recording import (
 
 
 class SleepScoringViewTests(unittest.TestCase):
+    def test_artifact_file_prefers_dedicated_session_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session_dir = Path(directory)
+            scoring_dir = session_dir / "saved_results"
+            artifact_dir = session_dir / "artifacts"
+            scoring_dir.mkdir()
+            artifact_dir.mkdir()
+            recording = types.SimpleNamespace(
+                output_dir=scoring_dir,
+                edf_path=Path("recording.edf"),
+            )
+            legacy = scoring_dir / "recording_artifact_epochs.parquet"
+            dedicated = artifact_dir / "recording_artifact_epochs.parquet"
+            legacy.touch()
+            dedicated.touch()
+
+            self.assertEqual(_artifact_file(recording), dedicated)
+
     def test_hours_are_parsed_and_validated(self) -> None:
         args = build_parser().parse_args(
             ["--subject", "66", "--date", "20260717", "--hours", "3", "6"]

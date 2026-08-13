@@ -210,7 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const=".",
         default=None,
-        help="Optionally save CSV reports in the shared session QC directory.",
+        help="Optionally save CSV reports in the session artifacts directory.",
     )
     return parser
 
@@ -268,9 +268,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         parser.error("--epoch-seconds must be a positive finite number")
 
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
-    from scripts.io.recording_paths import artifact_path, quality_control_output_path
+    from scripts.io.input_paths import artifact_path
+    from scripts.io.output_paths import artifact_output_path
 
     rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
     derivatives_root = Path(
@@ -294,7 +295,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         _print_report(report)
         if args.save_dir is not None:
-            save_dir = quality_control_output_path(
+            save_dir = artifact_output_path(
                 args.save_dir, edf_path, rawdata_root, derivatives_root
             )
             _save_report(report, save_dir, edf_path.stem)

@@ -1,1 +1,1 @@
-"""Recording discovery, configuration, and file-loading helpers."""
+"""Input discovery, output paths, repository locations, and file-loading helpers."""

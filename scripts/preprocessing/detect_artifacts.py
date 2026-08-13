@@ -6,8 +6,8 @@ outlier scores separately for every channel and sleep state. Hard signal failure
 (nonfinite data, flatlining, and clipping-like repeated edge values) remain
 state-independent.
 
-Only epoch-level results are written. Outputs default to the directory containing
-the sleep-scoring parquet file and are saved as both CSV and parquet. Tunable
+Only epoch-level results are written. Outputs default to the session's dedicated
+artifact directory and are saved as both CSV and parquet. Tunable
 detector settings and output naming rules are loaded from the pipeline YAML.
 ``ArtifactDetector`` reuses one immutable configuration for single-pair or
 sequential multi-pair processing while retaining failures as structured results.
@@ -28,7 +28,7 @@ try:
     from scripts.analysis.power_spectra import bandpower
     from scripts.analysis.statistics import robust_upper_z
     from scripts.io.mne_io import import_mne
-    from scripts.io.recording_paths import artifact_output_paths
+    from scripts.io.output_paths import artifact_output_paths
     from scripts.utils.config import load_config, nested_get, two_float_tuple
     from scripts.utils.epochs import (
         align_epoch_states,
@@ -41,7 +41,7 @@ except ModuleNotFoundError:
     from scripts.analysis.power_spectra import bandpower
     from scripts.analysis.statistics import robust_upper_z
     from scripts.io.mne_io import import_mne
-    from scripts.io.recording_paths import artifact_output_paths
+    from scripts.io.output_paths import artifact_output_paths
     from scripts.utils.config import load_config, nested_get, two_float_tuple
     from scripts.utils.epochs import (
         align_epoch_states,
@@ -619,7 +619,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory; defaults beside the sleep-scoring parquet.",
+        help=(
+            "Output directory; defaults to the session's dedicated artifacts "
+            "directory."
+        ),
     )
     parser.add_argument("--overwrite", action="store_true", default=None)
     return parser

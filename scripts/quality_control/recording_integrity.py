@@ -21,14 +21,14 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 try:
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
-    from scripts.io.recording_paths import quality_control_output_path
+    from scripts.io.output_paths import quality_control_output_path
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
-    from scripts.io.recording_paths import quality_control_output_path
+    from scripts.io.output_paths import quality_control_output_path
 
 
 GAP_ANNOTATION_TERMS = ("gap", "boundary", "discontinu", "dropout", "missing")

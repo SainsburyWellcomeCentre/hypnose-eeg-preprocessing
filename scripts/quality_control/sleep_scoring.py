@@ -12,14 +12,16 @@ import numpy as np
 import pandas as pd
 
 try:
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
-    from scripts.io.recording_paths import quality_control_output_path, scoring_path
+    from scripts.io.input_paths import scoring_path
+    from scripts.io.output_paths import sleep_scoring_output_path
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
     from scripts.utils.epochs import infer_epoch_seconds
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
-    from scripts.io.recording_paths import quality_control_output_path, scoring_path
+    from scripts.io.input_paths import scoring_path
+    from scripts.io.output_paths import sleep_scoring_output_path
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import select_recordings
     from scripts.utils.epochs import infer_epoch_seconds
 
@@ -159,14 +161,14 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="somnotate_scoring_epochs.csv",
         default=None,
-        help="Optionally save epoch output in the shared session QC directory.",
+        help="Optionally save epoch output in the session Somnotate directory.",
     )
     parser.add_argument(
         "--summary",
         nargs="?",
         const="somnotate_scoring_summary.csv",
         default=None,
-        help="Optionally save the state summary in the shared session QC directory.",
+        help="Optionally save the state summary in the session Somnotate directory.",
     )
     return parser
 
@@ -211,14 +213,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     _print_report(output, summary)
 
     if args.save is not None:
-        save_path = quality_control_output_path(
+        save_path = sleep_scoring_output_path(
             args.save, edf_path, rawdata_root, derivatives_root
         )
         save_path.parent.mkdir(parents=True, exist_ok=True)
         output.to_csv(save_path, index=False)
         print(f"Saved: {save_path}")
     if args.summary is not None:
-        summary_path = quality_control_output_path(
+        summary_path = sleep_scoring_output_path(
             args.summary, edf_path, rawdata_root, derivatives_root
         )
         summary_path.parent.mkdir(parents=True, exist_ok=True)

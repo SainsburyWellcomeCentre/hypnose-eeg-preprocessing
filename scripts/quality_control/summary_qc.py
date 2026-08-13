@@ -15,12 +15,9 @@ try:
     from scripts.analysis.correlation import compute_state_channel_correlations
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
-    from scripts.io.recording_paths import (
-        artifact_path,
-        quality_control_output_path,
-        scoring_path,
-    )
+    from scripts.io.input_paths import artifact_path, scoring_path
+    from scripts.io.output_paths import quality_control_output_path
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import check_pair, select_recordings
     from scripts.quality_control.artifacts import build_artifact_report
     from scripts.quality_control.sleep_scoring import prepare_scoring_output
@@ -30,12 +27,9 @@ except ModuleNotFoundError:
     from scripts.analysis.correlation import compute_state_channel_correlations
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra
-    from scripts.io.data_paths import get_derivatives_root, get_rawdata_root
-    from scripts.io.recording_paths import (
-        artifact_path,
-        quality_control_output_path,
-        scoring_path,
-    )
+    from scripts.io.input_paths import artifact_path, scoring_path
+    from scripts.io.output_paths import quality_control_output_path
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.quality_control.recording_integrity import check_pair, select_recordings
     from scripts.quality_control.artifacts import build_artifact_report
     from scripts.quality_control.sleep_scoring import prepare_scoring_output

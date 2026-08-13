@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from scripts.analysis.power_spectra import bandpower
-from scripts.io.recording_paths import artifact_output_paths
+from scripts.io.output_paths import artifact_output_paths
 from scripts.preprocessing.detect_artifacts import ArtifactDetector
 from scripts.utils.config import two_float_tuple
 from scripts.utils.epochs import align_epoch_states, complete_epoch_count, epoch_batch
@@ -69,10 +69,26 @@ class ArtifactDetectionTests(unittest.TestCase):
             remove_from_stem="somnotate_predictions",
             output_suffix="artifact_epochs",
         )
-        self.assertEqual(csv_path, Path("/results/sample_artifact_epochs.csv"))
         self.assertEqual(
-            parquet_path, Path("/results/sample_artifact_epochs.parquet")
+            csv_path, Path("/results/artifacts/sample_artifact_epochs.csv")
         )
+        self.assertEqual(
+            parquet_path,
+            Path("/results/artifacts/sample_artifact_epochs.parquet"),
+        )
+
+        csv_path, parquet_path = artifact_output_paths(
+            "/derivatives/sub-066/ses-1_date-20260717/saved_results/"
+            "sample_somnotate_predictions.parquet",
+            remove_from_stem="somnotate_predictions",
+            output_suffix="artifact_epochs",
+        )
+        expected = Path(
+            "/derivatives/sub-066/ses-1_date-20260717/artifacts/"
+            "sample_artifact_epochs"
+        )
+        self.assertEqual(csv_path, expected.with_suffix(".csv"))
+        self.assertEqual(parquet_path, expected.with_suffix(".parquet"))
 
 
 if __name__ == "__main__":

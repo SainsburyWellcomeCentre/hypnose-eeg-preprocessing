@@ -11,11 +11,15 @@ import pandas as pd
 from scripts.quality_control.spectra import build_parser, plot_state_emg_rms
 from scripts.analysis.emg import compute_state_emg_rms
 from scripts.analysis.power_spectra import compute_state_spectra
-from scripts.io.recording_paths import (
+from scripts.io.input_paths import (
     artifact_path,
-    quality_control_output_path,
     scoring_path,
     session_derivatives_dir,
+)
+from scripts.io.output_paths import (
+    artifact_output_path,
+    quality_control_output_path,
+    sleep_scoring_output_path,
 )
 from scripts.utils.epochs import artifact_epoch_ids, epoch_sleep_states
 
@@ -89,6 +93,20 @@ class SleepStateSpectraTests(unittest.TestCase):
                     "qc_summary.csv", edf, rawdata, derivatives
                 ),
                 saved.parent / "quality_control" / "qc_summary.csv",
+            )
+            self.assertEqual(
+                sleep_scoring_output_path(
+                    "somnotate_scoring_summary.csv", edf, rawdata, derivatives
+                ),
+                saved.parent
+                / "somnotate_sleep_scoring"
+                / "somnotate_scoring_summary.csv",
+            )
+            self.assertEqual(
+                artifact_output_path(
+                    "recording_artifact_report", edf, rawdata, derivatives
+                ),
+                saved.parent / "artifacts" / "recording_artifact_report",
             )
 
     def test_generic_artifact_filename_is_supported(self) -> None:

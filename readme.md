@@ -26,9 +26,9 @@ The shared profiles live in `configs/data_locations.yml`. Select a
 profile once for each checkout:
 
 ```bash
-python scripts/io/data_paths.py --list
-python scripts/io/data_paths.py server-linux   # or server-mac / server-windows
-python scripts/io/data_paths.py --show
+python scripts/io/repository_paths.py --list
+python scripts/io/repository_paths.py server-linux   # or server-mac / server-windows
+python scripts/io/repository_paths.py --show
 ```
 
 The selection is written to `configs/data_locations.local.yml`,
@@ -94,7 +94,7 @@ The report prints duration and percentage in Wake, NREM, REM, and Undefined,
 prediction-probability quantiles, and the number of signal epochs below the
 review threshold. Nothing is saved by default. Use `--save` for the enhanced
 epoch output or `--summary` for the state summary. Both are written beneath the
-shared derivatives session's `quality_control/` directory.
+shared derivatives session's `somnotate_sleep_scoring/` directory.
 
 Run every session-level quality-control section and obtain one analysis-readiness
 decision with a unified list of epochs requiring review:
@@ -114,9 +114,15 @@ limits determine review status for scoring, artifacts, and correlations. Review
 rows use start/end seconds from recording onset so results from one-second
 Somnotate epochs and the default four-second signal epochs can be combined safely.
 All thresholds have command-line overrides; run the command with `--help` for the
-complete list. Reports are only saved when their output options are supplied and
-default to `<derivatives>/<subject>/<session>/quality_control/`. A relative name
-is placed below that shared location; an absolute path is an explicit override.
+complete list. Reports are only saved when their output options are supplied.
+Outputs are separated beneath the shared derivatives session:
+
+- Somnotate scoring reports: `somnotate_sleep_scoring/`
+- Artifact detection and reports: `artifacts/`
+- Combined QC, integrity, spectra, and correlation reports: `quality_control/`
+
+A relative output name is placed below its corresponding directory; an absolute
+path is an explicit override.
 
 Visually inspect the raw signals and predicted states for one scored session:
 
@@ -141,8 +147,8 @@ python scripts/sleep_scoring/view_scored_recording.py \
 `--hours` and `--time-range` are mutually exclusive.
 
 For faster rendering, downsample the selected interval to 128 Hz. Artifact
-regions from the matching `*_artifact_epochs.parquet` beside the scoring output
-can also be shaded and labelled:
+regions from the matching `*_artifact_epochs.parquet` in the session's
+`artifacts/` directory can also be shaded and labelled:
 
 ```bash
 python scripts/sleep_scoring/view_scored_recording.py \
@@ -282,6 +288,6 @@ duration from `time_s`, and supports both `artifact_channels` and legacy
 channel-prefixed `artifact_features`. EMG-supported artifact epochs are reported
 as `EMG (combined)` when the stored reason identifies an EMG-supported EEG
 outlier. Nothing is saved by default; add `--save-dir` to write separate overall,
-hourly, and sleep-state CSV tables to the shared session QC directory. Use
+hourly, and sleep-state CSV tables to the shared session `artifacts/` directory. Use
 `--epoch-seconds` only when the duration cannot be
 reliably inferred from the artifact file.
