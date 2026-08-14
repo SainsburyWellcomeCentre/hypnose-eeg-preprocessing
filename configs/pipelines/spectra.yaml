@@ -1,0 +1,38 @@
+name: sleep_state_spectral_quality
+
+spectra:
+  analysis:
+    epoch_seconds: 4.0
+    welch_seconds: 2.0
+    minimum_frequency_hz: 0.5
+    maximum_frequency_hz: 55.0
+    chunk_epochs: 512
+    include_artifacts: false
+
+  frequency_bands_hz:
+    delta: [0.5, 4.0]
+    theta: [4.0, 10.0]
+    alpha: [8.0, 12.0]
+    beta: [12.0, 30.0]
+
+  sleep_states:
+    wake:
+      code: 0
+      label: "Wake"
+      color: "red"
+    nrem:
+      code: 1
+      label: "NREM"
+      color: "royalblue"
+    rem:
+      code: 2
+      label: "REM"
+      color: "goldenrod"
+
+  quality:
+    determining_eeg_channel_number: 1
+    wake_delta_max_nrem_ratio: 1.0
+    nrem_delta_min_wake_ratio: 1.0
+    nrem_delta_min_rem_ratio: 1.0
+    rem_theta_delta_min_nrem_ratio: 1.0
+    emg_state_order: [0, 1, 2]

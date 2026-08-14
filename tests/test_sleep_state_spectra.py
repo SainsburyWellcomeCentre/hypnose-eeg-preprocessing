@@ -9,8 +9,10 @@ import numpy as np
 import pandas as pd
 
 from scripts.quality_control.spectra import (
+    DEFAULT_CONFIG_PATH,
     build_parser,
     build_spectral_quality_report,
+    load_spectra_config,
     plot_state_emg_rms,
 )
 from scripts.analysis.emg import compute_state_emg_rms
@@ -29,6 +31,13 @@ from scripts.utils.epochs import artifact_epoch_ids, epoch_sleep_states
 
 
 class SleepStateSpectraTests(unittest.TestCase):
+    def test_spectral_definitions_are_loaded_from_pipeline_config(self) -> None:
+        config = load_spectra_config(DEFAULT_CONFIG_PATH)
+
+        self.assertEqual(config.frequency_bands_hz["theta"], (4.0, 10.0))
+        self.assertEqual(config.determining_eeg_channel_number, 1)
+        self.assertEqual(config.emg_state_order, (0, 1, 2))
+
     def test_quality_report_checks_expected_sleep_state_patterns(self) -> None:
         frequencies = np.array(
             [0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 20, 25, 30],
@@ -51,15 +60,15 @@ class SleepStateSpectraTests(unittest.TestCase):
                 2: np.array([[1.0], [1.5]]),
             },
             ["EMG"],
-        ).set_index("sleep_state")
+        ).set_index(["sleep_state", "eeg_channel"])
 
-        self.assertEqual(report.loc["Wake", "quality_status"], "PASS")
-        self.assertEqual(report.loc["NREM", "quality_status"], "PASS")
-        self.assertEqual(report.loc["REM", "quality_status"], "PASS")
+        self.assertEqual(report.loc[("Wake", "EEG1"), "quality_status"], "PASS")
+        self.assertEqual(report.loc[("NREM", "EEG1"), "quality_status"], "PASS")
+        self.assertEqual(report.loc[("REM", "EEG1"), "quality_status"], "PASS")
         self.assertTrue(report["frequency_expectation_met"].all())
         self.assertTrue(report["emg_expectation_met"].all())
-        self.assertEqual(report.loc["Wake", "emg_rms_median_uv"], 3.5)
-        self.assertEqual(report.loc["Wake", "eeg_epoch_count"], 10)
+        self.assertEqual(report.loc[("Wake", "EEG1"), "emg_rms_median_uv"], 3.5)
+        self.assertEqual(report.loc[("Wake", "EEG1"), "eeg_epoch_count"], 10)
         self.assertTrue((report["recording_quality_status"] == "PASS").all())
 
     def test_invalid_spectrum_fails_quality_report(self) -> None:
@@ -79,6 +88,35 @@ class SleepStateSpectraTests(unittest.TestCase):
         self.assertEqual(report.loc["NREM", "spectral_quality_status"], "FAIL")
         self.assertEqual(report.loc["REM", "spectral_quality_status"], "REVIEW")
         self.assertTrue((report["recording_quality_status"] == "FAIL").all())
+
+    def test_only_first_eeg_channel_determines_recording_status(self) -> None:
+        frequencies = np.arange(0.5, 30.5, 0.5)
+        wake = np.ones((2, len(frequencies)))
+        nrem = np.ones((2, len(frequencies)))
+        rem = np.ones((2, len(frequencies)))
+        nrem[0, frequencies <= 4] = 8.0
+        rem[0, (frequencies >= 4) & (frequencies <= 8)] = 8.0
+        wake[1] = np.nan
+        nrem[1] = np.nan
+        rem[1] = np.nan
+        report = build_spectral_quality_report(
+            frequencies,
+            {0: wake, 1: nrem, 2: rem},
+            {0: 5, 1: 5, 2: 5},
+            ["EEG1", "EEG2"],
+            {
+                0: np.array([[3.0]]),
+                1: np.array([[2.0]]),
+                2: np.array([[1.0]]),
+            },
+            ["EMG"],
+        )
+
+        channel_1 = report.loc[report["eeg_channel"] == "EEG1"]
+        channel_2 = report.loc[report["eeg_channel"] == "EEG2"]
+        self.assertTrue((channel_1["quality_status"] == "PASS").all())
+        self.assertTrue((channel_2["spectral_quality_status"] == "FAIL").all())
+        self.assertTrue((report["recording_quality_status"] == "PASS").all())
 
     def test_spectrum_computation_is_available_from_analysis(self) -> None:
         self.assertTrue(callable(compute_state_spectra))

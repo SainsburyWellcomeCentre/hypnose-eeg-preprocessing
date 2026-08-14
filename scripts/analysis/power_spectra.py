@@ -15,7 +15,7 @@ from scripts.utils.epochs import (
 )
 
 
-def bandpower(
+def integrated_power(
     psd: np.ndarray,
     frequencies: np.ndarray,
     low_hz: float,
@@ -26,6 +26,16 @@ def bandpower(
     if mask.sum() < 2:
         return np.full(psd.shape[:-1], np.nan)
     return np.trapz(psd[..., mask], frequencies[mask], axis=-1)
+
+
+def bandpower(
+    psd: np.ndarray,
+    frequencies: np.ndarray,
+    low_hz: float,
+    high_hz: float,
+) -> np.ndarray:
+    """Backward-compatible name for integrated spectral power."""
+    return integrated_power(psd, frequencies, low_hz, high_hz)
 
 
 def compute_state_spectra(

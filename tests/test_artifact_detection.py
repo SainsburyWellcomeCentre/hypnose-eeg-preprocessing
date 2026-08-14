@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.analysis.power_spectra import bandpower
+from scripts.analysis.power_spectra import bandpower, integrated_power
 from scripts.io.output_paths import artifact_output_paths
 from scripts.preprocessing.detect_artifacts import ArtifactDetector
 from scripts.utils.config import two_float_tuple
@@ -63,6 +63,9 @@ class ArtifactDetectionTests(unittest.TestCase):
         frequencies = np.array([0.0, 1.0, 2.0, 3.0])
         psd = np.ones((2, 4))
         np.testing.assert_allclose(bandpower(psd, frequencies, 1.0, 3.0), 2.0)
+        np.testing.assert_allclose(
+            integrated_power(psd, frequencies, 1.0, 3.0), 2.0
+        )
 
         csv_path, parquet_path = artifact_output_paths(
             "/results/sample_somnotate_predictions.parquet",

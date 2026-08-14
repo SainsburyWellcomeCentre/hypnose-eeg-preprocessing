@@ -238,12 +238,16 @@ automatically when an `*_artifact_epochs.parquet` file is available; use
 figure style. When saved, the EEG and EMG figures are provenance-tagged PDFs
 named with the `_sleep_state_power_spectra` and `_sleep_state_emg_rms` labels,
 respectively. Saving also writes a `_sleep_state_spectral_quality.csv` report
-with one row per sleep state. It includes analyzable EEG/EMG epoch counts,
-relative delta (0.5–4 Hz), theta (4–8 Hz), alpha (8–12 Hz), and beta
+with one row per sleep state and EEG channel. It includes analyzable EEG/EMG epoch counts,
+relative delta (0.5–4 Hz), theta (4–10 Hz), alpha (8–12 Hz), and beta
 (12–30 Hz) power, EMG RMS distribution statistics, state quality status, and
-the worst-state overall recording status. The physiological review checks expect
-Wake beta power to exceed NREM, NREM delta power to exceed Wake and REM, REM's
-theta/delta ratio to exceed NREM, and EMG RMS to follow Wake ≥ NREM ≥ REM.
+the overall recording status. Wake delta power must be lower than NREM, NREM
+delta power must exceed Wake and REM, REM's theta/delta ratio must exceed NREM,
+and EMG RMS should follow Wake ≥ NREM ≥ REM. Every EEG channel is reported, but
+only the first EEG channel determines the overall recording status.
+These definitions, analysis defaults, comparison ratios, sleep-state display
+labels/colors, EMG ordering, and the determining channel are configured in
+`configs/pipelines/spectra.yaml` and can be overridden with `--config`.
 
 Save plots without opening an interactive window with:
 
