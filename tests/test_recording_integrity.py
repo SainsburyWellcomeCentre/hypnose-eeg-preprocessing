@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from scripts.quality_control.recording_integrity import (
+from scripts.qc.recording_integrity import (
     Gap,
     _format_gap,
     _source_stem_from_fif,
@@ -59,7 +59,7 @@ class RecordingIntegrityTests(unittest.TestCase):
             )
         )
         with patch(
-            "scripts.quality_control.recording_integrity.import_mne",
+            "scripts.qc.recording_integrity.import_mne",
             return_value=fake_mne,
         ):
             result, gaps = check_pair(

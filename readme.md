@@ -86,10 +86,10 @@ Inspect the stored Somnotate predictions and their per-state probabilities for
 one session without loading the EDF or rerunning the model:
 
 ```bash
-python scripts/quality_control/sleep_scoring.py \
+python scripts/qc/sleep_scoring.py \
   --subject 66 --session 1
 
-python scripts/quality_control/sleep_scoring.py \
+python scripts/qc/sleep_scoring.py \
   --subject 66 --date 20260717 --confidence-threshold 0.80
 ```
 
@@ -103,21 +103,27 @@ Run every session-level quality-control section and obtain one analysis-readines
 decision with a unified list of epochs requiring review:
 
 ```bash
-python scripts/quality_control/summary_qc.py \
+python scripts/qc/summary_qc.py \
   --subject 66 --session 1 \
   --summary \
   --review-epochs
 ```
 
+`--review-epochs` writes both `qc_review_epochs.csv` and
+`qc_review_epochs.parquet`; the parquet copy provides typed, machine-readable
+review intervals for downstream processing.
+
 The command checks EDF/FIF integrity and gaps, Somnotate confidence and undefined
 epochs, artifact burden, EEG/EMG channel correlation, sleep-state power spectra,
-and EMG RMS availability. Results are `PASS`, `REVIEW`, or `FAIL`. A duration
-mismatch or invalid spectral result fails the recording; configurable percentage
-limits determine review status for scoring, artifacts, and correlations. Review
-rows use start/end seconds from recording onset so results from one-second
-Somnotate epochs and the default four-second signal epochs can be combined safely.
-All thresholds have command-line overrides; run the command with `--help` for the
-complete list. Reports are only saved when their output options are supplied.
+and EMG RMS. Results are `PASS`, `REVIEW`, or `FAIL`. The power-spectra and EMG
+sections use the frequency bands, state expectations, RMS ordering, and determining
+EEG channel defined in `configs/pipelines/spectra.yaml`; select another definition
+file with `--spectra-config`. A duration mismatch or invalid spectral result fails
+the recording, while configurable percentage limits determine review status for
+scoring, artifacts, and correlations. Review rows use start/end seconds from
+recording onset so results from one-second Somnotate epochs and the default
+four-second signal epochs can be combined safely. Run the command with `--help`
+for the complete list. Reports are only saved when their output options are supplied.
 Outputs are separated beneath the shared derivatives session:
 
 - Somnotate predictions and scoring reports: `sleep_scoring/`
@@ -179,10 +185,10 @@ either session date or session number; rawdata and derivatives paths are resolve
 automatically:
 
 ```bash
-python scripts/quality_control/recording_integrity.py \
+python scripts/qc/recording_integrity.py \
   --subject 66 --date 20260717
 
-python scripts/quality_control/recording_integrity.py \
+python scripts/qc/recording_integrity.py \
   --subject 66 --session 1
 ```
 
@@ -190,7 +196,7 @@ Compare one raw EDF with its derivative FIF, scanning only the EDF for gaps and
 opening the FIF only for duration metadata:
 
 ```bash
-python scripts/quality_control/recording_integrity.py \
+python scripts/qc/recording_integrity.py \
   --edf /path/to/rawdata/session/recording.edf \
   --fif /path/to/derivatives/session/recording_resampled-128hz_raw.fif
 ```
@@ -200,7 +206,7 @@ rawdata and derivatives roots. Use `--edf-pattern` and `--fif-pattern` to narrow
 the batch selection:
 
 ```bash
-python scripts/quality_control/recording_integrity.py \
+python scripts/qc/recording_integrity.py \
   --edf-pattern "sub-066/**/*.edf" \
   --fif-pattern "sub-066/**/*_raw.fif"
 ```
@@ -220,10 +226,10 @@ Plot the mean EEG power spectral density for Wake, NREM, and REM for one
 subject and either a session date or session number:
 
 ```bash
-python scripts/quality_control/spectra.py \
+python scripts/qc/spectra.py \
   --subject 66 --date 20260717
 
-python scripts/quality_control/spectra.py \
+python scripts/qc/spectra.py \
   --subject 66 --session 1
 ```
 
@@ -252,7 +258,7 @@ labels/colors, EMG ordering, and the determining channel are configured in
 Save plots without opening an interactive window with:
 
 ```bash
-python scripts/quality_control/spectra.py \
+python scripts/qc/spectra.py \
   --subject 66 --date 20260717 \
   --save-dir --no-show
 ```
@@ -266,10 +272,10 @@ Plot the distribution of epoch-wise Pearson correlation for every EEG/EMG
 channel pair, separated into Wake, NREM, and REM:
 
 ```bash
-python scripts/quality_control/channel_correlations.py \
+python scripts/qc/channel_correlations.py \
   --subject 66 --date 20260717
 
-python scripts/quality_control/channel_correlations.py \
+python scripts/qc/channel_correlations.py \
   --subject 66 --session 1
 ```
 
@@ -292,10 +298,10 @@ Report artifact counts, duration, percentage per recording hour, sleep-state
 breakdown, and longest contiguous artifact period separately by channel:
 
 ```bash
-python scripts/quality_control/artifacts.py \
+python scripts/qc/artifacts.py \
   --subject 66 --date 20260717
 
-python scripts/quality_control/artifacts.py \
+python scripts/qc/artifacts.py \
   --subject 66 --session 1
 ```
 

@@ -43,7 +43,7 @@ class ArtifactReport:
     sleep_state: pd.DataFrame
 
 
-def _channels_from_row(row: pd.Series) -> list[str]:
+def channels_from_row(row: pd.Series) -> list[str]:
     channels: list[str] = []
     explicit = row.get("artifact_channels")
     features = row.get("artifact_features")
@@ -77,7 +77,7 @@ def expand_artifact_channels(artifact_epochs: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     flagged = artifact_epochs.loc[artifact_epochs["artifact"].astype(bool)]
     for _, row in flagged.iterrows():
-        for channel in _channels_from_row(row):
+        for channel in channels_from_row(row):
             rows.append(
                 {
                     "epoch_id": int(row["epoch_id"]),
@@ -269,7 +269,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--epoch-seconds must be a positive finite number")
 
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.quality_control.recording_integrity import select_recordings
+    from scripts.qc.recording_integrity import select_recordings
     from scripts.io.input_paths import artifact_path
     from scripts.io.output_paths import artifact_output_path
 

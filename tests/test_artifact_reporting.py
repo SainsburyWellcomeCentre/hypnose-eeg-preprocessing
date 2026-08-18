@@ -4,8 +4,8 @@ import unittest
 
 import pandas as pd
 
-from scripts.quality_control.artifacts import build_parser
-from scripts.quality_control.artifacts import build_artifact_report
+from scripts.qc.artifacts import build_parser
+from scripts.qc.artifacts import build_artifact_report
 
 
 class ArtifactReportingTests(unittest.TestCase):

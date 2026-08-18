@@ -19,7 +19,7 @@ try:
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.quality_control.recording_integrity import select_recordings
+    from scripts.qc.recording_integrity import select_recordings
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra, integrated_power
     from scripts.utils.config import load_config, nested_get, two_float_tuple
@@ -28,7 +28,7 @@ except ModuleNotFoundError:
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.quality_control.recording_integrity import select_recordings
+    from scripts.qc.recording_integrity import select_recordings
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra, integrated_power
     from scripts.utils.config import load_config, nested_get, two_float_tuple

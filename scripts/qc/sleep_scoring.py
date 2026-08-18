@@ -15,14 +15,14 @@ try:
     from scripts.io.input_paths import scoring_path
     from scripts.io.output_paths import sleep_scoring_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.quality_control.recording_integrity import select_recordings
+    from scripts.qc.recording_integrity import select_recordings
     from scripts.utils.epochs import infer_epoch_seconds
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.input_paths import scoring_path
     from scripts.io.output_paths import sleep_scoring_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.quality_control.recording_integrity import select_recordings
+    from scripts.qc.recording_integrity import select_recordings
     from scripts.utils.epochs import infer_epoch_seconds
 
 

@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from scripts.quality_control.sleep_scoring import (
+from scripts.qc.sleep_scoring import (
     build_parser,
     prepare_scoring_output,
     scoring_summary,

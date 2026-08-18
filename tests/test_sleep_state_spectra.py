@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.quality_control.spectra import (
+from scripts.qc.spectra import (
     DEFAULT_CONFIG_PATH,
     build_parser,
     build_spectral_quality_report,

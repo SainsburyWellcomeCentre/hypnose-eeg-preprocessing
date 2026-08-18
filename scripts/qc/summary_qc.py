@@ -18,9 +18,15 @@ try:
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.quality_control.recording_integrity import check_pair, select_recordings
-    from scripts.quality_control.artifacts import build_artifact_report
-    from scripts.quality_control.sleep_scoring import prepare_scoring_output
+    from scripts.qc.recording_integrity import check_pair, select_recordings
+    from scripts.qc.artifacts import build_artifact_report, channels_from_row
+    from scripts.qc.sleep_scoring import prepare_scoring_output
+    from scripts.qc.spectra import (
+        DEFAULT_CONFIG_PATH as DEFAULT_SPECTRA_CONFIG_PATH,
+        SpectraConfig,
+        build_spectral_quality_report,
+        load_spectra_config,
+    )
     from scripts.utils.epochs import infer_epoch_seconds
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -30,13 +36,18 @@ except ModuleNotFoundError:
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.quality_control.recording_integrity import check_pair, select_recordings
-    from scripts.quality_control.artifacts import build_artifact_report
-    from scripts.quality_control.sleep_scoring import prepare_scoring_output
+    from scripts.qc.recording_integrity import check_pair, select_recordings
+    from scripts.qc.artifacts import build_artifact_report, channels_from_row
+    from scripts.qc.sleep_scoring import prepare_scoring_output
+    from scripts.qc.spectra import (
+        DEFAULT_CONFIG_PATH as DEFAULT_SPECTRA_CONFIG_PATH,
+        SpectraConfig,
+        build_spectral_quality_report,
+        load_spectra_config,
+    )
     from scripts.utils.epochs import infer_epoch_seconds
 
 
-STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM"}
 STATUS_ORDER = {"pass": 0, "review": 1, "fail": 2}
 SECTION_COLUMNS = ["section", "status", "metric", "value", "threshold", "detail"]
 REVIEW_COLUMNS = [
@@ -61,6 +72,66 @@ def overall_status(sections: pd.DataFrame) -> str:
         sections["status"].astype(str),
         key=lambda status: STATUS_ORDER.get(status, STATUS_ORDER["fail"]),
     )
+
+
+def spectral_quality_sections(
+    quality_report: pd.DataFrame,
+    config: SpectraConfig,
+) -> list[dict[str, object]]:
+    """Convert the configured determining-channel results into QC sections."""
+    determining = quality_report.loc[quality_report["determines_recording_quality"]]
+    if determining.empty:
+        raise ValueError("Spectral quality report has no determining EEG channel")
+
+    spectral_status = max(
+        determining["spectral_quality_status"].str.lower(),
+        key=lambda status: STATUS_ORDER[status],
+    )
+    emg_status = max(
+        determining["emg_quality_status"].str.lower(),
+        key=lambda status: STATUS_ORDER[status],
+    )
+    spectral_passes = int(determining["frequency_expectation_met"].sum())
+    emg_passes = int(determining["emg_expectation_met"].sum())
+    state_count = len(determining)
+    channel_name = str(determining["eeg_channel"].iloc[0])
+    thresholds = (
+        f"wake_delta<nrem×{config.wake_delta_max_nrem_ratio:g}; "
+        f"nrem_delta>wake×{config.nrem_delta_min_wake_ratio:g}, "
+        f"rem×{config.nrem_delta_min_rem_ratio:g}; "
+        f"rem_theta/delta>nrem×{config.rem_theta_delta_min_nrem_ratio:g}"
+    )
+    return [
+        {
+            "section": "power_spectra",
+            "status": spectral_status,
+            "metric": "configured_state_band_expectations_met",
+            "value": f"{spectral_passes}/{state_count}",
+            "threshold": thresholds,
+            "detail": (
+                f"determining EEG channel {config.determining_eeg_channel_number}="
+                f"{channel_name}; "
+                + "; ".join(
+                    f"{row.sleep_state}={str(row.spectral_quality_status).lower()}"
+                    for row in determining.itertuples(index=False)
+                )
+            ),
+        },
+        {
+            "section": "emg_rms",
+            "status": emg_status,
+            "metric": "configured_state_emg_order_met",
+            "value": f"{emg_passes}/{state_count}",
+            "threshold": ">=".join(
+                config.state_names[state] for state in config.emg_state_order
+            ),
+            "detail": "; ".join(
+                f"{row.sleep_state} median={row.emg_rms_median_uv:g} µV, "
+                f"status={str(row.emg_quality_status).lower()}"
+                for row in determining.itertuples(index=False)
+            ),
+        },
+    ]
 
 
 def _section(
@@ -133,29 +204,47 @@ def _validate_fraction(parser: argparse.ArgumentParser, name: str, value: float)
         parser.error(f"{name} must be between 0 and 100")
 
 
+def review_output_paths(requested: str | Path) -> tuple[Path, Path]:
+    """Return paired CSV and parquet paths for a requested review output."""
+    path = Path(requested)
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        return path, path.with_suffix(".parquet")
+    if suffix in {".parquet", ".pq"}:
+        return path.with_suffix(".csv"), path.with_suffix(".parquet")
+    return path.with_suffix(".csv"), path.with_suffix(".parquet")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--spectra-config",
+        default=str(DEFAULT_SPECTRA_CONFIG_PATH),
+        help=f"Spectral quality YAML (default: {DEFAULT_SPECTRA_CONFIG_PATH}).",
+    )
     parser.add_argument("--subject", "--subjid", dest="subject", required=True)
     selector = parser.add_mutually_exclusive_group(required=True)
     selector.add_argument("--date", help="Session date: YYYYMMDD.")
     selector.add_argument("--session", help="Session number, for example 1 or ses-1.")
     parser.add_argument("--rawdata-root", default=None)
     parser.add_argument("--derivatives-root", default=None)
-    parser.add_argument("--analysis-epoch-seconds", type=float, default=4.0)
-    parser.add_argument("--chunk-epochs", type=int, default=512)
+    parser.add_argument("--analysis-epoch-seconds", type=float, default=None)
+    parser.add_argument("--chunk-epochs", type=int, default=None)
     parser.add_argument("--duration-tolerance", type=float, default=1.0)
     parser.add_argument("--min-gap", type=float, default=1.0)
     parser.add_argument("--gap-scan-chunk-seconds", type=float, default=1800.0)
+    parser.add_argument("--max-gap-percent", type=float, default=1.0)
+    parser.add_argument("--max-longest-gap", type=float, default=600.0)
     parser.add_argument("--confidence-threshold", type=float, default=0.80)
     parser.add_argument("--max-low-confidence-percent", type=float, default=10.0)
     parser.add_argument("--max-undefined-percent", type=float, default=5.0)
-    parser.add_argument("--max-artifact-percent", type=float, default=20.0)
+    parser.add_argument("--max-artifact-percent", type=float, default=5.0)
     parser.add_argument("--eeg-eeg-threshold", type=float, default=0.90)
     parser.add_argument("--eeg-emg-threshold", type=float, default=0.50)
-    parser.add_argument("--max-correlation-review-percent", type=float, default=5.0)
-    parser.add_argument("--welch-seconds", type=float, default=2.0)
-    parser.add_argument("--fmin", type=float, default=0.5)
-    parser.add_argument("--fmax", type=float, default=55.0)
+    parser.add_argument("--max-correlation-review-percent", type=float, default=2.0)
+    parser.add_argument("--welch-seconds", type=float, default=None)
+    parser.add_argument("--fmin", type=float, default=None)
+    parser.add_argument("--fmax", type=float, default=None)
     parser.add_argument(
         "--summary",
         nargs="?",
@@ -168,7 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="qc_review_epochs.csv",
         default=None,
-        help="Optionally save review ranges in the shared session QC directory.",
+        help="Optionally save review ranges as paired CSV and parquet files.",
     )
     return parser
 
@@ -179,6 +268,7 @@ def run_qc(
     scoring_file: Path,
     artifact_file: Path,
     args: argparse.Namespace,
+    spectra_config: SpectraConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run all QC sections for one recording and return summary/review tables."""
     sections: list[dict[str, object]] = []
@@ -190,9 +280,11 @@ def run_qc(
         duration_tolerance_s=args.duration_tolerance,
         min_gap_s=args.min_gap,
         chunk_duration_s=args.gap_scan_chunk_seconds,
+        max_gap_percent=args.max_gap_percent,
+        max_longest_gap_s=args.max_longest_gap,
     )
     duration_ok = abs(integrity.edf_fif_difference_s) <= args.duration_tolerance
-    integrity_status = "fail" if not duration_ok else ("review" if gaps else "pass")
+    integrity_status = "fail" if not duration_ok else integrity.status
     _section(
         sections,
         "recording_integrity",
@@ -200,7 +292,9 @@ def run_qc(
         "edf_fif_duration_difference_s",
         integrity.edf_fif_difference_s,
         args.duration_tolerance,
-        f"{len(gaps)} gap(s) detected",
+        f"{len(gaps)} gap(s) detected ({integrity.edf_gap_total_s:.1f}s total, "
+        f"{integrity.edf_gap_percent:.2f}% of recording, "
+        f"longest {integrity.edf_longest_gap_s:.1f}s)",
     )
     for gap in gaps:
         _review(
@@ -279,16 +373,17 @@ def run_qc(
         f"{int(flagged.sum())} flagged epochs ({artifact_percent:.2f}% overall)",
     )
     for _, row in artifact_epochs.loc[flagged].iterrows():
+        channels = channels_from_row(row)
         _review(
             reviews,
             section="artifacts",
             start_s=float(row["time_s"]),
             end_s=float(row["time_s"]) + artifact_report.epoch_seconds,
-            sleep_state=row.get("sleep_state", ""),
-            channels=str(row.get("artifact_channels", "")),
+            sleep_state=str(row.get("sleep_state", "")),
+            channels="; ".join(channels),
             metric="artifact",
-            value=True,
-            threshold="flagged",
+            value=1.0,
+            threshold=1.0,
             reason=str(row.get("artifact_features", "artifact detector flag")),
         )
 
@@ -336,7 +431,9 @@ def run_qc(
             section="channel_correlation",
             start_s=float(row.time_s),
             end_s=float(row.time_s) + args.analysis_epoch_seconds,
-            sleep_state=STATE_NAMES.get(int(row.sleep_state), row.sleep_state),
+            sleep_state=str(
+                spectra_config.state_names.get(int(row.sleep_state), row.sleep_state)
+            ),
             channels=f"{row.channel_1} ↔ {row.channel_2}",
             metric="absolute_pearson_r",
             value=abs(float(row.pearson_r)),
@@ -347,51 +444,35 @@ def run_qc(
     frequencies, spectra, counts, eeg_channels = compute_state_spectra(
         fif_path,
         scoring_file,
-        artifact_path=artifact_file,
+        artifact_path=(
+            None if spectra_config.include_artifacts else artifact_file
+        ),
         epoch_seconds=args.analysis_epoch_seconds,
         welch_seconds=args.welch_seconds,
         fmin_hz=args.fmin,
         fmax_hz=args.fmax,
         chunk_epochs=args.chunk_epochs,
     )
-    finite_spectra = bool(len(frequencies)) and all(
-        np.all(np.isfinite(spectrum)) for spectrum in spectra.values()
-    )
-    missing_states = [STATE_NAMES[state] for state, count in counts.items() if count == 0]
-    spectral_status = "fail" if not finite_spectra else ("review" if missing_states else "pass")
-    _section(
-        sections,
-        "power_spectra",
-        spectral_status,
-        "finite_state_spectra",
-        finite_spectra,
-        True,
-        f"EEG channels={eeg_channels}; missing states={missing_states or 'none'}",
-    )
 
     emg_rms, emg_channels = compute_state_emg_rms(
         fif_path,
         scoring_file,
-        artifact_path=artifact_file,
+        artifact_path=(
+            None if spectra_config.include_artifacts else artifact_file
+        ),
         epoch_seconds=args.analysis_epoch_seconds,
         chunk_epochs=args.chunk_epochs,
     )
-    finite_emg = bool(emg_channels and emg_rms) and all(
-        np.all(np.isfinite(values)) for values in emg_rms.values()
+    spectral_report = build_spectral_quality_report(
+        frequencies,
+        spectra,
+        counts,
+        eeg_channels,
+        emg_rms,
+        emg_channels,
+        config=spectra_config,
     )
-    missing_emg_states = [
-        STATE_NAMES[state] for state in STATE_NAMES if state not in emg_rms
-    ]
-    emg_status = "pass" if finite_emg and not missing_emg_states else "review"
-    _section(
-        sections,
-        "emg_rms",
-        emg_status,
-        "finite_state_emg_rms",
-        finite_emg,
-        True,
-        f"EMG channels={emg_channels or 'none'}; missing states={missing_emg_states or 'none'}",
-    )
+    sections.extend(spectral_quality_sections(spectral_report, spectra_config))
 
     return (
         pd.DataFrame(sections, columns=SECTION_COLUMNS),
@@ -418,11 +499,28 @@ def _print_results(sections: pd.DataFrame, reviews: pd.DataFrame) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        spectra_config = load_spectra_config(args.spectra_config)
+    except (KeyError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
+
+    if args.analysis_epoch_seconds is None:
+        args.analysis_epoch_seconds = spectra_config.epoch_seconds
+    if args.chunk_epochs is None:
+        args.chunk_epochs = spectra_config.chunk_epochs
+    if args.welch_seconds is None:
+        args.welch_seconds = spectra_config.welch_seconds
+    if args.fmin is None:
+        args.fmin = spectra_config.fmin_hz
+    if args.fmax is None:
+        args.fmax = spectra_config.fmax_hz
+
     for name in (
         "max_low_confidence_percent",
         "max_undefined_percent",
         "max_artifact_percent",
         "max_correlation_review_percent",
+        "max_gap_percent",
     ):
         _validate_fraction(parser, f"--{name.replace('_', '-')}", getattr(args, name))
     for name in ("confidence_threshold", "eeg_eeg_threshold", "eeg_emg_threshold"):
@@ -434,6 +532,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "duration_tolerance",
         "min_gap",
         "gap_scan_chunk_seconds",
+        "max_longest_gap",
         "welch_seconds",
         "fmin",
         "fmax",
@@ -474,7 +573,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Scoring: {scoring_file}")
         print(f"Artifacts: {artifact_file}")
         sections, reviews = run_qc(
-            edf_path, fif_path, scoring_file, artifact_file, args
+            edf_path,
+            fif_path,
+            scoring_file,
+            artifact_file,
+            args,
+            spectra_config,
         )
     except (ImportError, OSError, ValueError) as exc:
         parser.error(str(exc))
@@ -488,12 +592,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         sections.to_csv(summary_path, index=False)
         print(f"Saved: {summary_path}")
     if args.review_epochs is not None:
-        review_path = quality_control_output_path(
+        requested_review_path = quality_control_output_path(
             args.review_epochs, edf_path, rawdata_root, derivatives_root
         )
-        review_path.parent.mkdir(parents=True, exist_ok=True)
-        reviews.to_csv(review_path, index=False)
-        print(f"Saved: {review_path}")
+        review_csv_path, review_parquet_path = review_output_paths(
+            requested_review_path
+        )
+        review_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        reviews.to_csv(review_csv_path, index=False)
+        reviews.to_parquet(review_parquet_path, index=False)
+        print(f"Saved: {review_csv_path}")
+        print(f"Saved: {review_parquet_path}")
     return 0 if overall_status(sections) != "fail" else 1
 
 

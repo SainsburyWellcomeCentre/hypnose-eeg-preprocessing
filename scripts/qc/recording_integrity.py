@@ -57,6 +57,9 @@ class IntegrityResult:
     fif_duration_s: float
     edf_fif_difference_s: float
     edf_gap_count: int
+    edf_gap_total_s: float
+    edf_gap_percent: float
+    edf_longest_gap_s: float
     status: str
 
 
@@ -296,6 +299,8 @@ def check_pair(
     duration_tolerance_s: float,
     min_gap_s: float,
     chunk_duration_s: float,
+    max_gap_percent: float = 1.0,
+    max_longest_gap_s: float = 600.0,
 ) -> tuple[IntegrityResult, list[Gap]]:
     mne = import_mne()
     edf = mne.io.read_raw_edf(
@@ -318,7 +323,13 @@ def check_pair(
 
     duration_difference_s = fif_duration_s - edf_duration_s
     duration_ok = abs(duration_difference_s) <= duration_tolerance_s
-    status = "pass" if duration_ok and not edf_gaps else "review"
+    merged_gaps = _merge_intervals((gap.start_s, gap.end_s) for gap in edf_gaps)
+    gap_durations = [end_s - start_s for start_s, end_s in merged_gaps]
+    gap_total_s = sum(gap_durations)
+    gap_percent = 100.0 * gap_total_s / edf_duration_s if edf_duration_s else 0.0
+    longest_gap_s = max(gap_durations, default=0.0)
+    gap_review = gap_percent >= max_gap_percent or longest_gap_s > max_longest_gap_s
+    status = "pass" if duration_ok and not gap_review else "review"
     result = IntegrityResult(
         recording=edf_path.stem,
         edf_path=str(edf_path),
@@ -327,6 +338,9 @@ def check_pair(
         fif_duration_s=fif_duration_s,
         edf_fif_difference_s=duration_difference_s,
         edf_gap_count=len(edf_gaps),
+        edf_gap_total_s=gap_total_s,
+        edf_gap_percent=gap_percent,
+        edf_longest_gap_s=longest_gap_s,
         status=status,
     )
     return result, edf_gaps
@@ -372,6 +386,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="EDF scan chunk size (default: 1800 seconds).",
     )
     parser.add_argument(
+        "--max-gap-percent",
+        type=float,
+        default=1.0,
+        metavar="PERCENT",
+        help="Flag for review when combined gap time reaches this percent of the "
+        "recording (default: 1.0).",
+    )
+    parser.add_argument(
+        "--max-longest-gap",
+        type=float,
+        default=600.0,
+        metavar="SECONDS",
+        help="Flag for review when the single longest gap exceeds this many "
+        "seconds (default: 600).",
+    )
+    parser.add_argument(
         "--summary",
         nargs="?",
         const="recording_integrity.csv",
@@ -399,6 +429,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(f"{name} must be a positive finite number")
     if not math.isfinite(args.duration_tolerance) or args.duration_tolerance < 0:
         parser.error("duration tolerance must be a non-negative finite number")
+    for name, value in (
+        ("max gap percent", args.max_gap_percent),
+        ("max longest gap", args.max_longest_gap),
+    ):
+        if not math.isfinite(value) or value < 0:
+            parser.error(f"{name} must be a non-negative finite number")
 
     if bool(args.edf) != bool(args.fif):
         parser.error("--edf and --fif must be supplied together")
@@ -451,6 +487,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             duration_tolerance_s=args.duration_tolerance,
             min_gap_s=args.min_gap,
             chunk_duration_s=args.chunk_duration,
+            max_gap_percent=args.max_gap_percent,
+            max_longest_gap_s=args.max_longest_gap,
         )
         results.append(result)
         gaps.extend(pair_gaps)
@@ -458,7 +496,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"  {result.status}: EDF={result.edf_duration_s:.3f}s, "
             f"FIF={result.fif_duration_s:.3f}s, "
             f"difference={result.edf_fif_difference_s:+.3f}s, "
-            f"gaps={len(pair_gaps)}"
+            f"gaps={len(pair_gaps)} ({result.edf_gap_total_s:.3f}s, "
+            f"{result.edf_gap_percent:.3f}% of recording, "
+            f"longest={result.edf_longest_gap_s:.3f}s)"
         )
         if pair_gaps:
             print("  Detected gaps:")

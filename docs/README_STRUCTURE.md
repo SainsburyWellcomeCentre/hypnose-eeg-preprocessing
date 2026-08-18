@@ -24,7 +24,7 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
 - `io/`: recording discovery, data-location configuration, and MNE file-loading
   helpers.
 - `preprocessing/`: executable preprocessing workflows.
-- `quality_control/`: executable reporting and visualisation workflows.
+- `qc/`: executable reporting and visualisation workflows.
 - `sleep_scoring/`: executable automated and interactive sleep-scoring workflows.
 - `utils/`: small cross-cutting helpers such as configuration, artifact, and
   sleep-state handling.
