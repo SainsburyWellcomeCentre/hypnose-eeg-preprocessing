@@ -259,7 +259,7 @@ and EMG RMS should follow Wake ≥ NREM ≥ REM. Every EEG channel is reported, 
 only the first EEG channel determines the overall recording status.
 These definitions, analysis defaults, comparison ratios, sleep-state display
 labels/colors, EMG ordering, and the determining channel are configured in
-`configs/pipelines/spectra.yaml` and can be overridden with `--config`.
+`configs/pipelines/spectra.yaml` and can be overridden with `--spectra-config`.
 
 Save plots without opening an interactive window with:
 

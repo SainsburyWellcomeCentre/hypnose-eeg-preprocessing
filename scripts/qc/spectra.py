@@ -431,7 +431,7 @@ def plot_state_emg_rms(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--config",
+        "--spectra-config",
         default=str(DEFAULT_CONFIG_PATH),
         help=f"Spectra pipeline YAML (default: {DEFAULT_CONFIG_PATH}).",
     )
@@ -467,7 +467,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        config = load_spectra_config(args.config)
+        config = load_spectra_config(args.spectra_config)
     except (KeyError, TypeError, ValueError) as exc:
         parser.error(str(exc))
     args.epoch_seconds = (

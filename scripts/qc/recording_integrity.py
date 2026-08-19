@@ -553,12 +553,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_csv(
             summary_path, result_rows, list(IntegrityResult.__dataclass_fields__)
         )
-        print(f"Summary: {summary_path}")
+        print(f"Saved: {summary_path}")
     if args.gaps:
         gaps_path = output_path(args.gaps)
         gap_rows = [asdict(gap) for gap in gaps]
         _write_csv(gaps_path, gap_rows, list(Gap.__dataclass_fields__))
-        print(f"Gaps: {gaps_path}")
+        print(f"Saved: {gaps_path}")
     return 1 if any(result.status != "pass" for result in results) else 0
 
 
