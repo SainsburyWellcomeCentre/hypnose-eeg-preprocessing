@@ -55,19 +55,20 @@ Run processing stages in this order:
 4. **Sleep scoring** — `scripts/sleep_scoring/score_recordings.py`
 5. **Detect artifacts** — `scripts/preprocessing/detect_artifacts.py`
 
-The development pipeline config leaves source and sink locations unset so they
-are supplied by the active data-location profile:
+The preprocessing pipeline config leaves source and sink locations unset so
+they are supplied by the active data-location profile:
 
 ```bash
 python scripts/preprocessing/concatenate_recordings.py \
-  --config configs/environments/dev.yaml --dry-run
+  --config configs/pipelines/preprocessing.yaml --dry-run
 
 python scripts/preprocessing/downsample_recordings.py \
-  --config configs/environments/dev.yaml --dry-run
+  --config configs/pipelines/preprocessing.yaml --dry-run
 ```
 
-Configure a Somnotate model and subjects in
-`configs/pipelines/sleep_scoring.yaml`, or override them from the command line:
+Configure the Somnotate model and channel settings in
+`configs/pipelines/sleep_scoring.yaml`; subject and date/session selectors are
+always passed on the command line:
 
 ```bash
 python scripts/sleep_scoring/score_recordings.py \
@@ -118,12 +119,17 @@ epochs, artifact burden, EEG/EMG channel correlation, sleep-state power spectra,
 and EMG RMS. Results are `PASS`, `REVIEW`, or `FAIL`. The power-spectra and EMG
 sections use the frequency bands, state expectations, RMS ordering, and determining
 EEG channel defined in `configs/pipelines/spectra.yaml`; select another definition
-file with `--spectra-config`. A duration mismatch or invalid spectral result fails
-the recording, while configurable percentage limits determine review status for
-scoring, artifacts, and correlations. Review rows use start/end seconds from
-recording onset so results from one-second Somnotate epochs and the default
-four-second signal epochs can be combined safely. Run the command with `--help`
-for the complete list. Reports are only saved when their output options are supplied.
+file with `--spectra-config`. Every review/pass threshold (duration tolerance, gap
+percentage and longest-gap limits, confidence and correlation cutoffs, artifact and
+undefined-epoch percentages) is defined in `configs/pipelines/quality_control.yaml`
+and shared across `summary_qc.py`, `recording_integrity.py`,
+`channel_correlations.py`, and `sleep_scoring.py`; select another definition file
+with `--qc-config`, or override any single value from the command line. A duration
+mismatch or invalid spectral result fails the recording. Review rows use start/end
+seconds from recording onset so results from one-second Somnotate epochs and the
+default four-second signal epochs can be combined safely. Run the command with
+`--help` for the complete list. Reports are only saved when their output options
+are supplied.
 Outputs are separated beneath the shared derivatives session:
 
 - Somnotate predictions and scoring reports: `sleep_scoring/`

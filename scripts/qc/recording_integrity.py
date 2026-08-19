@@ -24,11 +24,15 @@ try:
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
     from scripts.io.output_paths import quality_control_output_path
+    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
+    from scripts.utils.config import coalesce
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
     from scripts.io.output_paths import quality_control_output_path
+    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
+    from scripts.utils.config import coalesce
 
 
 GAP_ANNOTATION_TERMS = ("gap", "boundary", "discontinu", "dropout", "missing")
@@ -376,30 +380,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--derivatives-root", default=None)
     parser.add_argument("--edf-pattern", default="**/*.edf")
     parser.add_argument("--fif-pattern", default="**/*_raw.fif")
-    parser.add_argument("--duration-tolerance", type=float, default=1.0, metavar="SECONDS")
-    parser.add_argument("--min-gap", type=float, default=1.0, metavar="SECONDS")
+    parser.add_argument(
+        "--qc-config",
+        default=str(DEFAULT_QC_CONFIG_PATH),
+        help=f"Quality-control threshold YAML (default: {DEFAULT_QC_CONFIG_PATH}).",
+    )
+    parser.add_argument(
+        "--duration-tolerance", type=float, default=None, metavar="SECONDS"
+    )
+    parser.add_argument("--min-gap", type=float, default=None, metavar="SECONDS")
     parser.add_argument(
         "--chunk-duration",
         type=float,
-        default=1800.0,
+        default=None,
         metavar="SECONDS",
-        help="EDF scan chunk size (default: 1800 seconds).",
+        help="EDF scan chunk size (default: from --qc-config).",
     )
     parser.add_argument(
         "--max-gap-percent",
         type=float,
-        default=1.0,
+        default=None,
         metavar="PERCENT",
         help="Flag for review when combined gap time reaches this percent of the "
-        "recording (default: 1.0).",
+        "recording (default: from --qc-config).",
     )
     parser.add_argument(
         "--max-longest-gap",
         type=float,
-        default=600.0,
+        default=None,
         metavar="SECONDS",
         help="Flag for review when the single longest gap exceeds this many "
-        "seconds (default: 600).",
+        "seconds (default: from --qc-config).",
     )
     parser.add_argument(
         "--summary",
@@ -421,6 +432,25 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        qc_thresholds = load_qc_thresholds(args.qc_config)
+    except (KeyError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
+
+    args.duration_tolerance = coalesce(
+        args.duration_tolerance, qc_thresholds.duration_tolerance_s
+    )
+    args.min_gap = coalesce(args.min_gap, qc_thresholds.min_gap_s)
+    args.chunk_duration = coalesce(
+        args.chunk_duration, qc_thresholds.gap_scan_chunk_seconds
+    )
+    args.max_gap_percent = coalesce(
+        args.max_gap_percent, qc_thresholds.max_gap_percent
+    )
+    args.max_longest_gap = coalesce(
+        args.max_longest_gap, qc_thresholds.max_longest_gap_s
+    )
+
     for name, value in (
         ("minimum gap", args.min_gap),
         ("chunk duration", args.chunk_duration),

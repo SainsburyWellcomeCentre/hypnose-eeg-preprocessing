@@ -27,6 +27,11 @@ try:
         build_spectral_quality_report,
         load_spectra_config,
     )
+    from scripts.qc.thresholds import (
+        DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH,
+        load_qc_thresholds,
+    )
+    from scripts.utils.config import coalesce
     from scripts.utils.epochs import infer_epoch_seconds
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -45,6 +50,11 @@ except ModuleNotFoundError:
         build_spectral_quality_report,
         load_spectra_config,
     )
+    from scripts.qc.thresholds import (
+        DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH,
+        load_qc_thresholds,
+    )
+    from scripts.utils.config import coalesce
     from scripts.utils.epochs import infer_epoch_seconds
 
 
@@ -222,6 +232,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_SPECTRA_CONFIG_PATH),
         help=f"Spectral quality YAML (default: {DEFAULT_SPECTRA_CONFIG_PATH}).",
     )
+    parser.add_argument(
+        "--qc-config",
+        default=str(DEFAULT_QC_CONFIG_PATH),
+        help=f"Quality-control threshold YAML (default: {DEFAULT_QC_CONFIG_PATH}).",
+    )
     parser.add_argument("--subject", "--subjid", dest="subject", required=True)
     selector = parser.add_mutually_exclusive_group(required=True)
     selector.add_argument("--date", help="Session date: YYYYMMDD.")
@@ -230,18 +245,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--derivatives-root", default=None)
     parser.add_argument("--analysis-epoch-seconds", type=float, default=None)
     parser.add_argument("--chunk-epochs", type=int, default=None)
-    parser.add_argument("--duration-tolerance", type=float, default=1.0)
-    parser.add_argument("--min-gap", type=float, default=1.0)
-    parser.add_argument("--gap-scan-chunk-seconds", type=float, default=1800.0)
-    parser.add_argument("--max-gap-percent", type=float, default=1.0)
-    parser.add_argument("--max-longest-gap", type=float, default=600.0)
-    parser.add_argument("--confidence-threshold", type=float, default=0.80)
-    parser.add_argument("--max-low-confidence-percent", type=float, default=10.0)
-    parser.add_argument("--max-undefined-percent", type=float, default=5.0)
-    parser.add_argument("--max-artifact-percent", type=float, default=5.0)
-    parser.add_argument("--eeg-eeg-threshold", type=float, default=0.90)
-    parser.add_argument("--eeg-emg-threshold", type=float, default=0.50)
-    parser.add_argument("--max-correlation-review-percent", type=float, default=2.0)
+    parser.add_argument("--duration-tolerance", type=float, default=None)
+    parser.add_argument("--min-gap", type=float, default=None)
+    parser.add_argument("--gap-scan-chunk-seconds", type=float, default=None)
+    parser.add_argument("--max-gap-percent", type=float, default=None)
+    parser.add_argument("--max-longest-gap", type=float, default=None)
+    parser.add_argument("--confidence-threshold", type=float, default=None)
+    parser.add_argument("--max-low-confidence-percent", type=float, default=None)
+    parser.add_argument("--max-undefined-percent", type=float, default=None)
+    parser.add_argument("--max-artifact-percent", type=float, default=None)
+    parser.add_argument("--eeg-eeg-threshold", type=float, default=None)
+    parser.add_argument("--eeg-emg-threshold", type=float, default=None)
+    parser.add_argument("--max-correlation-review-percent", type=float, default=None)
     parser.add_argument("--welch-seconds", type=float, default=None)
     parser.add_argument("--fmin", type=float, default=None)
     parser.add_argument("--fmax", type=float, default=None)
@@ -503,6 +518,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         spectra_config = load_spectra_config(args.spectra_config)
     except (KeyError, TypeError, ValueError) as exc:
         parser.error(str(exc))
+    try:
+        qc_thresholds = load_qc_thresholds(args.qc_config)
+    except (KeyError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
 
     if args.analysis_epoch_seconds is None:
         args.analysis_epoch_seconds = spectra_config.epoch_seconds
@@ -514,6 +533,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.fmin = spectra_config.fmin_hz
     if args.fmax is None:
         args.fmax = spectra_config.fmax_hz
+
+    args.duration_tolerance = coalesce(
+        args.duration_tolerance, qc_thresholds.duration_tolerance_s
+    )
+    args.min_gap = coalesce(args.min_gap, qc_thresholds.min_gap_s)
+    args.gap_scan_chunk_seconds = coalesce(
+        args.gap_scan_chunk_seconds, qc_thresholds.gap_scan_chunk_seconds
+    )
+    args.max_gap_percent = coalesce(
+        args.max_gap_percent, qc_thresholds.max_gap_percent
+    )
+    args.max_longest_gap = coalesce(
+        args.max_longest_gap, qc_thresholds.max_longest_gap_s
+    )
+    args.confidence_threshold = coalesce(
+        args.confidence_threshold, qc_thresholds.confidence_threshold
+    )
+    args.max_low_confidence_percent = coalesce(
+        args.max_low_confidence_percent, qc_thresholds.max_low_confidence_percent
+    )
+    args.max_undefined_percent = coalesce(
+        args.max_undefined_percent, qc_thresholds.max_undefined_percent
+    )
+    args.max_artifact_percent = coalesce(
+        args.max_artifact_percent, qc_thresholds.max_artifact_percent
+    )
+    args.eeg_eeg_threshold = coalesce(
+        args.eeg_eeg_threshold, qc_thresholds.eeg_eeg_threshold
+    )
+    args.eeg_emg_threshold = coalesce(
+        args.eeg_emg_threshold, qc_thresholds.eeg_emg_threshold
+    )
+    args.max_correlation_review_percent = coalesce(
+        args.max_correlation_review_percent,
+        qc_thresholds.max_correlation_review_percent,
+    )
 
     for name in (
         "max_low_confidence_percent",

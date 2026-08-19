@@ -177,17 +177,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
     config = load_config(args.config)
-    scoring = nested_get(config, ("sleep_scoring",), {})
     view = nested_get(config, ("sleep_scoring_view",), {})
-    if not isinstance(scoring, dict) or not isinstance(view, dict):
-        raise ValueError("sleep_scoring and sleep_scoring_view must be YAML mappings")
+    if not isinstance(view, dict):
+        raise ValueError("sleep_scoring_view config must be a YAML mapping")
 
-    subject = _single_value(
-        coalesce(args.subject, view.get("subject"), scoring.get("subjids")),
-        option_name="subject",
-    )
+    subject = _single_value(args.subject, option_name="subject")
     if subject is None:
-        raise ValueError("a subject is required in the config or via --subject")
+        raise ValueError("a subject is required via --subject")
 
     if args.hours is not None:
         configured_hours = args.hours
@@ -208,57 +204,25 @@ def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
     )
     time_range = _parse_time_range(configured_time_range)
 
-    if args.date is not None:
-        date_value = args.date
-        session_value = None
-    elif args.session is not None:
-        date_value = None
-        session_value = args.session
-    else:
-        view_date = view.get("date")
-        view_session = view.get("session")
-        if view_date is not None or view_session is not None:
-            date_value = view_date
-            session_value = view_session
-        else:
-            date_value = scoring.get("dates")
-            session_value = scoring.get("sessions")
-    date = _single_value(date_value, option_name="date")
-    session_text = _single_value(session_value, option_name="session")
-    if date is not None and session_text is not None:
-        raise ValueError("date and session are mutually exclusive")
+    date = _single_value(args.date, option_name="date")
+    session_text = _single_value(args.session, option_name="session")
     session = (
         None if session_text is None else parse_sessions([session_text])[0]
     )
     if date is None and session is None and time_range is None:
         raise ValueError(
-            "a date or session is required in the config or via --date/--session "
+            "a date or session is required via --date/--session "
             "(or use --time-range)"
         )
 
     rawdata_root = Path(
-        coalesce(
-            args.rawdata_root,
-            view.get("rawdata_root"),
-            scoring.get("rawdata_root"),
-            get_rawdata_root(),
-        )
+        coalesce(args.rawdata_root, get_rawdata_root())
     ).expanduser().resolve(strict=False)
     derivatives_root = Path(
-        coalesce(
-            args.derivatives_root,
-            view.get("derivatives_root"),
-            scoring.get("derivatives_root"),
-            get_derivatives_root(),
-        )
+        coalesce(args.derivatives_root, get_derivatives_root())
     ).expanduser().resolve(strict=False)
     repo_root = Path(
-        coalesce(
-            args.repo_root,
-            view.get("repo_root"),
-            scoring.get("repo_root"),
-            get_repo_root(),
-        )
+        coalesce(args.repo_root, get_repo_root())
     ).expanduser().resolve(strict=False)
 
     recording_index = int(coalesce(args.recording_index, view.get("recording_index"), 0))

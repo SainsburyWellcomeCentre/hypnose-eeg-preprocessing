@@ -1,0 +1,22 @@
+name: quality_control_thresholds
+
+quality_control:
+  recording_integrity:
+    duration_tolerance_s: 1.0
+    min_gap_s: 1.0
+    gap_scan_chunk_seconds: 1800.0
+    max_gap_percent: 1.0
+    max_longest_gap_s: 600.0
+
+  somnotate_scoring:
+    confidence_threshold: 0.80
+    max_low_confidence_percent: 10.0
+    max_undefined_percent: 5.0
+
+  artifacts:
+    max_artifact_percent: 5.0
+
+  channel_correlation:
+    eeg_eeg_threshold: 0.90
+    eeg_emg_threshold: 0.50
+    max_correlation_review_percent: 2.0

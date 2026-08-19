@@ -1,23 +1,9 @@
 name: somnotate_sleep_scoring
 
 sleep_scoring:
-  # Required. Accepts subject numbers (66), zero-padded IDs (066), or sub-066.
-  subjids: []
-
-  # Optional selectors. Set exactly one of dates, date_range, or sessions.
-  dates: null
-  date_range: null  # Example: [20260707, 20260718]
-  sessions: null    # Example: [1, 2]
-
   # Required. An absolute path, a path relative to the derivatives root, or a
   # model name resolved as derivatives/somnotate_training/<name>/model.pickle.
   model_path: null
-
-  # Normally resolved from configs/environments/data_locations*.yml. Set these
-  # only when this scoring pipeline needs an explicit override.
-  rawdata_root: null
-  derivatives_root: null
-  repo_root: null
 
   # These must match the raw EDF and the model's training assumptions.
   sampling_rate_hz: 512
@@ -29,12 +15,8 @@ sleep_scoring:
   export_visbrain: true
 
 # Interactive visual quality check for predictions already written by scoring.
-# subject/date/session fall back to sleep_scoring values when each contains one
-# value. Set them here to inspect a different single session.
+# Subject and date/session are always passed on the command line.
 sleep_scoring_view:
-  subject: null
-  date: null
-  session: null
   recording_index: 0
   eeg_channel: 0       # 0=EEG1, 1=EEG2
   view_length_s: 120.0
@@ -43,8 +25,3 @@ sleep_scoring_view:
   time_range: null
   display_rate_hz: null # Optional display downsampling, e.g. 128
   show_artifacts: false # Shade regions flagged by artifact_epochs.parquet
-
-  # Normally inherited from sleep_scoring and the active data profile.
-  rawdata_root: null
-  derivatives_root: null
-  repo_root: null

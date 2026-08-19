@@ -173,35 +173,24 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     if not isinstance(scoring, dict):
         raise ValueError("sleep_scoring config must be a YAML mapping")
 
-    subjids = _as_list(coalesce(args.subjids, scoring.get("subjids")), option_name="subjids")
+    subjids = _as_list(args.subjids, option_name="subjids")
     if not subjids:
-        raise ValueError("at least one subject is required in the config or via --subject")
+        raise ValueError("at least one subject is required via --subject")
 
-    cli_selector_used = any(
-        value is not None for value in (args.dates, args.date_range, args.sessions)
-    )
-    if cli_selector_used:
-        dates_value = args.dates
-        date_range_value = args.date_range
-        sessions_value = args.sessions
-    else:
-        dates_value = scoring.get("dates")
-        date_range_value = scoring.get("date_range")
-        sessions_value = scoring.get("sessions")
-    dates = _as_list(dates_value, option_name="dates")
-    date_range = _as_date_range(date_range_value)
-    sessions = parse_sessions(sessions_value) or None
+    dates = _as_list(args.dates, option_name="dates")
+    date_range = _as_date_range(args.date_range)
+    sessions = parse_sessions(args.sessions) or None
     if sum(value is not None for value in (dates, date_range, sessions)) > 1:
         raise ValueError("dates, date_range, and sessions are mutually exclusive")
 
     rawdata_root = Path(
-        coalesce(args.rawdata_root, scoring.get("rawdata_root"), get_rawdata_root())
+        coalesce(args.rawdata_root, get_rawdata_root())
     ).expanduser().resolve(strict=False)
     derivatives_root = Path(
-        coalesce(args.derivatives_root, scoring.get("derivatives_root"), get_derivatives_root())
+        coalesce(args.derivatives_root, get_derivatives_root())
     ).expanduser().resolve(strict=False)
     repo_root = Path(
-        coalesce(args.repo_root, scoring.get("repo_root"), get_repo_root())
+        coalesce(args.repo_root, get_repo_root())
     ).expanduser().resolve(strict=False)
 
     model_value = coalesce(args.model_path, scoring.get("model_path"))

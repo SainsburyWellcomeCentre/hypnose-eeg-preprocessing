@@ -1,19 +1,11 @@
-environment: dev
+name: preprocessing
 
 source:
-  kind: mounted-edf
-  source_id: "hypnose-eeg-raw-edf"
   uri: null  # resolved from the active data-location profile
-  format: "edf"
   glob: "**/*.edf"
 
 sink:
-  kind: filesystem
-  uri: null  # resolved from the active data-location profile
-  format: "fif"
-  partition_by:
-    - "session_date"
-    - "subject_id"
+  uri: null  # resolved from the active data-location profile; used by downsample only
 
 preprocessing:
   concatenate:
@@ -21,25 +13,8 @@ preprocessing:
     manifest: null
   downsample:
     target_sfreq: 128
-    output_format: "fif"
     manifest: null
   trim_channels:
     n_samples: 100
     keep_first: 3
     output_suffix: "_trimmed"
-
-epoching:
-  duration_seconds: 4
-  overlap_seconds: 2
-
-checkpoint:
-  kind: local-file
-  uri: "state/checkpoint_dev.json"
-
-runtime:
-  max_retry_count: 3
-  retry_backoff_seconds: 2
-
-logging:
-  level: INFO
-  metrics_namespace: "hypnose_eeg"

@@ -19,6 +19,8 @@ try:
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.qc.recording_integrity import select_recordings
+    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
+    from scripts.utils.config import coalesce
     from scripts.analysis.correlation import compute_state_channel_correlations
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -26,6 +28,8 @@ except ModuleNotFoundError:
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.qc.recording_integrity import select_recordings
+    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
+    from scripts.utils.config import coalesce
     from scripts.analysis.correlation import compute_state_channel_correlations
 
 
@@ -104,16 +108,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chunk-epochs", type=int, default=512)
     parser.add_argument("--bins", type=int, default=40)
     parser.add_argument(
+        "--qc-config",
+        default=str(DEFAULT_QC_CONFIG_PATH),
+        help=f"Quality-control threshold YAML (default: {DEFAULT_QC_CONFIG_PATH}).",
+    )
+    parser.add_argument(
         "--eeg-eeg-threshold",
         type=float,
-        default=0.90,
-        help="Review EEG–EEG epochs with absolute r above this value.",
+        default=None,
+        help="Review EEG–EEG epochs with absolute r above this value "
+        "(default: from --qc-config).",
     )
     parser.add_argument(
         "--eeg-emg-threshold",
         type=float,
-        default=0.50,
-        help="Review EEG–EMG epochs with absolute r above this value.",
+        default=None,
+        help="Review EEG–EMG epochs with absolute r above this value "
+        "(default: from --qc-config).",
     )
     parser.add_argument(
         "--include-artifacts",
@@ -212,6 +223,17 @@ def _print_review_counts(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        qc_thresholds = load_qc_thresholds(args.qc_config)
+    except (KeyError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
+    args.eeg_eeg_threshold = coalesce(
+        args.eeg_eeg_threshold, qc_thresholds.eeg_eeg_threshold
+    )
+    args.eeg_emg_threshold = coalesce(
+        args.eeg_emg_threshold, qc_thresholds.eeg_emg_threshold
+    )
+
     if not math.isfinite(args.epoch_seconds) or args.epoch_seconds <= 0:
         parser.error("--epoch-seconds must be a positive finite number")
     if args.chunk_epochs <= 0:

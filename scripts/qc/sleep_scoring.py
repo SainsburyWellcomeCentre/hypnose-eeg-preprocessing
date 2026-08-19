@@ -16,6 +16,8 @@ try:
     from scripts.io.output_paths import sleep_scoring_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.qc.recording_integrity import select_recordings
+    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
+    from scripts.utils.config import coalesce
     from scripts.utils.epochs import infer_epoch_seconds
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -23,6 +25,8 @@ except ModuleNotFoundError:
     from scripts.io.output_paths import sleep_scoring_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.qc.recording_integrity import select_recordings
+    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
+    from scripts.utils.config import coalesce
     from scripts.utils.epochs import infer_epoch_seconds
 
 
@@ -151,10 +155,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rawdata-root", default=None)
     parser.add_argument("--derivatives-root", default=None)
     parser.add_argument(
+        "--qc-config",
+        default=str(DEFAULT_QC_CONFIG_PATH),
+        help=f"Quality-control threshold YAML (default: {DEFAULT_QC_CONFIG_PATH}).",
+    )
+    parser.add_argument(
         "--confidence-threshold",
         type=float,
-        default=0.80,
-        help="Flag signal epochs below this predicted-state probability (default: 0.80).",
+        default=None,
+        help="Flag signal epochs below this predicted-state probability "
+        "(default: from --qc-config).",
     )
     parser.add_argument(
         "--save",
@@ -176,6 +186,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        qc_thresholds = load_qc_thresholds(args.qc_config)
+    except (KeyError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
+    args.confidence_threshold = coalesce(
+        args.confidence_threshold, qc_thresholds.confidence_threshold
+    )
     if (
         not math.isfinite(args.confidence_threshold)
         or not 0 <= args.confidence_threshold <= 1

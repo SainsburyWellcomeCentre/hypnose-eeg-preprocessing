@@ -117,7 +117,7 @@ class RecordingIntegrityTests(unittest.TestCase):
         self.assertFalse(hasattr(args, "expected_seconds"))
         self.assertIsNone(args.summary)
         self.assertIsNone(args.gaps)
-        self.assertEqual(args.chunk_duration, 1800.0)
+        self.assertIsNone(args.chunk_duration)
 
     def test_gap_terminal_output_only_includes_length(self) -> None:
         gap = Gap(
