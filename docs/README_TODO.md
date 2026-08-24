@@ -26,28 +26,28 @@ Task: pull the shared `mkdir` + write + `"Saved: {path}"` sequence into one help
 `recording_integrity.py`'s `_write_csv` and the two `write_manifest()` methods can
 share it too.
 
-## 2. Improve `scripts/qc`/`scripts/utils` organization
+## ~~2. Improve `scripts/qc`/`scripts/utils` organization~~
 
-- `--edf-pattern`/`--fif-pattern` glob defaults in `recording_integrity.py` are the
+- ~~`--edf-pattern`/`--fif-pattern` glob defaults in `recording_integrity.py` are the
   last hardcoded CLI defaults left in `scripts/qc/`; decide whether they're worth
-  moving to config or are fine as structural constants.
+  moving to config or are fine as structural constants.~~
 - ~~`select_recordings` naming collision between `scripts/utils/recording_selection.py`
-  and `concatenate_recordings.py`~~ — done: renamed the latter's method to
-  `EdfSessionConcatenator.select_session_recordings`.
-- Sleep-state name/color dicts (`SLEEP_STATE_NAMES` in `artifacts.py`, `STATE_NAMES`/
+  and `concatenate_recordings.py` — done: renamed the latter's method to
+  `EdfSessionConcatenator.select_session_recordings`.~~
+- ~~Sleep-state name/color dicts (`SLEEP_STATE_NAMES` in `artifacts.py`, `STATE_NAMES`/
   `STATE_COLORS` in `channel_correlations.py`, `STATE_NAMES` in `sleep_scoring.py`)
   are intentionally independent per-script copies (not sourced from
-  `spectra.yaml`) — revisit only if they drift out of sync in practice.
-- Audit `scripts/qc/*.py` for any other cross-script imports beyond the two already
+  `spectra.yaml`) — revisit only if they drift out of sync in practice.~~
+- ~~Audit `scripts/qc/*.py` for any other cross-script imports beyond the two already
   extracted (`select_recordings`, `QCThresholds`) — decide case by case whether it
   belongs in `scripts/utils/` or `scripts/qc/thresholds.py`-style shared modules
-  before moving anything.
-- `downsample_recordings.py:_prefer_concatenated_recordings()` independently
+  before moving anything.~~
+- ~~`downsample_recordings.py:_prefer_concatenated_recordings()` independently
   hardcodes the `"_recording-concat"` naming convention that
   `concatenate_recordings.py:_concatenated_base_name()` defines and produces —
   same coupling risk `_trimmed` had (now fixed: `concatenate_recordings.py` reads
   `preprocessing.trim_channels.output_suffix` instead of hardcoding `"_trimmed"`).
-  Worth a shared constant/config value so both scripts agree on the concat suffix.
+  Worth a shared constant/config value so both scripts agree on the concat suffix.~~
 
 ## 3. `detect_artifacts.py` performance
 
