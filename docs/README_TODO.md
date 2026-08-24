@@ -63,4 +63,12 @@ the likely bottleneck on large recordings:
 
 ## 7. inspect_and_trim_channels.py needs better method for running and provided info
 
-## 8. Check for any for loops that would limit speed on large recordings
+## 8. Check for any for loops that would limit speed on large recordings - vectorisation
+
+## 9. Artifact detection naming not based on somnotate_predictions and based on derivatives location
+
+- Change all cases in which the referencing is done explicitly and instead folders should be created by the name of the script being run
+
+## 10. Check any places that require full paths and change them into requiring sub/date/session
+
+- One example is detect_artifacts.py

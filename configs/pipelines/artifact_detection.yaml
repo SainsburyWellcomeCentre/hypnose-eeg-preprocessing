@@ -31,6 +31,18 @@ artifact_detection:
     emg_soft_features_required: 2
     emg_supported_eeg_features_required: 1
 
+  features:
+    eeg_score_features:
+      - "peak_to_peak_uv"
+      - "rms_uv"
+      - "max_derivative_uv_per_sample"
+      - "high_frequency_power_uv2"
+      - "line_noise_power_uv2"
+    emg_score_features:
+      - "emg_peak_to_peak_uv"
+      - "emg_rms_uv"
+      - "emg_max_derivative_uv_per_sample"
+
   output:
     remove_from_stem: "somnotate_predictions"
     suffix: "artifact_epochs"

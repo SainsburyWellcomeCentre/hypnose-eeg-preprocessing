@@ -1,16 +1,9 @@
 """Detect state-dependent EEG artifacts in a FIF recording.
 
-The detector aligns sleep states from a parquet file to non-overlapping epochs,
-extracts EEG and optional EMG features in bounded chunks, and estimates robust
-outlier scores separately for every channel and sleep state. Hard signal failures
-(nonfinite data, flatlining, and clipping-like repeated edge values) remain
-state-independent.
-
-Only epoch-level results are written. Outputs default to the session's dedicated
-artifact directory and are saved as both CSV and parquet. Tunable
-detector settings and output naming rules are loaded from the pipeline YAML.
-``ArtifactDetector`` reuses one immutable configuration for single-pair or
-sequential multi-pair processing while retaining failures as structured results.
+Aligns sleep states to epochs, extracts EEG/EMG features, and flags epochs using
+per-channel, per-state robust outlier scores plus state-independent hard failures
+(nonfinite, flatline, clipping). Writes epoch-level CSV and parquet outputs;
+settings come from the pipeline YAML.
 """
 
 from __future__ import annotations
@@ -61,20 +54,6 @@ except ModuleNotFoundError:
     )
 
 
-EEG_SCORE_FEATURES = (
-    "peak_to_peak_uv",
-    "rms_uv",
-    "max_derivative_uv_per_sample",
-    "high_frequency_power_uv2",
-    "line_noise_power_uv2",
-)
-EMG_SCORE_FEATURES = (
-    "emg_peak_to_peak_uv",
-    "emg_rms_uv",
-    "emg_max_derivative_uv_per_sample",
-)
-
-
 @dataclass(frozen=True)
 class ArtifactDetector:
     """Configured artifact detector for one or many recording pairs."""
@@ -100,6 +79,8 @@ class ArtifactDetector:
     soft_features_required: int
     emg_soft_features_required: int
     emg_supported_eeg_features_required: int
+    eeg_score_features: tuple[str, ...]
+    emg_score_features: tuple[str, ...]
     remove_from_stem: str
     output_suffix: str
     overwrite: bool
@@ -153,6 +134,8 @@ class ArtifactDetector:
             emg_supported_eeg_features_required=int(
                 value(("thresholds", "emg_supported_eeg_features_required"))
             ),
+            eeg_score_features=tuple(value(("features", "eeg_score_features"))),
+            emg_score_features=tuple(value(("features", "emg_score_features"))),
             remove_from_stem=str(value(("output", "remove_from_stem"))),
             output_suffix=str(value(("output", "suffix"))),
             overwrite=bool(value(("output", "overwrite"))),
@@ -246,8 +229,10 @@ def extract_features(
     n_per_seg = min(epoch_samples, int(round(welch_segment_seconds * sfreq)))
     n_fft = 1 << (n_per_seg - 1).bit_length()
     n_overlap = n_per_seg // 2
-    eeg_rows: list[dict[str, Any]] = []
-    emg_rows: list[dict[str, Any]] = []
+    eeg_channel_names = np.array(eeg.ch_names)
+    emg_channel_names = np.array(emg.ch_names) if emg is not None else None
+    eeg_chunks: list[pd.DataFrame] = []
+    emg_chunks: list[pd.DataFrame] = []
 
     for first_epoch in range(0, n_epochs, chunk_epochs):
         last_epoch = min(first_epoch + chunk_epochs, n_epochs)
@@ -307,51 +292,44 @@ def extract_features(
                 np.abs(np.diff(emg_clean, axis=-1)), axis=-1
             )
 
-        for offset in range(epoch_count):
-            epoch_id = first_epoch + offset
-            for channel_index, channel in enumerate(eeg.ch_names):
-                eeg_rows.append(
+        epoch_ids = first_epoch + np.arange(epoch_count)
+        flat_epoch_ids = np.repeat(epoch_ids, len(eeg_channel_names))
+        eeg_chunks.append(
+            pd.DataFrame(
+                {
+                    "epoch_id": flat_epoch_ids,
+                    "time_s": flat_epoch_ids * epoch_seconds,
+                    "time_h": flat_epoch_ids * epoch_seconds / 3600,
+                    "channel": np.tile(eeg_channel_names, epoch_count),
+                    "peak_to_peak_uv": peak_to_peak.ravel(),
+                    "rms_uv": rms.ravel(),
+                    "max_derivative_uv_per_sample": max_derivative.ravel(),
+                    "std_uv": standard_deviation.ravel(),
+                    "edge_fraction": edge_fraction.ravel(),
+                    "high_frequency_power_uv2": high_frequency_power.ravel(),
+                    "line_noise_power_uv2": line_noise_power.ravel(),
+                    "nonfinite": nonfinite.ravel(),
+                }
+            )
+        )
+        if emg is not None:
+            flat_emg_epoch_ids = np.repeat(epoch_ids, len(emg_channel_names))
+            emg_chunks.append(
+                pd.DataFrame(
                     {
-                        "epoch_id": epoch_id,
-                        "time_s": epoch_id * epoch_seconds,
-                        "time_h": epoch_id * epoch_seconds / 3600,
-                        "channel": channel,
-                        "peak_to_peak_uv": peak_to_peak[offset, channel_index],
-                        "rms_uv": rms[offset, channel_index],
-                        "max_derivative_uv_per_sample": max_derivative[
-                            offset, channel_index
-                        ],
-                        "std_uv": standard_deviation[offset, channel_index],
-                        "edge_fraction": edge_fraction[offset, channel_index],
-                        "high_frequency_power_uv2": high_frequency_power[
-                            offset, channel_index
-                        ],
-                        "line_noise_power_uv2": line_noise_power[
-                            offset, channel_index
-                        ],
-                        "nonfinite": nonfinite[offset, channel_index],
+                        "epoch_id": flat_emg_epoch_ids,
+                        "emg_channel": np.tile(emg_channel_names, epoch_count),
+                        "emg_peak_to_peak_uv": emg_peak_to_peak.ravel(),
+                        "emg_rms_uv": emg_rms.ravel(),
+                        "emg_max_derivative_uv_per_sample": emg_max_derivative.ravel(),
+                        "emg_nonfinite": emg_nonfinite.ravel(),
                     }
                 )
-            if emg is not None:
-                for channel_index, channel in enumerate(emg.ch_names):
-                    emg_rows.append(
-                        {
-                            "epoch_id": epoch_id,
-                            "emg_channel": channel,
-                            "emg_peak_to_peak_uv": emg_peak_to_peak[
-                                offset, channel_index
-                            ],
-                            "emg_rms_uv": emg_rms[offset, channel_index],
-                            "emg_max_derivative_uv_per_sample": emg_max_derivative[
-                                offset, channel_index
-                            ],
-                            "emg_nonfinite": emg_nonfinite[offset, channel_index],
-                        }
-                    )
+            )
 
     return (
-        pd.DataFrame(eeg_rows),
-        pd.DataFrame(emg_rows),
+        pd.concat(eeg_chunks, ignore_index=True) if eeg_chunks else pd.DataFrame(),
+        pd.concat(emg_chunks, ignore_index=True) if emg_chunks else pd.DataFrame(),
         list(eeg.ch_names),
         list(emg.ch_names) if emg is not None else [],
         chunk_epochs,
@@ -371,6 +349,8 @@ def classify_artifacts(
     soft_features_required: int,
     emg_soft_features_required: int,
     emg_supported_eeg_features_required: int,
+    eeg_score_features: tuple[str, ...],
+    emg_score_features: tuple[str, ...],
 ) -> pd.DataFrame:
     """Apply state-dependent robust rules and return one row per epoch."""
     eeg_features = eeg_features.merge(
@@ -380,13 +360,13 @@ def classify_artifacts(
         emg_features = emg_features.merge(
             epoch_states, on="epoch_id", how="left", validate="many_to_one"
         )
-        for feature in EMG_SCORE_FEATURES:
+        for feature in emg_score_features:
             emg_features[f"z_{feature}"] = emg_features.groupby(
                 ["emg_channel", "sleep_state"]
             )[feature].transform(
                 lambda values: robust_upper_z(values, robust_mad_scale)
             )
-        emg_z_columns = [f"z_{feature}" for feature in EMG_SCORE_FEATURES]
+        emg_z_columns = [f"z_{feature}" for feature in emg_score_features]
         emg_features["emg_soft_feature_count"] = (
             emg_features[emg_z_columns] > robust_z_threshold
         ).sum(axis=1)
@@ -415,13 +395,13 @@ def classify_artifacts(
             }
         )
 
-    for feature in EEG_SCORE_FEATURES:
+    for feature in eeg_score_features:
         eeg_features[f"z_{feature}"] = eeg_features.groupby(
             ["channel", "sleep_state"]
         )[feature].transform(
             lambda values: robust_upper_z(values, robust_mad_scale)
         )
-    z_columns = [f"z_{feature}" for feature in EEG_SCORE_FEATURES]
+    z_columns = [f"z_{feature}" for feature in eeg_score_features]
     eeg_features["soft_feature_count"] = (
         eeg_features[z_columns] > robust_z_threshold
     ).sum(axis=1)
@@ -445,24 +425,24 @@ def classify_artifacts(
         | eeg_features["emg_supported_artifact"]
     )
 
-    reasons: list[str] = []
-    for row in eeg_features.to_dict(orient="records"):
-        row_reasons = []
-        if row["nonfinite"]:
-            row_reasons.append("nonfinite")
-        if row["std_uv"] < min_std_uv:
-            row_reasons.append("flatline")
-        if row["edge_fraction"] > max_edge_fraction:
-            row_reasons.append("clipping_or_repeated_edge")
-        if row["emg_supported_artifact"]:
-            row_reasons.append("emg_outlier_with_eeg_outlier")
-        row_reasons.extend(
-            feature
-            for feature in EEG_SCORE_FEATURES
-            if row[f"z_{feature}"] > robust_z_threshold
+    reason_conditions = [
+        ("nonfinite", eeg_features["nonfinite"]),
+        ("flatline", eeg_features["std_uv"] < min_std_uv),
+        ("clipping_or_repeated_edge", eeg_features["edge_fraction"] > max_edge_fraction),
+        ("emg_outlier_with_eeg_outlier", eeg_features["emg_supported_artifact"]),
+    ] + [
+        (feature, eeg_features[f"z_{feature}"] > robust_z_threshold)
+        for feature in eeg_score_features
+    ]
+    artifact_reason = np.full(len(eeg_features), "", dtype=object)
+    for label, flagged in reason_conditions:
+        flagged = flagged.to_numpy()
+        artifact_reason = np.where(
+            flagged,
+            np.where(artifact_reason == "", label, artifact_reason + ";" + label),
+            artifact_reason,
         )
-        reasons.append(";".join(row_reasons))
-    eeg_features["artifact_reason"] = reasons
+    eeg_features["artifact_reason"] = artifact_reason
 
     artifact_epochs = eeg_features.groupby("epoch_id", as_index=False).agg(
         time_s=("time_s", "first"),
@@ -579,6 +559,8 @@ def _detect_fif_artifacts(
         detector.soft_features_required,
         detector.emg_soft_features_required,
         detector.emg_supported_eeg_features_required,
+        detector.eeg_score_features,
+        detector.emg_score_features,
     )
 
     save_csv(artifact_epochs, csv_path)
