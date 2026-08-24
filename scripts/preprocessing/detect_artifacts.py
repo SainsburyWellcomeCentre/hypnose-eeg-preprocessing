@@ -28,7 +28,7 @@ try:
     from scripts.analysis.power_spectra import bandpower
     from scripts.analysis.statistics import robust_upper_z
     from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import artifact_output_paths
+    from scripts.io.output_paths import artifact_output_paths, save_csv
     from scripts.utils.config import (
         DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
         load_config,
@@ -46,7 +46,7 @@ except ModuleNotFoundError:
     from scripts.analysis.power_spectra import bandpower
     from scripts.analysis.statistics import robust_upper_z
     from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import artifact_output_paths
+    from scripts.io.output_paths import artifact_output_paths, save_csv
     from scripts.utils.config import (
         DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
         load_config,
@@ -581,14 +581,12 @@ def _detect_fif_artifacts(
         detector.emg_supported_eeg_features_required,
     )
 
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    artifact_epochs.to_csv(csv_path, index=False)
+    save_csv(artifact_epochs, csv_path)
     artifact_epochs.to_parquet(parquet_path, index=False)
     print(
         f"Flagged {artifact_epochs['artifact'].sum():,} / {len(artifact_epochs):,} "
         f"epochs ({artifact_epochs['artifact'].mean():.2%})"
     )
-    print(f"Saved: {csv_path}")
     print(f"Saved: {parquet_path}")
     return artifact_epochs, csv_path, parquet_path
 

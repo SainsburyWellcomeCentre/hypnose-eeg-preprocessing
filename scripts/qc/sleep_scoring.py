@@ -13,7 +13,7 @@ import pandas as pd
 
 try:
     from scripts.io.input_paths import scoring_path
-    from scripts.io.output_paths import sleep_scoring_output_path
+    from scripts.io.output_paths import save_csv, sleep_scoring_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils.recording_selection import select_recordings
     from scripts.qc.thresholds import load_qc_thresholds
@@ -26,7 +26,7 @@ try:
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.input_paths import scoring_path
-    from scripts.io.output_paths import sleep_scoring_output_path
+    from scripts.io.output_paths import save_csv, sleep_scoring_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils.recording_selection import select_recordings
     from scripts.qc.thresholds import load_qc_thresholds
@@ -237,16 +237,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         save_path = sleep_scoring_output_path(
             args.save, edf_path, rawdata_root, derivatives_root
         )
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        output.to_csv(save_path, index=False)
-        print(f"Saved: {save_path}")
+        save_csv(output, save_path)
     if args.summary is not None:
         summary_path = sleep_scoring_output_path(
             args.summary, edf_path, rawdata_root, derivatives_root
         )
-        summary_path.parent.mkdir(parents=True, exist_ok=True)
-        summary.to_csv(summary_path, index=False)
-        print(f"Saved: {summary_path}")
+        save_csv(summary, summary_path)
     return 0
 
 

@@ -1,14 +1,19 @@
-"""Construct categorized output paths in the shared session layout."""
+"""Construct categorized output paths in the shared session layout, and write CSVs to them."""
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from hypnose_helpers.io.layout import (
     SessionLayout,
     parse_session_dirname,
     parse_subject_dirname,
 )
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 OUTPUT_GROUPS = {
@@ -140,3 +145,26 @@ def artifact_output_path(
     return session_output_path(
         output, recording_path, rawdata_root, derivatives_root, "artifacts"
     )
+
+
+def save_csv(df: "pd.DataFrame", path: str | Path) -> Path:
+    """Write a DataFrame to CSV, creating parent directories, and report the save."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+    print(f"Saved: {path}")
+    return path
+
+
+def save_csv_rows(
+    rows: list[dict[str, Any]], fieldnames: list[str], path: str | Path
+) -> Path:
+    """Write dict rows to CSV, creating parent directories, and report the save."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Saved: {path}")
+    return path

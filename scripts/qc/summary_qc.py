@@ -16,7 +16,7 @@ try:
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra
     from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path
+    from scripts.io.output_paths import quality_control_output_path, save_csv
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.qc.recording_integrity import check_pair
     from scripts.utils.recording_selection import select_recordings
@@ -40,7 +40,7 @@ except ModuleNotFoundError:
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra
     from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path
+    from scripts.io.output_paths import quality_control_output_path, save_csv
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.qc.recording_integrity import check_pair
     from scripts.utils.recording_selection import select_recordings
@@ -645,9 +645,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary_path = quality_control_output_path(
             args.summary, edf_path, rawdata_root, derivatives_root
         )
-        summary_path.parent.mkdir(parents=True, exist_ok=True)
-        sections.to_csv(summary_path, index=False)
-        print(f"Saved: {summary_path}")
+        save_csv(sections, summary_path)
     if args.review_epochs is not None:
         requested_review_path = quality_control_output_path(
             args.review_epochs, edf_path, rawdata_root, derivatives_root
@@ -655,10 +653,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         review_csv_path, review_parquet_path = review_output_paths(
             requested_review_path
         )
-        review_csv_path.parent.mkdir(parents=True, exist_ok=True)
-        reviews.to_csv(review_csv_path, index=False)
+        save_csv(reviews, review_csv_path)
         reviews.to_parquet(review_parquet_path, index=False)
-        print(f"Saved: {review_csv_path}")
         print(f"Saved: {review_parquet_path}")
     return 0 if overall_status(sections) != "fail" else 1
 

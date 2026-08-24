@@ -11,7 +11,6 @@ storage and computation while retaining frequencies below the new Nyquist limit.
 from __future__ import annotations
 
 import argparse
-import csv
 import gc
 import sys
 from dataclasses import dataclass
@@ -21,11 +20,13 @@ from typing import Any, Iterable
 try:
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
+    from scripts.io.output_paths import save_csv_rows
     from scripts.utils.config import coalesce, load_config, nested_get
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
+    from scripts.io.output_paths import save_csv_rows
     from scripts.utils.config import coalesce, load_config, nested_get
 
 
@@ -162,8 +163,6 @@ class EdfDownsampler:
         return self.downsample_file(edf_files[0])
 
     def write_manifest(self, results: Iterable[DownsampleResult], manifest_path: str | Path) -> Path:
-        manifest = Path(manifest_path)
-        manifest.parent.mkdir(parents=True, exist_ok=True)
         rows = [_result_to_row(result) for result in results]
         fieldnames = [
             "source_path",
@@ -176,13 +175,7 @@ class EdfDownsampler:
             "duration_seconds",
             "error",
         ]
-
-        with manifest.open("w", newline="") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-
-        return manifest
+        return save_csv_rows(rows, fieldnames, manifest_path)
 
     def _failed_result(self, edf_path: Path, exc: Exception) -> DownsampleResult:
         return DownsampleResult(
@@ -273,10 +266,9 @@ def main() -> None:
     else:
         results = downsampler.downsample_all()
 
-    manifest_path = downsampler.write_manifest(results, manifest)
+    downsampler.write_manifest(results, manifest)
     for result in results:
         print(f"{result.status}: {result.source_path} -> {result.output_path}")
-    print(f"manifest: {manifest_path}")
 
 
 if __name__ == "__main__":

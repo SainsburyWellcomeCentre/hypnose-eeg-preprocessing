@@ -17,7 +17,7 @@ from hypnose_helpers.viz.styles import ensure_style
 
 try:
     from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path
+    from scripts.io.output_paths import quality_control_output_path, save_csv
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils.recording_selection import select_recordings
     from scripts.analysis.emg import compute_state_emg_rms
@@ -32,7 +32,7 @@ try:
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path
+    from scripts.io.output_paths import quality_control_output_path, save_csv
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils.recording_selection import select_recordings
     from scripts.analysis.emg import compute_state_emg_rms
@@ -613,8 +613,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             quality_output_path = (
                 save_dir / f"{edf_path.stem}_sleep_state_spectral_quality.csv"
             )
-            quality_report.to_csv(quality_output_path, index=False)
-            print(f"Saved: {quality_output_path}")
+            save_csv(quality_report, quality_output_path)
             output_path = save_figure(
                 fig,
                 f"{edf_path.stem}_sleep_state_power_spectra",

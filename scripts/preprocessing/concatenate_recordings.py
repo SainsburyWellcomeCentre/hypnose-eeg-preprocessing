@@ -11,7 +11,6 @@ and failures. Existing outputs are preserved unless overwrite is requested.
 from __future__ import annotations
 
 import argparse
-import csv
 import gc
 import re
 import sys
@@ -22,11 +21,13 @@ from typing import Any, Iterable
 try:
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import export_raw_edf, import_mne
+    from scripts.io.output_paths import save_csv_rows
     from scripts.utils.config import coalesce, load_config, nested_get
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import export_raw_edf, import_mne
+    from scripts.io.output_paths import save_csv_rows
     from scripts.utils.config import coalesce, load_config, nested_get
 
 
@@ -326,8 +327,6 @@ class EdfSessionConcatenator:
         return results
 
     def write_manifest(self, results: Iterable[ConcatenationResult], manifest_path: str | Path) -> Path:
-        manifest = Path(manifest_path)
-        manifest.parent.mkdir(parents=True, exist_ok=True)
         rows = [_result_to_row(result) for result in results]
         fieldnames = [
             "session_path",
@@ -343,13 +342,7 @@ class EdfSessionConcatenator:
             "existing_outputs",
             "error",
         ]
-
-        with manifest.open("w", newline="") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-
-        return manifest
+        return save_csv_rows(rows, fieldnames, manifest_path)
 
     def _concatenated_base_name(self, files: list[Path]) -> str:
         first_stem = files[0].stem
@@ -525,13 +518,12 @@ def main() -> None:
     else:
         results = concatenator.concatenate_all()
 
-    manifest_path = concatenator.write_manifest(results, manifest)
+    concatenator.write_manifest(results, manifest)
     for result in results:
         print(
             f"{result.status}: {result.session_path} "
             f"({result.n_recordings} recordings) -> {result.edf_output_path}"
         )
-    print(f"manifest: {manifest_path}")
 
 
 if __name__ == "__main__":

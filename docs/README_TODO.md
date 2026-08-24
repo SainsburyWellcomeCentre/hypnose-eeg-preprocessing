@@ -3,28 +3,15 @@
 Punch list of known cleanup and improvement work. Not scheduled; pick items up as
 capacity allows.
 
-## 1. Consolidate CSV-writing
+## ~~1. Consolidate CSV-writing~~
 
-CSV output is currently written three different ways, each reimplementing the same
-`mkdir(parents=True, exist_ok=True)` + write + report pattern:
-
-- **Raw `csv.DictWriter`**, once per caller:
-  - `scripts/qc/recording_integrity.py:_write_csv()` — writes `IntegrityResult`/`Gap`
-    dataclass rows.
-  - `scripts/preprocessing/concatenate_recordings.py:EdfSessionConcatenator.write_manifest()`
-  - `scripts/preprocessing/downsample_recordings.py:EdfDownsampler.write_manifest()`
-- **`DataFrame.to_csv()`**, each preceded by its own `path.parent.mkdir(...)` and
-  followed by its own `print(f"Saved: {path}")`:
-  - `scripts/qc/summary_qc.py` (section summary, review CSV + parquet)
-  - `scripts/qc/sleep_scoring.py` (epoch output, state summary)
-  - `scripts/qc/artifacts.py` (overall/hourly/sleep-state reports)
-  - `scripts/qc/spectra.py` (spectral quality report)
-  - `scripts/preprocessing/detect_artifacts.py`
-
-Task: pull the shared `mkdir` + write + `"Saved: {path}"` sequence into one helper
-(e.g. `scripts/utils/io.py`), with a thin wrapper for the dataclass-rows case so
-`recording_integrity.py`'s `_write_csv` and the two `write_manifest()` methods can
-share it too.
+~~CSV output is currently written three different ways, each reimplementing the same
+`mkdir(parents=True, exist_ok=True)` + write + report pattern~~ — done:
+`scripts/io/output_paths.py` now has `save_csv()` (DataFrame) and `save_csv_rows()`
+(dict rows via `csv.DictWriter`), both doing mkdir + write + `print(f"Saved: {path}")`.
+Every listed call site (`recording_integrity.py`, `concatenate_recordings.py`/
+`downsample_recordings.py` manifests, `summary_qc.py`, `sleep_scoring.py`,
+`artifacts.py`, `spectra.py`, `detect_artifacts.py`) now uses one of the two.
 
 ## ~~2. Improve `scripts/qc`/`scripts/utils` organization~~
 
@@ -75,3 +62,5 @@ the likely bottleneck on large recordings:
 ## 6. Remove need for sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 ## 7. inspect_and_trim_channels.py needs better method for running and provided info
+
+## 8. Check for any for loops that would limit speed on large recordings

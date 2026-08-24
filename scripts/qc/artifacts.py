@@ -14,10 +14,12 @@ import numpy as np
 import pandas as pd
 
 try:
+    from scripts.io.output_paths import save_csv
     from scripts.utils.epochs import infer_epoch_seconds
     from scripts.utils.sleep_states import load_sleep_states
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.io.output_paths import save_csv
     from scripts.utils.epochs import infer_epoch_seconds
     from scripts.utils.sleep_states import load_sleep_states
 
@@ -250,16 +252,13 @@ def _print_report(report: ArtifactReport) -> None:
 
 
 def _save_report(report: ArtifactReport, save_dir: Path, stem: str) -> None:
-    save_dir.mkdir(parents=True, exist_ok=True)
     outputs = {
         "overall": report.overall,
         "hourly": report.hourly,
         "sleep_state": report.sleep_state,
     }
     for suffix, table in outputs.items():
-        output = save_dir / f"{stem}_artifact_report_{suffix}.csv"
-        table.to_csv(output, index=False)
-        print(f"Saved: {output}")
+        save_csv(table, save_dir / f"{stem}_artifact_report_{suffix}.csv")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

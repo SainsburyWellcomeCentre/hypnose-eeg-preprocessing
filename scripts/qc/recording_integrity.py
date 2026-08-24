@@ -9,7 +9,6 @@ Gap-like EDF annotations are also included in the gap report.
 from __future__ import annotations
 
 import argparse
-import csv
 import math
 import sys
 from dataclasses import asdict, dataclass
@@ -22,7 +21,7 @@ import numpy as np
 try:
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import quality_control_output_path
+    from scripts.io.output_paths import quality_control_output_path, save_csv_rows
     from scripts.qc.thresholds import load_qc_thresholds
     from scripts.utils.config import (
         DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
@@ -33,7 +32,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import quality_control_output_path
+    from scripts.io.output_paths import quality_control_output_path, save_csv_rows
     from scripts.qc.thresholds import load_qc_thresholds
     from scripts.utils.config import (
         DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
@@ -249,14 +248,6 @@ def check_pair(
     return result, edf_gaps
 
 
-def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def _format_gap(index: int, gap: Gap) -> str:
     """Format only one gap's duration for concise terminal output."""
     return f"    Gap {index}: {gap.duration_s:.3f} seconds"
@@ -449,15 +440,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.summary:
         summary_path = output_path(args.summary)
         result_rows = [asdict(result) for result in results]
-        _write_csv(
-            summary_path, result_rows, list(IntegrityResult.__dataclass_fields__)
+        save_csv_rows(
+            result_rows, list(IntegrityResult.__dataclass_fields__), summary_path
         )
-        print(f"Saved: {summary_path}")
     if args.gaps:
         gaps_path = output_path(args.gaps)
         gap_rows = [asdict(gap) for gap in gaps]
-        _write_csv(gaps_path, gap_rows, list(Gap.__dataclass_fields__))
-        print(f"Saved: {gaps_path}")
+        save_csv_rows(gap_rows, list(Gap.__dataclass_fields__), gaps_path)
     return 1 if any(result.status != "pass" for result in results) else 0
 
 
