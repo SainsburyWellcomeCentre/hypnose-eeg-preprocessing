@@ -15,22 +15,21 @@ spectra:
     alpha: [8.0, 12.0]
     beta: [12.0, 30.0]
 
-  sleep_states:
-    wake:
-      code: 0
-      label: "Wake"
-      color: "red"
-    nrem:
-      code: 1
-      label: "NREM"
-      color: "royalblue"
-    rem:
-      code: 2
-      label: "REM"
-      color: "goldenrod"
+  sleep_state_names:
+    0: "Wake"
+    1: "NREM"
+    2: "REM"
+
+  state_colors:
+    0: "red"
+    1: "royalblue"
+    2: "goldenrod"
 
   quality:
     determining_eeg_channel_number: 1
+    wake_code: 0
+    nrem_code: 1
+    rem_code: 2
     wake_delta_max_nrem_ratio: 1.0
     nrem_delta_min_wake_ratio: 1.0
     nrem_delta_min_rem_ratio: 1.0

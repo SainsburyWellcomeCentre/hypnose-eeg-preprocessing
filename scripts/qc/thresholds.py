@@ -8,15 +8,18 @@ from pathlib import Path
 from typing import Mapping
 
 try:
-    from scripts.io.repository_paths import get_repo_root
-    from scripts.utils.config import load_config, nested_get
+    from scripts.utils.config import (
+        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+        load_config,
+        nested_get,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.repository_paths import get_repo_root
-    from scripts.utils.config import load_config, nested_get
-
-
-DEFAULT_CONFIG_PATH = get_repo_root() / "configs" / "pipelines" / "quality_control.yaml"
+    from scripts.utils.config import (
+        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+        load_config,
+        nested_get,
+    )
 
 
 @dataclass(frozen=True)
@@ -35,7 +38,22 @@ class QCThresholds:
     max_correlation_review_percent: float
 
 
-def load_qc_thresholds(path: str | Path = DEFAULT_CONFIG_PATH) -> QCThresholds:
+def load_performance_check(
+    path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+) -> dict[str, int]:
+    """Load and validate the shared pass/review/fail severity ranking."""
+    config = load_config(path)
+    order = nested_get(config, ("performance_check",))
+    if not isinstance(order, Mapping):
+        raise ValueError("quality_control config requires a performance_check mapping")
+    required = {"pass", "review", "fail"}
+    performance_check = {str(status).lower(): int(rank) for status, rank in order.items()}
+    if set(performance_check) != required:
+        raise ValueError(f"performance_check must define exactly {sorted(required)}")
+    return performance_check
+
+
+def load_qc_thresholds(path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH) -> QCThresholds:
     """Load and validate the shared quality-control review thresholds."""
     config = load_config(path)
     integrity = nested_get(config, ("quality_control", "recording_integrity"))

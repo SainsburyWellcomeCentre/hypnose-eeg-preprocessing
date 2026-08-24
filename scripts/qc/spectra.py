@@ -7,7 +7,7 @@ import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -18,24 +18,38 @@ from hypnose_helpers.viz.styles import ensure_style
 try:
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.qc.recording_integrity import select_recordings
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+    from scripts.utils.recording_selection import select_recordings
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra, integrated_power
-    from scripts.utils.config import load_config, nested_get, two_float_tuple
+    from scripts.qc.thresholds import load_performance_check
+    from scripts.utils.config import (
+        DEFAULT_SPECTRA_CONFIG_PATH,
+        load_config,
+        nested_get,
+        two_float_tuple,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.qc.recording_integrity import select_recordings
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+    from scripts.utils.recording_selection import select_recordings
     from scripts.analysis.emg import compute_state_emg_rms
     from scripts.analysis.power_spectra import compute_state_spectra, integrated_power
-    from scripts.utils.config import load_config, nested_get, two_float_tuple
+    from scripts.qc.thresholds import load_performance_check
+    from scripts.utils.config import (
+        DEFAULT_SPECTRA_CONFIG_PATH,
+        load_config,
+        nested_get,
+        two_float_tuple,
+    )
 
 
-QUALITY_ORDER = {"PASS": 0, "REVIEW": 1, "FAIL": 2}
-DEFAULT_CONFIG_PATH = get_repo_root() / "configs" / "pipelines" / "spectra.yaml"
+# Spectral/EMG quality statuses are upper-cased ("PASS"/"REVIEW"/"FAIL").
+PERFORMANCE_CHECK = {
+    status.upper(): rank for status, rank in load_performance_check().items()
+}
 
 
 @dataclass(frozen=True)
@@ -47,7 +61,7 @@ class SpectraConfig:
     chunk_epochs: int
     include_artifacts: bool
     frequency_bands_hz: dict[str, tuple[float, float]]
-    state_names: dict[int, str]
+    sleep_state_names: dict[int, str]
     state_colors: dict[int, str]
     wake_code: int
     nrem_code: int
@@ -60,31 +74,28 @@ class SpectraConfig:
     emg_state_order: tuple[int, ...]
 
 
-def load_spectra_config(path: str | Path = DEFAULT_CONFIG_PATH) -> SpectraConfig:
+def load_spectra_config(path: str | Path = DEFAULT_SPECTRA_CONFIG_PATH) -> SpectraConfig:
     """Load and validate spectral analysis and quality definitions."""
     config = load_config(path)
     analysis = nested_get(config, ("spectra", "analysis"))
     bands = nested_get(config, ("spectra", "frequency_bands_hz"))
-    states = nested_get(config, ("spectra", "sleep_states"))
+    names = nested_get(config, ("spectra", "sleep_state_names"))
+    colors = nested_get(config, ("spectra", "state_colors"))
     quality = nested_get(config, ("spectra", "quality"))
-    if not all(isinstance(section, Mapping) for section in (analysis, bands, states, quality)):
-        raise ValueError("Spectra config requires analysis, frequency bands, sleep states, and quality mappings")
+    if not all(
+        isinstance(section, Mapping)
+        for section in (analysis, bands, names, colors, quality)
+    ):
+        raise ValueError(
+            "Spectra config requires analysis, frequency bands, sleep state names, "
+            "state colors, and quality mappings"
+        )
 
-    state_definitions: dict[str, Mapping[str, Any]] = {}
-    for key in ("wake", "nrem", "rem"):
-        value = states.get(key)
-        if not isinstance(value, Mapping):
-            raise ValueError(f"Spectra config is missing sleep_states.{key}")
-        state_definitions[key] = value
-    state_codes = {key: int(value["code"]) for key, value in state_definitions.items()}
-    state_names = {
-        state_codes[key]: str(value["label"])
-        for key, value in state_definitions.items()
-    }
-    state_colors = {
-        state_codes[key]: str(value["color"])
-        for key, value in state_definitions.items()
-    }
+    sleep_state_names = {int(code): str(label) for code, label in names.items()}
+    state_colors = {int(code): str(color) for code, color in colors.items()}
+    if set(sleep_state_names) != set(state_colors):
+        raise ValueError("sleep_state_names and state_colors must define the same codes")
+
     frequency_bands = {
         str(name): two_float_tuple(value, f"{name} frequency band")
         for name, value in bands.items()
@@ -96,13 +107,22 @@ def load_spectra_config(path: str | Path = DEFAULT_CONFIG_PATH) -> SpectraConfig
         if low_hz < 0 or high_hz <= low_hz:
             raise ValueError(f"Invalid {name} frequency band: [{low_hz}, {high_hz}]")
 
+    wake_code = int(quality["wake_code"])
+    nrem_code = int(quality["nrem_code"])
+    rem_code = int(quality["rem_code"])
+    codes = {wake_code, nrem_code, rem_code}
+    if len(codes) != 3:
+        raise ValueError("wake_code, nrem_code, and rem_code must be distinct")
+    if codes != set(sleep_state_names):
+        raise ValueError(
+            "wake_code/nrem_code/rem_code must match the codes defined in "
+            "sleep_state_names"
+        )
+
     emg_order_value = quality["emg_state_order"]
     if isinstance(emg_order_value, str):
         emg_order_value = emg_order_value.strip("[]").split(",")
     emg_order = tuple(int(value) for value in emg_order_value)
-    codes = set(state_codes.values())
-    if len(codes) != 3:
-        raise ValueError("Wake, NREM, and REM must use distinct state codes")
     if set(emg_order) != codes or len(emg_order) != len(codes):
         raise ValueError("emg_state_order must contain every configured state exactly once")
     determining_channel = int(quality["determining_eeg_channel_number"])
@@ -116,11 +136,11 @@ def load_spectra_config(path: str | Path = DEFAULT_CONFIG_PATH) -> SpectraConfig
         chunk_epochs=int(analysis["chunk_epochs"]),
         include_artifacts=bool(analysis["include_artifacts"]),
         frequency_bands_hz=frequency_bands,
-        state_names=state_names,
+        sleep_state_names=sleep_state_names,
         state_colors=state_colors,
-        wake_code=state_codes["wake"],
-        nrem_code=state_codes["nrem"],
-        rem_code=state_codes["rem"],
+        wake_code=wake_code,
+        nrem_code=nrem_code,
+        rem_code=rem_code,
         determining_eeg_channel_number=determining_channel,
         wake_delta_max_nrem_ratio=float(quality["wake_delta_max_nrem_ratio"]),
         nrem_delta_min_wake_ratio=float(quality["nrem_delta_min_wake_ratio"]),
@@ -152,7 +172,7 @@ def build_spectral_quality_report(
             f"{config.determining_eeg_channel_number} > {len(eeg_channels)}"
         )
     emg_metrics: dict[int, dict[str, float | int]] = {}
-    for state in config.state_names:
+    for state in config.sleep_state_names:
         values = emg_rms.get(state)
         epoch_count = int(len(values)) if values is not None else 0
         flattened = (
@@ -176,10 +196,10 @@ def build_spectral_quality_report(
     emg_order_met = all(
         first >= second for first, second in zip(ordered_emg, ordered_emg[1:])
     )
-    emg_checks = {state: emg_order_met for state in config.state_names}
+    emg_checks = {state: emg_order_met for state in config.sleep_state_names}
 
     channel_metrics: dict[tuple[int, int], dict[str, float | bool | int]] = {}
-    for state in config.state_names:
+    for state in config.sleep_state_names:
         spectrum = spectra.get(state)
         for channel_index in range(len(eeg_channels)):
             channel_spectrum = (
@@ -216,7 +236,7 @@ def build_spectral_quality_report(
         config.nrem_code: "NREM delta relative power > configured Wake and REM ratios",
         config.rem_code: "REM theta/delta ratio > configured NREM ratio",
     }
-    for state, state_name in config.state_names.items():
+    for state, state_name in config.sleep_state_names.items():
         emg = emg_metrics[state]
         for channel_index, channel_name in enumerate(eeg_channels):
             metrics = channel_metrics[state, channel_index]
@@ -288,7 +308,7 @@ def build_spectral_quality_report(
                 emg_reason = "Expected Wake >= NREM >= REM EMG ordering was present"
 
             quality_status = max(
-                (spectral_status, emg_status), key=lambda value: QUALITY_ORDER[value]
+                (spectral_status, emg_status), key=lambda value: PERFORMANCE_CHECK[value]
             )
             rows.append(
                 {
@@ -331,7 +351,7 @@ def build_spectral_quality_report(
     report = pd.DataFrame(rows)
     determining = report.loc[report["determines_recording_quality"]]
     recording_status = max(
-        determining["quality_status"], key=lambda status: QUALITY_ORDER[str(status)]
+        determining["quality_status"], key=lambda status: PERFORMANCE_CHECK[str(status)]
     )
     report.insert(0, "recording_quality_status", recording_status)
     return report
@@ -359,7 +379,7 @@ def plot_state_spectra(
     for channel_index, (axis, channel_name) in enumerate(
         zip(axes[:, 0], channel_names)
     ):
-        for state, state_name in config.state_names.items():
+        for state, state_name in config.sleep_state_names.items():
             if state not in spectra:
                 continue
             axis.plot(
@@ -390,7 +410,7 @@ def plot_state_emg_rms(
     ensure_style()
     import matplotlib.pyplot as plt
 
-    states = [state for state in config.state_names if state in rms_by_state]
+    states = [state for state in config.sleep_state_names if state in rms_by_state]
     fig, axes = plt.subplots(
         len(channel_names),
         len(states),
@@ -416,7 +436,7 @@ def plot_state_emg_rms(
                 linewidth=0.4,
             )
             axis.set_title(
-                f"{channel_name} — {config.state_names[state]}\n"
+                f"{channel_name} — {config.sleep_state_names[state]}\n"
                 f"{len(values):,} epochs"
             )
             axis.set_xlabel("EMG RMS (µV)")
@@ -432,8 +452,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--spectra-config",
-        default=str(DEFAULT_CONFIG_PATH),
-        help=f"Spectra pipeline YAML (default: {DEFAULT_CONFIG_PATH}).",
+        default=str(DEFAULT_SPECTRA_CONFIG_PATH),
+        help=f"Spectra pipeline YAML (default: {DEFAULT_SPECTRA_CONFIG_PATH}).",
     )
     parser.add_argument("--subject", "--subjid", dest="subject", required=True)
     selector = parser.add_mutually_exclusive_group(required=True)
@@ -534,7 +554,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             fmax_hz=args.fmax,
             chunk_epochs=args.chunk_epochs,
         )
-        for state, name in config.state_names.items():
+        for state, name in config.sleep_state_names.items():
             print(f"  {name}: {counts[state]:,} epochs")
         fig = plot_state_spectra(
             frequencies,

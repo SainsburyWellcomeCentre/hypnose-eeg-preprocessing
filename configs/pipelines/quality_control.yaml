@@ -1,5 +1,12 @@
 name: quality_control_thresholds
 
+# Shared severity ranking for QC statuses, used to pick the most severe result
+# across sections/channels/states. Higher values are more severe.
+performance_check:
+  pass: 0
+  review: 1
+  fail: 2
+
 quality_control:
   recording_integrity:
     duration_tolerance_s: 1.0

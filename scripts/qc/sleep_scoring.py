@@ -15,28 +15,32 @@ try:
     from scripts.io.input_paths import scoring_path
     from scripts.io.output_paths import sleep_scoring_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import select_recordings
-    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
-    from scripts.utils.config import coalesce
+    from scripts.utils.recording_selection import select_recordings
+    from scripts.qc.thresholds import load_qc_thresholds
+    from scripts.utils.config import (
+        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+        coalesce,
+    )
     from scripts.utils.epochs import infer_epoch_seconds
+    from scripts.utils.sleep_states import load_sleep_states
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.input_paths import scoring_path
     from scripts.io.output_paths import sleep_scoring_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import select_recordings
-    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
-    from scripts.utils.config import coalesce
+    from scripts.utils.recording_selection import select_recordings
+    from scripts.qc.thresholds import load_qc_thresholds
+    from scripts.utils.config import (
+        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+        coalesce,
+    )
     from scripts.utils.epochs import infer_epoch_seconds
+    from scripts.utils.sleep_states import load_sleep_states
 
 
-STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM", 3: "Undefined"}
-STATE_PROBABILITY_COLUMNS = {
-    0: "prob_wake",
-    1: "prob_nrem",
-    2: "prob_rem",
-    3: "prob_undef",
-}
+_SLEEP_STATES = load_sleep_states()
+SLEEP_STATE_NAMES = _SLEEP_STATES.sleep_state_names
+STATE_PROBABILITY_COLUMNS = _SLEEP_STATES.probability_columns
 PROBABILITY_COLUMNS = list(STATE_PROBABILITY_COLUMNS.values())
 
 
@@ -62,7 +66,7 @@ def prepare_scoring_output(
     ).to_numpy(dtype=float)
     sorted_probabilities = np.sort(probabilities, axis=1)
     output["predicted_state"] = labels.map(
-        lambda value: STATE_NAMES.get(value, str(value))
+        lambda value: SLEEP_STATE_NAMES.get(value, str(value))
     )
     output["predicted_probability"] = [
         probabilities[index, label] if label in STATE_PROBABILITY_COLUMNS else np.nan
@@ -88,7 +92,7 @@ def scoring_summary(output: pd.DataFrame) -> pd.DataFrame:
     epoch_seconds = infer_epoch_seconds(output)
     total_epochs = len(output)
     rows: list[dict[str, object]] = []
-    for state in STATE_NAMES.values():
+    for state in SLEEP_STATE_NAMES.values():
         selected = output.loc[output["predicted_state"] == state]
         probabilities = pd.to_numeric(
             selected["predicted_probability"], errors="coerce"
@@ -156,8 +160,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--derivatives-root", default=None)
     parser.add_argument(
         "--qc-config",
-        default=str(DEFAULT_QC_CONFIG_PATH),
-        help=f"Quality-control threshold YAML (default: {DEFAULT_QC_CONFIG_PATH}).",
+        default=str(DEFAULT_QUALITY_CONTROL_CONFIG_PATH),
+        help=f"Quality-control threshold YAML (default: {DEFAULT_QUALITY_CONTROL_CONFIG_PATH}).",
     )
     parser.add_argument(
         "--confidence-threshold",

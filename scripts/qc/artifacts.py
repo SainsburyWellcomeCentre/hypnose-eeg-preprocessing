@@ -15,12 +15,14 @@ import pandas as pd
 
 try:
     from scripts.utils.epochs import infer_epoch_seconds
+    from scripts.utils.sleep_states import load_sleep_states
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.utils.epochs import infer_epoch_seconds
+    from scripts.utils.sleep_states import load_sleep_states
 
 
-SLEEP_STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM", 3: "Undefined"}
+SLEEP_STATE_NAMES = load_sleep_states().sleep_state_names
 
 
 def sleep_state_name(value: object) -> str:
@@ -269,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--epoch-seconds must be a positive finite number")
 
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import select_recordings
+    from scripts.utils.recording_selection import select_recordings
     from scripts.io.input_paths import artifact_path
     from scripts.io.output_paths import artifact_output_path
 

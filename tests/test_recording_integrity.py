@@ -11,12 +11,11 @@ import numpy as np
 from scripts.qc.recording_integrity import (
     Gap,
     _format_gap,
-    _source_stem_from_fif,
     build_parser,
     check_pair,
     detect_signal_gaps,
-    select_recordings,
 )
+from scripts.utils.recording_selection import _source_stem_from_fif, select_recordings
 
 
 class FakeRaw:

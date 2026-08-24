@@ -14,6 +14,20 @@ sleep_scoring:
 
   export_visbrain: true
 
+  # Predicted-state display labels, shared by every QC report. "Undefined" covers
+  # unscored epochs and has no display color.
+  sleep_state_names:
+    0: "Wake"
+    1: "NREM"
+    2: "REM"
+    3: "Undefined"
+
+  # Display colors for the scoreable states, shared by every QC plot.
+  state_colors:
+    0: "red"
+    1: "royalblue"
+    2: "goldenrod"
+
 # Interactive visual quality check for predictions already written by scoring.
 # Subject and date/session are always passed on the command line.
 sleep_scoring_view:

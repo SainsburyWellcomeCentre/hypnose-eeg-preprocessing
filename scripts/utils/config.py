@@ -5,6 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
+from scripts.io.repository_paths import get_repo_root
+
+
+DEFAULT_SPECTRA_CONFIG_PATH = get_repo_root() / "configs" / "pipelines" / "spectra.yaml"
+DEFAULT_QUALITY_CONTROL_CONFIG_PATH = (
+    get_repo_root() / "configs" / "pipelines" / "quality_control.yaml"
+)
+DEFAULT_SLEEP_SCORING_CONFIG_PATH = (
+    get_repo_root() / "configs" / "pipelines" / "sleep_scoring.yaml"
+)
+DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH = (
+    get_repo_root() / "configs" / "pipelines" / "artifact_detection.yaml"
+)
+
 
 def load_config(config_path: str | Path | None) -> dict[str, Any]:
     if config_path is None:

@@ -21,14 +21,21 @@ from hypnose_helpers.io.selectors import parse_sessions
 
 try:
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.utils.config import coalesce, load_config, nested_get
+    from scripts.utils.config import (
+        DEFAULT_SLEEP_SCORING_CONFIG_PATH,
+        coalesce,
+        load_config,
+        nested_get,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.utils.config import coalesce, load_config, nested_get
-
-
-DEFAULT_CONFIG_PATH = get_repo_root() / "configs" / "pipelines" / "sleep_scoring.yaml"
+    from scripts.utils.config import (
+        DEFAULT_SLEEP_SCORING_CONFIG_PATH,
+        coalesce,
+        load_config,
+        nested_get,
+    )
 
 
 @dataclass(frozen=True)
@@ -102,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG_PATH),
+        default=str(DEFAULT_SLEEP_SCORING_CONFIG_PATH),
         help="Pipeline YAML path (default: configs/pipelines/sleep_scoring.yaml).",
     )
     parser.add_argument(

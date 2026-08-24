@@ -55,11 +55,15 @@ class EdfSessionConcatenator:
         sink_dir: str | Path | None = None,
         edf_pattern: str = "**/*.edf",
         overwrite: bool = False,
+        trimmed_suffix: str = "_trimmed",
     ) -> None:
         self.source_dir = Path(source_dir)
         self.sink_dir = Path(sink_dir) if sink_dir is not None else None
         self.edf_pattern = edf_pattern
         self.overwrite = overwrite
+        # Matches inspect_and_trim_channels.py's preprocessing.trim_channels.output_suffix
+        # so a trimmed recording is preferred here under whatever suffix that step used.
+        self.trimmed_suffix = trimmed_suffix.lower()
 
     def find_multi_recording_sessions(self) -> dict[Path, list[Path]]:
         if not self.source_dir.exists():
@@ -95,7 +99,7 @@ class EdfSessionConcatenator:
             trimmed_files = [
                 file
                 for file in recording_files
-                if file.stem.lower().endswith("_trimmed")
+                if file.stem.lower().endswith(self.trimmed_suffix)
             ]
             selected.append(sorted(trimmed_files or recording_files)[0])
 
@@ -103,11 +107,11 @@ class EdfSessionConcatenator:
 
     def _recording_key(self, file: Path) -> str:
         stem = file.stem
-        if stem.lower().endswith("_trimmed"):
-            return stem[: -len("_trimmed")]
+        if stem.lower().endswith(self.trimmed_suffix):
+            return stem[: -len(self.trimmed_suffix)]
         return stem
 
-    def select_recordings(
+    def select_session_recordings(
         self,
         session_dir: str | Path,
         recording_selectors: list[str],
@@ -136,7 +140,7 @@ class EdfSessionConcatenator:
         session_dir: str | Path,
         recording_selectors: list[str],
     ) -> ConcatenationResult:
-        resolved_session_dir, files = self.select_recordings(session_dir, recording_selectors)
+        resolved_session_dir, files = self.select_session_recordings(session_dir, recording_selectors)
         relative_session_dir = resolved_session_dir.relative_to(self.source_dir)
         edf_output_path = self.output_path(resolved_session_dir, files)
         return ConcatenationResult(
@@ -153,7 +157,7 @@ class EdfSessionConcatenator:
         session_dir: str | Path,
         recording_selectors: list[str],
     ) -> ConcatenationResult:
-        resolved_session_dir, files = self.select_recordings(session_dir, recording_selectors)
+        resolved_session_dir, files = self.select_session_recordings(session_dir, recording_selectors)
         return self.concatenate_session(resolved_session_dir, files, sort_files=False)
 
     def _resolve_session_dir(self, session_dir: str | Path) -> Path:
@@ -491,12 +495,19 @@ def main() -> None:
         nested_get(config, ("preprocessing", "concatenate", "manifest")),
         get_derivatives_root() / "edf_concatenation_manifest.csv",
     )
+    trimmed_suffix = str(
+        coalesce(
+            nested_get(config, ("preprocessing", "trim_channels", "output_suffix")),
+            "_trimmed",
+        )
+    )
 
     concatenator = EdfSessionConcatenator(
         source_dir=source_dir,
         sink_dir=sink_dir,
         edf_pattern=edf_pattern,
         overwrite=args.overwrite,
+        trimmed_suffix=trimmed_suffix,
     )
 
     if (args.session_dir is None) != (args.recordings is None):

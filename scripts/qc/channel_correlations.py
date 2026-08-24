@@ -18,23 +18,42 @@ try:
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import select_recordings
-    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
-    from scripts.utils.config import coalesce
+    from scripts.qc.spectra import load_spectra_config
+    from scripts.utils.recording_selection import select_recordings
+    from scripts.qc.thresholds import load_qc_thresholds
+    from scripts.utils.config import (
+        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+        DEFAULT_SPECTRA_CONFIG_PATH,
+        coalesce,
+    )
+    from scripts.utils.sleep_states import load_sleep_states
     from scripts.analysis.correlation import compute_state_channel_correlations
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import select_recordings
-    from scripts.qc.thresholds import DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH, load_qc_thresholds
-    from scripts.utils.config import coalesce
+    from scripts.qc.spectra import load_spectra_config
+    from scripts.utils.recording_selection import select_recordings
+    from scripts.qc.thresholds import load_qc_thresholds
+    from scripts.utils.config import (
+        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+        DEFAULT_SPECTRA_CONFIG_PATH,
+        coalesce,
+    )
+    from scripts.utils.sleep_states import load_sleep_states
     from scripts.analysis.correlation import compute_state_channel_correlations
 
 
-STATE_NAMES = {0: "Wake", 1: "NREM", 2: "REM"}
-STATE_COLORS = {0: "red", 1: "royalblue", 2: "goldenrod"}
+_SLEEP_STATES = load_sleep_states()
+STATE_COLORS = _SLEEP_STATES.state_colors
+# Correlation plots only cover the scoreable states with a display color
+# (Wake/NREM/REM); "Undefined" has no color and is excluded here.
+SLEEP_STATE_NAMES = {
+    code: name
+    for code, name in _SLEEP_STATES.sleep_state_names.items()
+    if code in STATE_COLORS
+}
 
 
 def plot_correlation_distributions(
@@ -55,7 +74,7 @@ def plot_correlation_distributions(
     bin_edges = np.linspace(-1.0, 1.0, bins + 1)
     fig, axes = plt.subplots(
         len(pairs),
-        len(STATE_NAMES),
+        len(SLEEP_STATE_NAMES),
         figsize=(15, max(4, 3.1 * len(pairs))),
         sharex=True,
         sharey="row",
@@ -66,7 +85,7 @@ def plot_correlation_distributions(
             (correlations["channel_1"] == channel_1)
             & (correlations["channel_2"] == channel_2)
         ]
-        for column, (state, state_name) in enumerate(STATE_NAMES.items()):
+        for column, (state, state_name) in enumerate(SLEEP_STATE_NAMES.items()):
             axis = axes[row, column]
             values = pair_rows.loc[
                 pair_rows["sleep_state"] == state, "pearson_r"
@@ -104,13 +123,28 @@ def build_parser() -> argparse.ArgumentParser:
     selector.add_argument("--session", help="Session number, for example 1 or ses-1.")
     parser.add_argument("--rawdata-root", default=None)
     parser.add_argument("--derivatives-root", default=None)
-    parser.add_argument("--epoch-seconds", type=float, default=4.0)
-    parser.add_argument("--chunk-epochs", type=int, default=512)
+    parser.add_argument(
+        "--spectra-config",
+        default=str(DEFAULT_SPECTRA_CONFIG_PATH),
+        help=f"Spectra pipeline YAML (default: {DEFAULT_SPECTRA_CONFIG_PATH}).",
+    )
+    parser.add_argument(
+        "--epoch-seconds",
+        type=float,
+        default=None,
+        help="Analysis epoch duration (default: from --spectra-config).",
+    )
+    parser.add_argument(
+        "--chunk-epochs",
+        type=int,
+        default=None,
+        help="FIF read chunk size in epochs (default: from --spectra-config).",
+    )
     parser.add_argument("--bins", type=int, default=40)
     parser.add_argument(
         "--qc-config",
-        default=str(DEFAULT_QC_CONFIG_PATH),
-        help=f"Quality-control threshold YAML (default: {DEFAULT_QC_CONFIG_PATH}).",
+        default=str(DEFAULT_QUALITY_CONTROL_CONFIG_PATH),
+        help=f"Quality-control threshold YAML (default: {DEFAULT_QUALITY_CONTROL_CONFIG_PATH}).",
     )
     parser.add_argument(
         "--eeg-eeg-threshold",
@@ -149,7 +183,7 @@ def _print_summary(correlations: pd.DataFrame) -> None:
     for (channel_1, channel_2, state), values in grouped:
         lower, median, upper = np.quantile(values, [0.25, 0.5, 0.75])
         print(
-            f"  {channel_1} ↔ {channel_2} — {STATE_NAMES[int(state)]}: "
+            f"  {channel_1} ↔ {channel_2} — {SLEEP_STATE_NAMES[int(state)]}: "
             f"n={len(values):,}, median={median:.3f}, IQR={lower:.3f} to {upper:.3f}"
         )
 
@@ -208,7 +242,7 @@ def _print_review_counts(
         flagged_epoch_ids.update(rows.loc[flagged, "epoch_id"].astype(int))
         percentage = 100.0 * flagged_count / len(rows)
         print(
-            f"  {channel_1} ↔ {channel_2} — {STATE_NAMES[int(state)]}: "
+            f"  {channel_1} ↔ {channel_2} — {SLEEP_STATE_NAMES[int(state)]}: "
             f"{flagged_count:,} / {len(rows):,} ({percentage:.2f}%) "
             f"above |r| > {threshold:.2f}"
         )
@@ -225,6 +259,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         qc_thresholds = load_qc_thresholds(args.qc_config)
+        spectra_config = load_spectra_config(args.spectra_config)
     except (KeyError, TypeError, ValueError) as exc:
         parser.error(str(exc))
     args.eeg_eeg_threshold = coalesce(
@@ -233,6 +268,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.eeg_emg_threshold = coalesce(
         args.eeg_emg_threshold, qc_thresholds.eeg_emg_threshold
     )
+    args.epoch_seconds = coalesce(args.epoch_seconds, spectra_config.epoch_seconds)
+    args.chunk_epochs = coalesce(args.chunk_epochs, spectra_config.chunk_epochs)
 
     if not math.isfinite(args.epoch_seconds) or args.epoch_seconds <= 0:
         parser.error("--epoch-seconds must be a positive finite number")

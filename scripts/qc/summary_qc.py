@@ -18,20 +18,21 @@ try:
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import check_pair, select_recordings
+    from scripts.qc.recording_integrity import check_pair
+    from scripts.utils.recording_selection import select_recordings
     from scripts.qc.artifacts import build_artifact_report, channels_from_row
     from scripts.qc.sleep_scoring import prepare_scoring_output
     from scripts.qc.spectra import (
-        DEFAULT_CONFIG_PATH as DEFAULT_SPECTRA_CONFIG_PATH,
         SpectraConfig,
         build_spectral_quality_report,
         load_spectra_config,
     )
-    from scripts.qc.thresholds import (
-        DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH,
-        load_qc_thresholds,
+    from scripts.qc.thresholds import load_performance_check, load_qc_thresholds
+    from scripts.utils.config import (
+        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+        DEFAULT_SPECTRA_CONFIG_PATH,
+        coalesce,
     )
-    from scripts.utils.config import coalesce
     from scripts.utils.epochs import infer_epoch_seconds
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -41,24 +42,25 @@ except ModuleNotFoundError:
     from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import quality_control_output_path
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import check_pair, select_recordings
+    from scripts.qc.recording_integrity import check_pair
+    from scripts.utils.recording_selection import select_recordings
     from scripts.qc.artifacts import build_artifact_report, channels_from_row
     from scripts.qc.sleep_scoring import prepare_scoring_output
     from scripts.qc.spectra import (
-        DEFAULT_CONFIG_PATH as DEFAULT_SPECTRA_CONFIG_PATH,
         SpectraConfig,
         build_spectral_quality_report,
         load_spectra_config,
     )
-    from scripts.qc.thresholds import (
-        DEFAULT_CONFIG_PATH as DEFAULT_QC_CONFIG_PATH,
-        load_qc_thresholds,
+    from scripts.qc.thresholds import load_performance_check, load_qc_thresholds
+    from scripts.utils.config import (
+        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+        DEFAULT_SPECTRA_CONFIG_PATH,
+        coalesce,
     )
-    from scripts.utils.config import coalesce
     from scripts.utils.epochs import infer_epoch_seconds
 
 
-STATUS_ORDER = {"pass": 0, "review": 1, "fail": 2}
+PERFORMANCE_CHECK = load_performance_check()
 SECTION_COLUMNS = ["section", "status", "metric", "value", "threshold", "detail"]
 REVIEW_COLUMNS = [
     "section",
@@ -80,7 +82,7 @@ def overall_status(sections: pd.DataFrame) -> str:
         return "fail"
     return max(
         sections["status"].astype(str),
-        key=lambda status: STATUS_ORDER.get(status, STATUS_ORDER["fail"]),
+        key=lambda status: PERFORMANCE_CHECK.get(status, PERFORMANCE_CHECK["fail"]),
     )
 
 
@@ -95,11 +97,11 @@ def spectral_quality_sections(
 
     spectral_status = max(
         determining["spectral_quality_status"].str.lower(),
-        key=lambda status: STATUS_ORDER[status],
+        key=lambda status: PERFORMANCE_CHECK[status],
     )
     emg_status = max(
         determining["emg_quality_status"].str.lower(),
-        key=lambda status: STATUS_ORDER[status],
+        key=lambda status: PERFORMANCE_CHECK[status],
     )
     spectral_passes = int(determining["frequency_expectation_met"].sum())
     emg_passes = int(determining["emg_expectation_met"].sum())
@@ -133,7 +135,7 @@ def spectral_quality_sections(
             "metric": "configured_state_emg_order_met",
             "value": f"{emg_passes}/{state_count}",
             "threshold": ">=".join(
-                config.state_names[state] for state in config.emg_state_order
+                config.sleep_state_names[state] for state in config.emg_state_order
             ),
             "detail": "; ".join(
                 f"{row.sleep_state} median={row.emg_rms_median_uv:g} µV, "
@@ -234,8 +236,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--qc-config",
-        default=str(DEFAULT_QC_CONFIG_PATH),
-        help=f"Quality-control threshold YAML (default: {DEFAULT_QC_CONFIG_PATH}).",
+        default=str(DEFAULT_QUALITY_CONTROL_CONFIG_PATH),
+        help=f"Quality-control threshold YAML (default: {DEFAULT_QUALITY_CONTROL_CONFIG_PATH}).",
     )
     parser.add_argument("--subject", "--subjid", dest="subject", required=True)
     selector = parser.add_mutually_exclusive_group(required=True)
@@ -447,7 +449,7 @@ def run_qc(
             start_s=float(row.time_s),
             end_s=float(row.time_s) + args.analysis_epoch_seconds,
             sleep_state=str(
-                spectra_config.state_names.get(int(row.sleep_state), row.sleep_state)
+                spectra_config.sleep_state_names.get(int(row.sleep_state), row.sleep_state)
             ),
             channels=f"{row.channel_1} ↔ {row.channel_2}",
             metric="absolute_pearson_r",

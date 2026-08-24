@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 
 from scripts.qc.spectra import (
-    DEFAULT_CONFIG_PATH,
     build_parser,
     build_spectral_quality_report,
     load_spectra_config,
@@ -27,12 +26,13 @@ from scripts.io.output_paths import (
     quality_control_output_path,
     sleep_scoring_output_path,
 )
+from scripts.utils.config import DEFAULT_SPECTRA_CONFIG_PATH
 from scripts.utils.epochs import artifact_epoch_ids, epoch_sleep_states
 
 
 class SleepStateSpectraTests(unittest.TestCase):
     def test_spectral_definitions_are_loaded_from_pipeline_config(self) -> None:
-        config = load_spectra_config(DEFAULT_CONFIG_PATH)
+        config = load_spectra_config(DEFAULT_SPECTRA_CONFIG_PATH)
 
         self.assertEqual(config.frequency_bands_hz["theta"], (4.0, 10.0))
         self.assertEqual(config.determining_eeg_channel_number, 1)

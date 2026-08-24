@@ -29,7 +29,12 @@ try:
     from scripts.analysis.statistics import robust_upper_z
     from scripts.io.mne_io import import_mne
     from scripts.io.output_paths import artifact_output_paths
-    from scripts.utils.config import load_config, nested_get, two_float_tuple
+    from scripts.utils.config import (
+        DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
+        load_config,
+        nested_get,
+        two_float_tuple,
+    )
     from scripts.utils.epochs import (
         align_epoch_states,
         choose_chunk_epochs,
@@ -42,19 +47,18 @@ except ModuleNotFoundError:
     from scripts.analysis.statistics import robust_upper_z
     from scripts.io.mne_io import import_mne
     from scripts.io.output_paths import artifact_output_paths
-    from scripts.utils.config import load_config, nested_get, two_float_tuple
+    from scripts.utils.config import (
+        DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
+        load_config,
+        nested_get,
+        two_float_tuple,
+    )
     from scripts.utils.epochs import (
         align_epoch_states,
         choose_chunk_epochs,
         complete_epoch_count,
         epoch_batch,
     )
-
-
-DEFAULT_CONFIG_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "configs/pipelines/artifact_detection.yaml"
-)
 
 
 EEG_SCORE_FEATURES = (
@@ -600,8 +604,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG_PATH),
-        help=f"Artifact detection YAML config (default: {DEFAULT_CONFIG_PATH}).",
+        default=str(DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH),
+        help=f"Artifact detection YAML config (default: {DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH}).",
     )
     parser.add_argument("--epoch-seconds", type=float, default=None)
     parser.add_argument(
