@@ -36,24 +36,24 @@ Every listed call site (`recording_integrity.py`, `concatenate_recordings.py`/
   `preprocessing.trim_channels.output_suffix` instead of hardcoding `"_trimmed"`).
   Worth a shared constant/config value so both scripts agree on the concat suffix.~~
 
-## 3. `detect_artifacts.py` performance
+## ~~3. `detect_artifacts.py` performance~~
 
-`scripts/preprocessing/detect_artifacts.py` computes epoch features with numpy
+~~`scripts/preprocessing/detect_artifacts.py` computes epoch features with numpy
 (vectorized per chunk) but then serializes them with Python-level loops, which is
-the likely bottleneck on large recordings:
+the likely bottleneck on large recordings:~~
 
-- `extract_features()` (~line 306): nested
+- ~~`extract_features()` (~line 306): nested
   `for offset in range(epoch_count): for channel_index, channel in enumerate(...):`
   appends one dict per (epoch, channel) pair to `eeg_rows`/`emg_rows` before calling
   `pd.DataFrame(...)`. Building the DataFrame directly from the already-vectorized
   numpy arrays (e.g. via flattened columns or `pd.DataFrame` from a dict of 1-D
-  arrays) would skip the per-row Python object construction.
-- `classify_artifacts()` (~line 445): `for row in eeg_features.to_dict(orient="records"):`
+  arrays) would skip the per-row Python object construction.~~
+- ~~`classify_artifacts()` (~line 445): `for row in eeg_features.to_dict(orient="records"):`
   rebuilds an `artifact_reason` string per row in Python. Candidate for a vectorized
   `np.where`/string-join approach over the underlying boolean/z-score arrays instead
-  of round-tripping through per-row dicts.
-- Profile against a real multi-hour recording first to confirm these are the actual
-  hot spots before rewriting.
+  of round-tripping through per-row dicts.~~
+- ~~Profile against a real multi-hour recording first to confirm these are the actual
+  hot spots before rewriting.~~
 
 ## 4. Match input CLI for file locations to hypnose-helpers
 
