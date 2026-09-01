@@ -11,53 +11,30 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-try:
-    from scripts.analysis.correlation import compute_state_channel_correlations
-    from scripts.analysis.emg import compute_state_emg_rms
-    from scripts.analysis.power_spectra import compute_state_spectra
-    from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path, save_csv
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import check_pair
-    from scripts.utils.recording_selection import select_recordings
-    from scripts.qc.artifacts import build_artifact_report, channels_from_row
-    from scripts.qc.sleep_scoring import prepare_scoring_output
-    from scripts.qc.spectra import (
-        SpectraConfig,
-        build_spectral_quality_report,
-        load_spectra_config,
-    )
-    from scripts.qc.thresholds import load_performance_check, load_qc_thresholds
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        DEFAULT_SPECTRA_CONFIG_PATH,
-        coalesce,
-    )
-    from scripts.utils.epochs import infer_epoch_seconds
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.analysis.correlation import compute_state_channel_correlations
-    from scripts.analysis.emg import compute_state_emg_rms
-    from scripts.analysis.power_spectra import compute_state_spectra
-    from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path, save_csv
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.recording_integrity import check_pair
-    from scripts.utils.recording_selection import select_recordings
-    from scripts.qc.artifacts import build_artifact_report, channels_from_row
-    from scripts.qc.sleep_scoring import prepare_scoring_output
-    from scripts.qc.spectra import (
-        SpectraConfig,
-        build_spectral_quality_report,
-        load_spectra_config,
-    )
-    from scripts.qc.thresholds import load_performance_check, load_qc_thresholds
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        DEFAULT_SPECTRA_CONFIG_PATH,
-        coalesce,
-    )
-    from scripts.utils.epochs import infer_epoch_seconds
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.analysis.correlation import compute_state_channel_correlations
+from scripts.analysis.emg import compute_state_emg_rms
+from scripts.analysis.power_spectra import compute_state_spectra
+from scripts.io.input_paths import artifact_path, scoring_path
+from scripts.io.output_paths import quality_control_output_path, save_csv
+from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+from scripts.qc.recording_integrity import check_pair
+from scripts.utils.recording_selection import select_recordings
+from scripts.qc.artifacts import build_artifact_report, channels_from_row
+from scripts.qc.sleep_scoring import prepare_scoring_output
+from scripts.qc.spectra import (
+    SpectraConfig,
+    build_spectral_quality_report,
+    load_spectra_config,
+)
+from scripts.qc.thresholds import load_performance_check, load_qc_thresholds
+from scripts.utils.config import (
+    DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+    DEFAULT_SPECTRA_CONFIG_PATH,
+    coalesce,
+)
+from scripts.utils.epochs import infer_epoch_seconds
 
 
 PERFORMANCE_CHECK = load_performance_check()

@@ -27,17 +27,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-try:
-    from scripts.io.mne_io import export_raw_edf, import_mne
-    from scripts.io.repository_paths import get_rawdata_root
-    from scripts.utils.config import coalesce, load_config, nested_get
-    from scripts.utils.recording_selection import find_session_dirs
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.mne_io import export_raw_edf, import_mne
-    from scripts.io.repository_paths import get_rawdata_root
-    from scripts.utils.config import coalesce, load_config, nested_get
-    from scripts.utils.recording_selection import find_session_dirs
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.io.mne_io import export_raw_edf, import_mne
+from scripts.io.repository_paths import get_rawdata_root
+from scripts.utils.config import coalesce, load_config, nested_get
+from scripts.utils.recording_selection import find_session_dirs
 
 
 def inspect_edf(

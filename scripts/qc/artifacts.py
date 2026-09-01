@@ -13,15 +13,11 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-try:
-    from scripts.io.output_paths import save_csv
-    from scripts.utils.epochs import infer_epoch_seconds
-    from scripts.utils.sleep_states import load_sleep_states
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.output_paths import save_csv
-    from scripts.utils.epochs import infer_epoch_seconds
-    from scripts.utils.sleep_states import load_sleep_states
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.io.output_paths import save_csv
+from scripts.utils.epochs import infer_epoch_seconds
+from scripts.utils.sleep_states import load_sleep_states
 
 
 SLEEP_STATE_NAMES = load_sleep_states().sleep_state_names

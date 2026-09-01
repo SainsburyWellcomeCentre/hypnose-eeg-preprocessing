@@ -17,47 +17,27 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-try:
-    from scripts.analysis.power_spectra import bandpower
-    from scripts.analysis.statistics import robust_upper_z
-    from scripts.io.input_paths import scoring_path
-    from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import artifact_output_paths, save_csv
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.utils.config import (
-        DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
-        load_config,
-        nested_get,
-        two_float_tuple,
-    )
-    from scripts.utils.epochs import (
-        align_epoch_states,
-        choose_chunk_epochs,
-        complete_epoch_count,
-        epoch_batch,
-    )
-    from scripts.utils.recording_selection import select_recordings
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.analysis.power_spectra import bandpower
-    from scripts.analysis.statistics import robust_upper_z
-    from scripts.io.input_paths import scoring_path
-    from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import artifact_output_paths, save_csv
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.utils.config import (
-        DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
-        load_config,
-        nested_get,
-        two_float_tuple,
-    )
-    from scripts.utils.epochs import (
-        align_epoch_states,
-        choose_chunk_epochs,
-        complete_epoch_count,
-        epoch_batch,
-    )
-    from scripts.utils.recording_selection import select_recordings
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.analysis.power_spectra import bandpower
+from scripts.analysis.statistics import robust_upper_z
+from scripts.io.input_paths import scoring_path
+from scripts.io.mne_io import import_mne
+from scripts.io.output_paths import artifact_output_paths, save_csv
+from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+from scripts.utils.config import (
+    DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
+    load_config,
+    nested_get,
+    two_float_tuple,
+)
+from scripts.utils.epochs import (
+    align_epoch_states,
+    choose_chunk_epochs,
+    complete_epoch_count,
+    epoch_batch,
+)
+from scripts.utils.recording_selection import select_recordings
 
 
 @dataclass(frozen=True)

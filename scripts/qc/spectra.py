@@ -15,35 +15,21 @@ from hypnose_helpers.io.selectors import parse_subject
 from hypnose_helpers.viz.save import save_figure
 from hypnose_helpers.viz.styles import ensure_style
 
-try:
-    from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path, save_csv
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.utils.recording_selection import select_recordings
-    from scripts.analysis.emg import compute_state_emg_rms
-    from scripts.analysis.power_spectra import compute_state_spectra, integrated_power
-    from scripts.qc.thresholds import load_performance_check
-    from scripts.utils.config import (
-        DEFAULT_SPECTRA_CONFIG_PATH,
-        load_config,
-        nested_get,
-        two_float_tuple,
-    )
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path, save_csv
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.utils.recording_selection import select_recordings
-    from scripts.analysis.emg import compute_state_emg_rms
-    from scripts.analysis.power_spectra import compute_state_spectra, integrated_power
-    from scripts.qc.thresholds import load_performance_check
-    from scripts.utils.config import (
-        DEFAULT_SPECTRA_CONFIG_PATH,
-        load_config,
-        nested_get,
-        two_float_tuple,
-    )
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.io.input_paths import artifact_path, scoring_path
+from scripts.io.output_paths import quality_control_output_path, save_csv
+from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+from scripts.utils.recording_selection import select_recordings
+from scripts.analysis.emg import compute_state_emg_rms
+from scripts.analysis.power_spectra import compute_state_spectra, integrated_power
+from scripts.qc.thresholds import load_performance_check
+from scripts.utils.config import (
+    DEFAULT_SPECTRA_CONFIG_PATH,
+    load_config,
+    nested_get,
+    two_float_tuple,
+)
 
 
 # Spectral/EMG quality statuses are upper-cased ("PASS"/"REVIEW"/"FAIL").

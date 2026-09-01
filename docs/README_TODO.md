@@ -76,7 +76,10 @@ subpackage layout (`tests/preprocessing/`, `tests/qc/`, `tests/sleep_scoring/`,
 `tests/analysis/`) so each test file's location matches the script it
 exercises.
 
-## 6. Remove need for sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+~~## 6. Remove need for sys.path.insert(0, str(Path(__file__).resolve().parents[2]))~~
+
+~~Resolve duplication by ensuring that the repo root is specified in each repo and thus
+each scripts package is only referenced once.~~
 
 ## 7. inspect_and_trim_channels.py needs better method for running and provided info
 

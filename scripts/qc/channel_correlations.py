@@ -14,35 +14,21 @@ from hypnose_helpers.io.selectors import parse_subject
 from hypnose_helpers.viz.save import save_figure
 from hypnose_helpers.viz.styles import ensure_style
 
-try:
-    from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.spectra import load_spectra_config
-    from scripts.utils.recording_selection import select_recordings
-    from scripts.qc.thresholds import load_qc_thresholds
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        DEFAULT_SPECTRA_CONFIG_PATH,
-        coalesce,
-    )
-    from scripts.utils.sleep_states import load_sleep_states
-    from scripts.analysis.correlation import compute_state_channel_correlations
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.input_paths import artifact_path, scoring_path
-    from scripts.io.output_paths import quality_control_output_path
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.qc.spectra import load_spectra_config
-    from scripts.utils.recording_selection import select_recordings
-    from scripts.qc.thresholds import load_qc_thresholds
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        DEFAULT_SPECTRA_CONFIG_PATH,
-        coalesce,
-    )
-    from scripts.utils.sleep_states import load_sleep_states
-    from scripts.analysis.correlation import compute_state_channel_correlations
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.io.input_paths import artifact_path, scoring_path
+from scripts.io.output_paths import quality_control_output_path
+from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+from scripts.qc.spectra import load_spectra_config
+from scripts.utils.recording_selection import select_recordings
+from scripts.qc.thresholds import load_qc_thresholds
+from scripts.utils.config import (
+    DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+    DEFAULT_SPECTRA_CONFIG_PATH,
+    coalesce,
+)
+from scripts.utils.sleep_states import load_sleep_states
+from scripts.analysis.correlation import compute_state_channel_correlations
 
 
 _SLEEP_STATES = load_sleep_states()

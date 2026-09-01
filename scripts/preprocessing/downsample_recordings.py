@@ -17,17 +17,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-try:
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import save_csv_rows
-    from scripts.utils.config import coalesce, load_config, nested_get
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import save_csv_rows
-    from scripts.utils.config import coalesce, load_config, nested_get
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+from scripts.io.mne_io import import_mne
+from scripts.io.output_paths import save_csv_rows
+from scripts.utils.config import coalesce, load_config, nested_get
 
 
 @dataclass(frozen=True)

@@ -7,19 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-try:
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        load_config,
-        nested_get,
-    )
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        load_config,
-        nested_get,
-    )
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.utils.config import (
+    DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+    load_config,
+    nested_get,
+)
 
 
 @dataclass(frozen=True)

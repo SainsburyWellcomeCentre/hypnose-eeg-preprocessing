@@ -11,31 +11,19 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-try:
-    from scripts.io.input_paths import scoring_path
-    from scripts.io.output_paths import save_csv, sleep_scoring_output_path
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.utils.recording_selection import select_recordings
-    from scripts.qc.thresholds import load_qc_thresholds
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        coalesce,
-    )
-    from scripts.utils.epochs import infer_epoch_seconds
-    from scripts.utils.sleep_states import load_sleep_states
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.input_paths import scoring_path
-    from scripts.io.output_paths import save_csv, sleep_scoring_output_path
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.utils.recording_selection import select_recordings
-    from scripts.qc.thresholds import load_qc_thresholds
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        coalesce,
-    )
-    from scripts.utils.epochs import infer_epoch_seconds
-    from scripts.utils.sleep_states import load_sleep_states
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.io.input_paths import scoring_path
+from scripts.io.output_paths import save_csv, sleep_scoring_output_path
+from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+from scripts.utils.recording_selection import select_recordings
+from scripts.qc.thresholds import load_qc_thresholds
+from scripts.utils.config import (
+    DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+    coalesce,
+)
+from scripts.utils.epochs import infer_epoch_seconds
+from scripts.utils.sleep_states import load_sleep_states
 
 
 _SLEEP_STATES = load_sleep_states()

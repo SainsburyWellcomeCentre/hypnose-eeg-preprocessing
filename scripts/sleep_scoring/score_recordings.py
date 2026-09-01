@@ -19,23 +19,15 @@ from typing import Any, Callable, Sequence
 from hypnose_helpers.io.layout import SessionLayout
 from hypnose_helpers.io.selectors import parse_sessions
 
-try:
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.utils.config import (
-        DEFAULT_SLEEP_SCORING_CONFIG_PATH,
-        coalesce,
-        load_config,
-        nested_get,
-    )
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
-    from scripts.utils.config import (
-        DEFAULT_SLEEP_SCORING_CONFIG_PATH,
-        coalesce,
-        load_config,
-        nested_get,
-    )
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
+from scripts.utils.config import (
+    DEFAULT_SLEEP_SCORING_CONFIG_PATH,
+    coalesce,
+    load_config,
+    nested_get,
+)
 
 
 @dataclass(frozen=True)

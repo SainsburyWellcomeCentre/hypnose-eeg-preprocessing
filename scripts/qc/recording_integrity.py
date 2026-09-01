@@ -18,27 +18,17 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
-try:
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import quality_control_output_path, save_csv_rows
-    from scripts.qc.thresholds import load_qc_thresholds
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        coalesce,
-    )
-    from scripts.utils.recording_selection import pair_recordings, select_recordings
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from scripts.io.mne_io import import_mne
-    from scripts.io.output_paths import quality_control_output_path, save_csv_rows
-    from scripts.qc.thresholds import load_qc_thresholds
-    from scripts.utils.config import (
-        DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-        coalesce,
-    )
-    from scripts.utils.recording_selection import pair_recordings, select_recordings
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
+from scripts.io.mne_io import import_mne
+from scripts.io.output_paths import quality_control_output_path, save_csv_rows
+from scripts.qc.thresholds import load_qc_thresholds
+from scripts.utils.config import (
+    DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+    coalesce,
+)
+from scripts.utils.recording_selection import pair_recordings, select_recordings
 
 
 GAP_ANNOTATION_TERMS = ("gap", "boundary", "discontinu", "dropout", "missing")
