@@ -66,7 +66,15 @@ mechanism `scripts/io/input_paths.py` (`resolve_session_dir()`) and
 matching, `_id-`/other subject-dir suffixes, and duplicate-session detection are
 handled in one place instead of three.
 
-## 5. Understand purpose of tests and see if it can be reorganised
+## ~~5. Understand purpose of tests and see if it can be reorganised~~
+
+~~This is used for creating test scripts for when changes are made to
+`scripts/`, to catch regressions before they reach real recordings~~ — done:
+a local `.git/hooks/pre-commit` hook runs the full suite before every commit
+(bypassable with `--no-verify`), and `tests/` now mirrors the `scripts/`
+subpackage layout (`tests/preprocessing/`, `tests/qc/`, `tests/sleep_scoring/`,
+`tests/analysis/`) so each test file's location matches the script it
+exercises.
 
 ## 6. Remove need for sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 

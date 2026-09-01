@@ -19,7 +19,7 @@ from scripts.utils.epochs import align_epoch_states, complete_epoch_count, epoch
 
 
 CONFIG_PATH = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "configs/pipelines/artifact_detection.yaml"
 )
 
