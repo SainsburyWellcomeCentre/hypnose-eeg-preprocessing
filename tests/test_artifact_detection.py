@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,7 +9,11 @@ import pandas as pd
 
 from scripts.analysis.power_spectra import bandpower, integrated_power
 from scripts.io.output_paths import artifact_output_paths
-from scripts.preprocessing.detect_artifacts import ArtifactDetector
+from scripts.preprocessing.detect_artifacts import (
+    ArtifactDetector,
+    _resolve_paths,
+    build_parser,
+)
 from scripts.utils.config import two_float_tuple
 from scripts.utils.epochs import align_epoch_states, complete_epoch_count, epoch_batch
 
@@ -92,6 +97,55 @@ class ArtifactDetectionTests(unittest.TestCase):
         )
         self.assertEqual(csv_path, expected.with_suffix(".csv"))
         self.assertEqual(parquet_path, expected.with_suffix(".parquet"))
+
+    def test_cli_selects_subject_by_date_or_session(self) -> None:
+        by_date = build_parser().parse_args(
+            ["--subject", "66", "--date", "20260717"]
+        )
+        self.assertEqual((by_date.subject, by_date.date), ("66", "20260717"))
+        by_session = build_parser().parse_args(
+            ["--subject", "66", "--session", "1"]
+        )
+        self.assertEqual(by_session.session, "1")
+
+    def test_cli_resolves_fif_and_scoring_paths_from_selectors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            raw_session = rawdata / "sub-066" / "ses-1_date-20260717" / "ephys"
+            deriv_session = derivatives / "sub-066" / "ses-1_date-20260717"
+            raw_session.mkdir(parents=True)
+            (deriv_session / "ephys").mkdir(parents=True)
+            scoring_dir = deriv_session / "sleep_scoring"
+            scoring_dir.mkdir()
+
+            edf = raw_session / "recording.edf"
+            fif = deriv_session / "ephys" / "recording_raw.fif"
+            scoring = scoring_dir / "recording_somnotate_predictions.parquet"
+            edf.touch()
+            fif.touch()
+            scoring.touch()
+
+            parser = build_parser()
+            args = parser.parse_args(
+                [
+                    "--subject", "66", "--date", "20260717",
+                    "--rawdata-root", str(rawdata),
+                    "--derivatives-root", str(derivatives),
+                ]
+            )
+            fif_path, sleep_parquet_path = _resolve_paths(parser, args)
+            self.assertEqual(fif_path, fif)
+            self.assertEqual(sleep_parquet_path, scoring)
+
+    def test_cli_rejects_mixing_positional_path_and_selectors(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(
+            ["recording.fif", "scores.parquet", "--subject", "66", "--date", "20260717"]
+        )
+        with self.assertRaises(SystemExit):
+            _resolve_paths(parser, args)
 
 
 if __name__ == "__main__":

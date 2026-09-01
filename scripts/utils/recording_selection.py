@@ -5,8 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
-SESSION_DIR_RE = re.compile(r"^ses-([^-_]+)_date-(\d{8})$")
+from hypnose_helpers.io.layout import SessionLayout, normalize_subjid
 
 
 def _source_stem_from_fif(path: Path) -> str:
@@ -14,20 +13,20 @@ def _source_stem_from_fif(path: Path) -> str:
     return re.sub(r"_resampled-[0-9p.]+hz$", "", stem, flags=re.IGNORECASE)
 
 
-def _subject_label(subject: str | int) -> str:
-    value = str(subject)
-    if value.startswith("sub-"):
-        value = value[4:]
-    return f"sub-{int(value):03d}" if value.isdigit() else f"sub-{value}"
-
-
-def _session_matches(actual: str, requested: str | int) -> bool:
-    requested_text = str(requested)
-    if requested_text.startswith("ses-"):
-        requested_text = requested_text[4:]
-    if actual.isdigit() and requested_text.isdigit():
-        return int(actual) == int(requested_text)
-    return actual == requested_text
+def find_session_dirs(
+    rawdata_root: Path,
+    *,
+    subject: str | int,
+    date: str | int | None = None,
+    session: str | int | None = None,
+) -> list[Path]:
+    """Resolve rawdata session directories using subject and date/session selectors."""
+    layout = SessionLayout(rawdata_root, name="rawdata")
+    sessions = layout.find_sessions(subject, ses=session, date=date)
+    if not sessions:
+        selector = f"date {date}" if date is not None else f"session {session}"
+        raise FileNotFoundError(f"No {selector} found for {normalize_subjid(subject)}")
+    return [session_ref.path for session_ref in sessions]
 
 
 def select_recordings(
@@ -39,45 +38,22 @@ def select_recordings(
     session: str | int | None = None,
 ) -> list[tuple[Path, Path]]:
     """Resolve matching EDF/FIF pairs using subject and date/session selectors."""
-    subject_label = _subject_label(subject)
-    subject_dirs = sorted(
-        path
-        for path in rawdata_root.iterdir()
-        if path.is_dir() and path.name.startswith(subject_label)
-    )
-    if not subject_dirs:
-        raise FileNotFoundError(f"No rawdata directory found for {subject_label}")
+    session_dirs = find_session_dirs(rawdata_root, subject=subject, date=date, session=session)
 
     pairs: list[tuple[Path, Path]] = []
-    matched_sessions: list[Path] = []
-    for subject_dir in subject_dirs:
-        for session_dir in sorted(subject_dir.iterdir()):
-            if not session_dir.is_dir():
-                continue
-            match = SESSION_DIR_RE.match(session_dir.name)
-            if match is None:
-                continue
-            session_number, session_date = match.groups()
-            if date is not None and session_date != str(date):
-                continue
-            if session is not None and not _session_matches(session_number, session):
-                continue
-            matched_sessions.append(session_dir)
-            relative_session = session_dir.relative_to(rawdata_root).as_posix()
-            pairs.extend(
-                pair_recordings(
-                    rawdata_root,
-                    derivatives_root,
-                    edf_pattern=f"{relative_session}/**/*.edf",
-                    fif_pattern=f"{relative_session}/**/*_raw.fif",
-                )
+    for session_dir in session_dirs:
+        relative_session = session_dir.relative_to(rawdata_root).as_posix()
+        pairs.extend(
+            pair_recordings(
+                rawdata_root,
+                derivatives_root,
+                edf_pattern=f"{relative_session}/**/*.edf",
+                fif_pattern=f"{relative_session}/**/*_raw.fif",
             )
+        )
 
-    if not matched_sessions:
-        selector = f"date {date}" if date is not None else f"session {session}"
-        raise FileNotFoundError(f"No {selector} found for {subject_label}")
     if not pairs:
-        listing = ", ".join(str(path) for path in matched_sessions)
+        listing = ", ".join(str(path) for path in session_dirs)
         raise FileNotFoundError(f"No matching EDF/FIF pairs beneath: {listing}")
     return pairs
 

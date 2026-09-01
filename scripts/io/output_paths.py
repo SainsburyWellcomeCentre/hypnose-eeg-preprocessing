@@ -6,11 +6,9 @@ import csv
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hypnose_helpers.io.layout import (
-    SessionLayout,
-    parse_session_dirname,
-    parse_subject_dirname,
-)
+from hypnose_helpers.io.layout import parse_session_dirname, parse_subject_dirname
+
+from scripts.io.input_paths import resolve_session_dir
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -66,27 +64,10 @@ def session_output_dir(
         raise ValueError(
             f"Unknown output group {output_group!r}; expected one of {sorted(OUTPUT_GROUPS)}"
         )
-    recording = Path(recording_path)
-    rawdata = Path(rawdata_root)
-    try:
-        relative = recording.relative_to(rawdata)
-    except ValueError as exc:
-        raise ValueError(f"Recording is not beneath the rawdata root: {recording}") from exc
-    if len(relative.parts) < 3:
-        raise ValueError(
-            f"Recording is not inside a subject/session hierarchy: {recording}"
-        )
-    subject = parse_subject_dirname(relative.parts[0])
-    session = parse_session_dirname(relative.parts[1])
-    if subject is None or session is None:
-        raise ValueError(
-            f"Recording does not use the shared subject/session layout: {recording}"
-        )
-    session_number, date = session
-    layout = SessionLayout(Path(derivatives_root), name="derivatives")
-    selector = {"ses": session_number} if session_number is not None else {"date": date}
-    session_ref = layout.find_session(subject, **selector)
-    return session_ref.path / output_group
+    session_dir = resolve_session_dir(
+        recording_path, rawdata_root, derivatives_root, name="derivatives"
+    )
+    return session_dir / output_group
 
 
 def session_output_path(

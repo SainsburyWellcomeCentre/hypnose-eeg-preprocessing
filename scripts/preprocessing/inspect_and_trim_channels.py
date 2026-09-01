@@ -29,11 +29,15 @@ from typing import Any
 
 try:
     from scripts.io.mne_io import export_raw_edf, import_mne
+    from scripts.io.repository_paths import get_rawdata_root
     from scripts.utils.config import coalesce, load_config, nested_get
+    from scripts.utils.recording_selection import find_session_dirs
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.io.mne_io import export_raw_edf, import_mne
+    from scripts.io.repository_paths import get_rawdata_root
     from scripts.utils.config import coalesce, load_config, nested_get
+    from scripts.utils.recording_selection import find_session_dirs
 
 
 def inspect_edf(
@@ -133,12 +137,56 @@ def _export_raw_edf(raw: Any, output_path: Path, overwrite: bool) -> None:
     export_raw_edf(raw, output_path, overwrite=overwrite)
 
 
-def main() -> None:
+def _resolve_edf_path(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Path:
+    """Resolve the EDF to inspect either from an explicit path or subject/session selectors."""
+    has_selector = args.subject is not None or args.date is not None or args.session is not None
+    if args.edf_path is not None and has_selector:
+        parser.error("use either edf_path or --subject/--date/--session selectors")
+    if args.edf_path is not None:
+        return Path(args.edf_path)
+
+    if args.subject is None:
+        parser.error("edf_path or --subject is required")
+    if args.date is None and args.session is None:
+        parser.error("--subject requires either --date or --session")
+
+    rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
+    session_dirs = find_session_dirs(
+        rawdata_root, subject=args.subject, date=args.date, session=args.session
+    )
+    edf_paths = sorted(
+        path
+        for session_dir in session_dirs
+        for path in session_dir.glob("**/*.edf")
+        if path.is_file()
+    )
+    if len(edf_paths) != 1:
+        listing = ", ".join(str(path) for path in edf_paths) or "none"
+        parser.error(
+            f"Selection matched {len(edf_paths)} EDF file(s) ({listing}); "
+            "narrow --date/--session or pass edf_path explicitly"
+        )
+    return edf_paths[0]
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("edf_path", help="Path to the EDF file to inspect.")
+    parser.add_argument(
+        "edf_path", nargs="?", default=None, help="Path to the EDF file to inspect."
+    )
+    parser.add_argument(
+        "--subject", "--subjid", dest="subject", default=None,
+        help="Subject ID, for example 66 or sub-066. Alternative to edf_path.",
+    )
+    session_selector = parser.add_mutually_exclusive_group()
+    session_selector.add_argument("--date", default=None, help="Session date: YYYYMMDD.")
+    session_selector.add_argument(
+        "--session", default=None, help="Session number, for example 1 or ses-1."
+    )
+    parser.add_argument("--rawdata-root", default=None)
     parser.add_argument(
         "--config",
         default=None,
@@ -172,8 +220,15 @@ def main() -> None:
         help="Output EDF path. Defaults beside input with configured suffix.",
     )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output EDF if it exists.")
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
     config = load_config(args.config)
+
+    edf_path = _resolve_edf_path(parser, args)
 
     n_samples = int(
         coalesce(args.n_samples, nested_get(config, ("preprocessing", "trim_channels", "n_samples")), 100)
@@ -190,7 +245,7 @@ def main() -> None:
     )
 
     inspect_edf(
-        edf_path=args.edf_path,
+        edf_path=edf_path,
         n_samples=n_samples,
         keep_first=keep_first,
         output_suffix=output_suffix,

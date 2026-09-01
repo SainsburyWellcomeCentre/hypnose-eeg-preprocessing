@@ -55,7 +55,16 @@ the likely bottleneck on large recordings:~~
 - ~~Profile against a real multi-hour recording first to confirm these are the actual
   hot spots before rewriting.~~
 
-## 4. Match input CLI for file locations to hypnose-helpers
+## ~~4. Match input CLI for file locations to hypnose-helpers~~
+
+~~`scripts/utils/recording_selection.py` reimplemented its own `SESSION_DIR_RE`/
+`_subject_label`/`_session_matches` instead of using the shared layout parser~~ —
+done: `select_recordings()` and the new `find_session_dirs()` now resolve subject/
+session selectors through `hypnose_helpers.io.layout.SessionLayout`, the same
+mechanism `scripts/io/input_paths.py` (`resolve_session_dir()`) and
+`scripts/io/output_paths.py` (`session_output_dir()`) already used, so ses-vs-date
+matching, `_id-`/other subject-dir suffixes, and duplicate-session detection are
+handled in one place instead of three.
 
 ## 5. Understand purpose of tests and see if it can be reorganised
 
@@ -69,6 +78,15 @@ the likely bottleneck on large recordings:~~
 
 - Change all cases in which the referencing is done explicitly and instead folders should be created by the name of the script being run
 
-## 10. Check any places that require full paths and change them into requiring sub/date/session
+## ~~10. Check any places that require full paths and change them into requiring sub/date/session~~
 
-- One example is detect_artifacts.py
+~~One example is detect_artifacts.py~~ — done: `detect_artifacts.py` and
+`inspect_and_trim_channels.py` now accept `--subject`/`--date`/`--session`
+selectors (resolved via `select_recordings()`/`find_session_dirs()`), matching
+the pattern already used by `scripts/qc/*.py`, `score_recordings.py`, and
+`recording_integrity.py`; the raw-path positional arguments remain as an escape
+hatch for ad hoc files, mutually exclusive with the selectors, same as
+`recording_integrity.py`'s `--edf`/`--fif`.
+`downsample_recordings.py` and `concatenate_recordings.py` were left as-is —
+they sweep a whole directory tree rather than pointing at one recording, so
+converting them would be a larger design change, not a straight conversion.

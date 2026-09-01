@@ -20,8 +20,10 @@ import pandas as pd
 try:
     from scripts.analysis.power_spectra import bandpower
     from scripts.analysis.statistics import robust_upper_z
+    from scripts.io.input_paths import scoring_path
     from scripts.io.mne_io import import_mne
     from scripts.io.output_paths import artifact_output_paths, save_csv
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils.config import (
         DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
         load_config,
@@ -34,12 +36,15 @@ try:
         complete_epoch_count,
         epoch_batch,
     )
+    from scripts.utils.recording_selection import select_recordings
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.analysis.power_spectra import bandpower
     from scripts.analysis.statistics import robust_upper_z
+    from scripts.io.input_paths import scoring_path
     from scripts.io.mne_io import import_mne
     from scripts.io.output_paths import artifact_output_paths, save_csv
+    from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils.config import (
         DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
         load_config,
@@ -52,6 +57,7 @@ except ModuleNotFoundError:
         complete_epoch_count,
         epoch_batch,
     )
+    from scripts.utils.recording_selection import select_recordings
 
 
 @dataclass(frozen=True)
@@ -578,10 +584,26 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("fif_path", help="Input MNE FIF recording.")
     parser.add_argument(
-        "sleep_parquet_path", help="Matching sleep-scoring parquet file."
+        "fif_path", nargs="?", default=None, help="Input MNE FIF recording."
     )
+    parser.add_argument(
+        "sleep_parquet_path",
+        nargs="?",
+        default=None,
+        help="Matching sleep-scoring parquet file.",
+    )
+    parser.add_argument(
+        "--subject", "--subjid", dest="subject", default=None,
+        help="Subject ID, for example 66 or sub-066. Alternative to fif_path/sleep_parquet_path.",
+    )
+    session_selector = parser.add_mutually_exclusive_group()
+    session_selector.add_argument("--date", default=None, help="Session date: YYYYMMDD.")
+    session_selector.add_argument(
+        "--session", default=None, help="Session number, for example 1 or ses-1."
+    )
+    parser.add_argument("--rawdata-root", default=None)
+    parser.add_argument("--derivatives-root", default=None)
     parser.add_argument(
         "--config",
         default=str(DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH),
@@ -612,8 +634,44 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[Path, Path]:
+    """Resolve the FIF and sleep-scoring parquet either from explicit paths or selectors."""
+    has_explicit_path = args.fif_path is not None or args.sleep_parquet_path is not None
+    has_selector = args.subject is not None or args.date is not None or args.session is not None
+    if has_explicit_path and has_selector:
+        parser.error(
+            "use either fif_path/sleep_parquet_path or --subject/--date/--session selectors"
+        )
+    if has_explicit_path:
+        if args.fif_path is None or args.sleep_parquet_path is None:
+            parser.error("fif_path and sleep_parquet_path must be supplied together")
+        return Path(args.fif_path), Path(args.sleep_parquet_path)
+
+    if args.subject is None:
+        parser.error("fif_path/sleep_parquet_path or --subject is required")
+    if args.date is None and args.session is None:
+        parser.error("--subject requires either --date or --session")
+
+    rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
+    derivatives_root = Path(
+        args.derivatives_root or get_derivatives_root()
+    ).resolve(strict=False)
+    pairs = select_recordings(
+        rawdata_root, derivatives_root, subject=args.subject, date=args.date, session=args.session
+    )
+    if len(pairs) != 1:
+        parser.error(
+            f"Selection matched {len(pairs)} recordings; narrow --date/--session to one recording"
+        )
+    edf_path, fif_path = pairs[0]
+    sleep_parquet_path = scoring_path(edf_path, rawdata_root, derivatives_root)
+    return fif_path, sleep_parquet_path
+
+
 def main() -> None:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+    fif_path, sleep_parquet_path = _resolve_paths(parser, args)
     detector = ArtifactDetector.from_yaml(
         args.config,
         epoch_seconds=args.epoch_seconds,
@@ -626,7 +684,7 @@ def main() -> None:
         max_edge_fraction=args.max_edge_fraction,
         overwrite=args.overwrite,
     )
-    detector.process(args.fif_path, args.sleep_parquet_path, args.output_dir)
+    detector.process(fif_path, sleep_parquet_path, args.output_dir)
 
 
 if __name__ == "__main__":

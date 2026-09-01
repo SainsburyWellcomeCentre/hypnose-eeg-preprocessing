@@ -4,16 +4,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hypnose_helpers.io.layout import (
+    SessionLayout,
+    parse_session_dirname,
+    parse_subject_dirname,
+)
 
-def session_derivatives_dir(
+
+def resolve_session_dir(
     recording_path: str | Path,
     rawdata_root: str | Path,
-    derivatives_root: str | Path,
+    root: str | Path,
+    *,
+    name: str,
 ) -> Path:
-    """Map a recording under rawdata to its mirrored derivatives session."""
+    """Resolve a recording's session directory under a shared-layout root.
+
+    Parses the subject/session out of the recording's rawdata path, then looks it up
+    through `SessionLayout` -- robust to ses-vs-date selection, `_id-` subject suffixes,
+    and duplicate directories, unlike copying the rawdata directory names verbatim.
+    """
     recording = Path(recording_path)
     rawdata = Path(rawdata_root)
-    derivatives = Path(derivatives_root)
     try:
         relative = recording.relative_to(rawdata)
     except ValueError as exc:
@@ -22,7 +34,27 @@ def session_derivatives_dir(
         raise ValueError(
             f"Recording is not inside a subject/session hierarchy: {recording}"
         )
-    return derivatives / relative.parts[0] / relative.parts[1]
+    subject = parse_subject_dirname(relative.parts[0])
+    session = parse_session_dirname(relative.parts[1])
+    if subject is None or session is None:
+        raise ValueError(
+            f"Recording does not use the shared subject/session layout: {recording}"
+        )
+    session_number, date = session
+    layout = SessionLayout(Path(root), name=name)
+    selector = {"ses": session_number} if session_number is not None else {"date": date}
+    return layout.find_session(subject, **selector).path
+
+
+def session_derivatives_dir(
+    recording_path: str | Path,
+    rawdata_root: str | Path,
+    derivatives_root: str | Path,
+) -> Path:
+    """Map a recording under rawdata to its derivatives session."""
+    return resolve_session_dir(
+        recording_path, rawdata_root, derivatives_root, name="derivatives"
+    )
 
 
 def scoring_path(
