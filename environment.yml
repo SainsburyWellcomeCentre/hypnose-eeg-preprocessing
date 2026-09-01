@@ -51,4 +51,4 @@ dependencies:
       - -e ../hypnose-somnotate
 
       # Install this script-only project and validate its dependency metadata.
-      - -e .
+      - -e .[dev]

@@ -35,9 +35,15 @@ notebook = [
     "mne-qt-browser>=0.7,<0.8",
     "PyQt6>=6.10,<7",
 ]
+dev = [
+    "pytest>=8,<9",
+]
 
 # This repository currently exposes executable scripts rather than an importable
 # Python package. Explicitly disable automatic package discovery while retaining
 # standard project metadata and dependency installation via `pip install -e .`.
 [tool.setuptools]
 packages = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
