@@ -21,6 +21,7 @@ from hypnose_helpers.io.selectors import parse_sessions
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.io.output_layout import output_dir_name
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
 from scripts.utils.config import (
     DEFAULT_SLEEP_SCORING_CONFIG_PATH,
@@ -250,7 +251,7 @@ def _relocate_scoring_outputs(output_paths: Sequence[str | Path]) -> list[Path]:
             relocated.append(prediction)
             continue
 
-        destination_dir = prediction.parent.parent / "sleep_scoring"
+        destination_dir = prediction.parent.parent / output_dir_name("sleep_scoring")
         destination_dir.mkdir(parents=True, exist_ok=True)
         recording_stem = prediction.name.removesuffix(prediction_suffix)
         for source in sorted(prediction.parent.glob(f"{recording_stem}_somnotate_*")):

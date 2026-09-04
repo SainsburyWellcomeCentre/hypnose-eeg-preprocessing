@@ -9,6 +9,9 @@ from scripts.io.repository_paths import get_repo_root
 
 
 DEFAULT_SPECTRA_CONFIG_PATH = get_repo_root() / "configs" / "pipelines" / "spectra.yaml"
+DEFAULT_PREPROCESSING_CONFIG_PATH = (
+    get_repo_root() / "configs" / "pipelines" / "preprocessing.yaml"
+)
 DEFAULT_QUALITY_CONTROL_CONFIG_PATH = (
     get_repo_root() / "configs" / "pipelines" / "quality_control.yaml"
 )
@@ -18,6 +21,7 @@ DEFAULT_SLEEP_SCORING_CONFIG_PATH = (
 DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH = (
     get_repo_root() / "configs" / "pipelines" / "artifact_detection.yaml"
 )
+DEFAULT_OUTPUT_LAYOUT_CONFIG_PATH = get_repo_root() / "configs" / "output_layout.yaml"
 
 
 def load_config(config_path: str | Path | None) -> dict[str, Any]:

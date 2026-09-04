@@ -10,6 +10,8 @@ from hypnose_helpers.io.layout import (
     parse_subject_dirname,
 )
 
+from scripts.io.output_layout import output_dir_name
+
 
 def resolve_session_dir(
     recording_path: str | Path,
@@ -66,9 +68,12 @@ def scoring_path(
     recording = Path(recording_path)
     session_dir = session_derivatives_dir(recording, rawdata_root, derivatives_root)
     filename = f"{recording.stem}_somnotate_predictions.parquet"
-    expected = session_dir / "sleep_scoring" / filename
+    expected = session_dir / output_dir_name("sleep_scoring") / filename
     if expected.is_file():
         return expected
+    # "saved_results" is hypnose-somnotate's own native output folder name, not
+    # ours to rename -- this is a fallback for predictions never relocated by
+    # `score_recordings.py`'s `_relocate_scoring_outputs()`.
     legacy = session_dir / "saved_results" / filename
     if legacy.is_file():
         return legacy
@@ -89,7 +94,7 @@ def artifact_path(
     recording = Path(recording_path)
     session_dir = session_derivatives_dir(recording, rawdata_root, derivatives_root)
     exact_name = f"{recording.stem}_artifact_epochs.parquet"
-    expected_dir = session_dir / "artifacts"
+    expected_dir = session_dir / output_dir_name("artifacts")
     for filename in (exact_name, "artifact_epochs.parquet"):
         expected = expected_dir / filename
         if expected.is_file():

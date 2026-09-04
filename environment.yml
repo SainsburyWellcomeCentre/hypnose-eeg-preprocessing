@@ -17,8 +17,10 @@ dependencies:
   - xcb-util-wm
 
   - pip:
-      # EDF reading and EEG analysis.
+      # EDF reading and EEG analysis. edfio backs MNE's EDF export, used by
+      # concatenate_recordings.py to write the concatenated recording back out.
       - mne==1.12.1
+      - edfio
 
       # Scientific computing and data frames used by the notebook and pipeline.
       # Somnotate's pomegranate<1 dependency is not compatible with NumPy 2.

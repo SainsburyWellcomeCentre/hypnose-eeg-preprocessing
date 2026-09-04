@@ -24,6 +24,7 @@ from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.io.mne_io import export_raw_edf, import_mne
 from scripts.io.output_paths import save_csv_rows
 from scripts.utils.config import coalesce, load_config, nested_get
+from scripts.utils.recording_selection import find_session_dirs
 
 
 @dataclass(frozen=True)
@@ -464,6 +465,16 @@ def main() -> None:
             "in the order provided."
         ),
     )
+    parser.add_argument(
+        "--subject", "--subjid", dest="subject", default=None,
+        help="Subject ID, for example 66 or sub-066. Restricts concatenation to one "
+        "session's folder. Alternative to --edf-pattern/--session-dir.",
+    )
+    session_selector = parser.add_mutually_exclusive_group()
+    session_selector.add_argument("--date", default=None, help="Session date: YYYYMMDD.")
+    session_selector.add_argument(
+        "--session", default=None, help="Session number, for example 1 or ses-1."
+    )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs.")
     parser.add_argument("--first", action="store_true", help="Concatenate only the first matching session.")
     parser.add_argument("--dry-run", action="store_true", help="Preview matching sessions without writing files.")
@@ -475,9 +486,34 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
 
-    source_dir = coalesce(args.source_dir, nested_get(config, ("source", "uri")), get_rawdata_root())
+    has_selector = args.subject is not None or args.date is not None or args.session is not None
+    if has_selector and (args.edf_pattern is not None or args.session_dir is not None):
+        parser.error(
+            "--subject/--date/--session selectors cannot be combined with "
+            "--edf-pattern or --session-dir/--recordings"
+        )
+    if args.subject is not None and args.date is None and args.session is None:
+        parser.error("--subject requires either --date or --session")
+    if (args.date is not None or args.session is not None) and args.subject is None:
+        parser.error("--date/--session require --subject")
+
+    source_dir = Path(
+        coalesce(args.source_dir, nested_get(config, ("source", "uri")), get_rawdata_root())
+    ).resolve(strict=False)
     sink_dir = coalesce(args.sink_dir, nested_get(config, ("preprocessing", "concatenate", "sink_dir")))
-    edf_pattern = coalesce(args.edf_pattern, nested_get(config, ("source", "glob")), "**/*.edf")
+    if has_selector:
+        session_dirs = find_session_dirs(
+            source_dir, subject=args.subject, date=args.date, session=args.session
+        )
+        if len(session_dirs) != 1:
+            parser.error(
+                f"Selection matched {len(session_dirs)} sessions; "
+                "narrow --date/--session to one"
+            )
+        relative_session = session_dirs[0].relative_to(source_dir).as_posix()
+        edf_pattern = f"{relative_session}/**/*.edf"
+    else:
+        edf_pattern = coalesce(args.edf_pattern, nested_get(config, ("source", "glob")), "**/*.edf")
     manifest = coalesce(
         args.manifest,
         nested_get(config, ("preprocessing", "concatenate", "manifest")),

@@ -105,11 +105,22 @@ the pattern already used by `scripts/qc/*.py`, `score_recordings.py`, and
 `recording_integrity.py`; the raw-path positional arguments remain as an escape
 hatch for ad hoc files, mutually exclusive with the selectors, same as
 `recording_integrity.py`'s `--edf`/`--fif`.
-`downsample_recordings.py` and `concatenate_recordings.py` were left as-is —
-they sweep a whole directory tree rather than pointing at one recording, so
-converting them would be a larger design change, not a straight conversion.
+`downsample_recordings.py` and `concatenate_recordings.py` were initially left
+as-is, since they sweep a whole directory tree rather than pointing at one
+recording — since fixed: both now also accept `--subject`/`--date`/`--session`,
+resolved via `find_session_dirs()` to one session directory and translated into
+an `edf_pattern` scoped to that directory, so the existing directory-sweep
+logic (concat-part preference, multi-recording-session detection) runs
+unchanged but only sees that session's files; mutually exclusive with
+`--edf-pattern` (both) and `--session-dir`/`--recordings` (concatenate).
 
-## 11. Change folder naming to downsample for downsampling rather than ephys
+## ~~11. Change folder naming to downsample for downsampling rather than ephys~~
+
+~~Downsampled FIF output mirrored the raw `<modality>` folder (`ephys`) verbatim
+under derivatives~~ — done: `downsample_recordings.py`'s `output_path()` now
+resolves each recording's `sub-XXX/ses-YYY_date-.../` folder and writes under
+`.../downsample/` instead, matching the `artifacts`/`sleep_scoring`/
+`quality_control` output-group convention from item 9.
 
 ## 12. Best method for sleep scoring, either before or after concatenation
 
@@ -118,3 +129,5 @@ converting them would be a larger design change, not a straight conversion.
 ## 14. Update readme to make more concise
 
 ## 15. Create executable scripts for each separate section with API
+
+## 16. Automate running of the preprocessing for hypnose dataset with reports of errors

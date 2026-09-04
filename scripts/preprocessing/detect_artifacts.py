@@ -571,6 +571,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Matching sleep-scoring parquet file.",
     )
     parser.add_argument(
+        "--edf", default=None,
+        help="Raw EDF recording; resolves the matching sleep-scoring parquet. "
+        "Requires --fif.",
+    )
+    parser.add_argument("--fif", default=None, help="Matching derivative FIF for --edf.")
+    parser.add_argument(
         "--subject", "--subjid", dest="subject", default=None,
         help="Subject ID, for example 66 or sub-066. Alternative to fif_path/sleep_parquet_path.",
     )
@@ -612,20 +618,34 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _resolve_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[Path, Path]:
-    """Resolve the FIF and sleep-scoring parquet either from explicit paths or selectors."""
+    """Resolve the FIF and sleep-scoring parquet from explicit paths, --edf/--fif, or selectors."""
     has_explicit_path = args.fif_path is not None or args.sleep_parquet_path is not None
+    has_edf_fif = args.edf is not None or args.fif is not None
     has_selector = args.subject is not None or args.date is not None or args.session is not None
-    if has_explicit_path and has_selector:
+    if sum([has_explicit_path, has_edf_fif, has_selector]) > 1:
         parser.error(
-            "use either fif_path/sleep_parquet_path or --subject/--date/--session selectors"
+            "use exactly one of: fif_path/sleep_parquet_path, --edf/--fif, or "
+            "--subject/--date/--session selectors"
         )
     if has_explicit_path:
         if args.fif_path is None or args.sleep_parquet_path is None:
             parser.error("fif_path and sleep_parquet_path must be supplied together")
         return Path(args.fif_path), Path(args.sleep_parquet_path)
 
+    if has_edf_fif:
+        if bool(args.edf) != bool(args.fif):
+            parser.error("--edf and --fif must be supplied together")
+        edf_path = Path(args.edf).resolve(strict=False)
+        fif_path = Path(args.fif).resolve(strict=False)
+        rawdata_root = Path(args.rawdata_root or edf_path.parent).resolve(strict=False)
+        derivatives_root = Path(
+            args.derivatives_root or fif_path.parent
+        ).resolve(strict=False)
+        sleep_parquet_path = scoring_path(edf_path, rawdata_root, derivatives_root)
+        return fif_path, sleep_parquet_path
+
     if args.subject is None:
-        parser.error("fif_path/sleep_parquet_path or --subject is required")
+        parser.error("fif_path/sleep_parquet_path, --edf/--fif, or --subject is required")
     if args.date is None and args.session is None:
         parser.error("--subject requires either --date or --session")
 

@@ -22,6 +22,7 @@ from hypnose_helpers.io.selectors import parse_sessions
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.io.input_paths import scoring_path
+from scripts.io.output_layout import output_dir_name
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
 from scripts.utils.config import (
     DEFAULT_SLEEP_SCORING_CONFIG_PATH,
@@ -291,7 +292,7 @@ def _downsample_signals(raw_signals: Any, source_hz: float, target_hz: float):
 def _artifact_file(recording: Any) -> Path:
     """Resolve artifacts from the dedicated directory, with legacy fallback."""
     scoring_dir = Path(recording.output_dir)
-    directories = (scoring_dir.parent / "artifacts", scoring_dir)
+    directories = (scoring_dir.parent / output_dir_name("artifacts"), scoring_dir)
     exact_name = f"{recording.edf_path.stem}_artifact_epochs.parquet"
     for directory in directories:
         exact = directory / exact_name

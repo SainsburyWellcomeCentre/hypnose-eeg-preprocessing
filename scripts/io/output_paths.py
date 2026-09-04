@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from hypnose_helpers.io.layout import parse_session_dirname, parse_subject_dirname
 
 from scripts.io.input_paths import resolve_session_dir
+from scripts.io.output_layout import output_dir_name
 from scripts.utils.recording_selection import source_stem_from_fif
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ def artifact_output_paths(
         destination = Path(output_dir)
     else:
         session_dir = _session_dir_from_derivative_path(recording)
-        destination = (session_dir or recording.parent) / "artifacts"
+        destination = (session_dir or recording.parent) / output_dir_name("artifacts")
     stem = f"{source_stem_from_fif(recording)}_{output_suffix}"
     return (
         destination / f"{stem}.csv",
@@ -73,7 +74,7 @@ def session_output_dir(
     session_dir = resolve_session_dir(
         recording_path, rawdata_root, derivatives_root, name="derivatives"
     )
-    return session_dir / output_group
+    return session_dir / output_dir_name(output_group)
 
 
 def session_output_path(

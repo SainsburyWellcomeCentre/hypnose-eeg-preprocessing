@@ -66,6 +66,17 @@ python scripts/preprocessing/downsample_recordings.py \
   --config configs/pipelines/preprocessing.yaml --dry-run
 ```
 
+Both also accept `--subject`/`--date`/`--session` to restrict the sweep to one
+session's folder instead of the whole tree:
+
+```bash
+python scripts/preprocessing/concatenate_recordings.py \
+  --config configs/pipelines/preprocessing.yaml --subject 66 --date 20260717
+
+python scripts/preprocessing/downsample_recordings.py \
+  --config configs/pipelines/preprocessing.yaml --subject 66 --session 1
+```
+
 Configure the Somnotate model and channel settings in
 `configs/pipelines/sleep_scoring.yaml`; subject and date/session selectors are
 always passed on the command line:

@@ -1,0 +1,12 @@
+# Folder names for named derivative outputs, shared across every preprocessing,
+# sleep-scoring, and QC script. Each one sits one level below a recording's
+# `derivatives/sub-XXX/ses-YYY_date-.../` session directory. Rename a value here
+# to rename that output folder everywhere it is written to or read from -- no
+# script changes needed.
+name: output_layout
+
+output_dirs:
+  downsample: downsample
+  sleep_scoring: sleep_scoring
+  artifacts: artifacts
+  quality_control: quality_control

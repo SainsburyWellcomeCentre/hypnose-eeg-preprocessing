@@ -2,10 +2,12 @@
 
 This script selects source recordings, preferring a session's concatenated file
 when multiple parts are present, and resamples each signal to a configured target
-frequency with MNE. It preserves the source directory structure under the
-derivative output root, writes an MNE FIF recording, and records processing
-status and signal metadata in a CSV manifest. Reducing the sample rate lowers
-storage and computation while retaining frequencies below the new Nyquist limit.
+frequency with MNE. For each recording under the shared subject/session layout, it
+writes the MNE FIF recording under that session's `downsample` derivative folder
+(rather than mirroring the source's raw modality folder, e.g. `ephys`), and records
+processing status and signal metadata in a CSV manifest. Reducing the sample rate
+lowers storage and computation while retaining frequencies below the new Nyquist
+limit.
 """
 
 from __future__ import annotations
@@ -19,10 +21,19 @@ from typing import Any, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from hypnose_helpers.io.layout import parse_session_dirname, parse_subject_dirname
+
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.io.mne_io import import_mne
+from scripts.io.output_layout import output_dir_name
 from scripts.io.output_paths import save_csv_rows
-from scripts.utils.config import coalesce, load_config, nested_get
+from scripts.utils.config import (
+    DEFAULT_PREPROCESSING_CONFIG_PATH,
+    coalesce,
+    load_config,
+    nested_get,
+)
+from scripts.utils.recording_selection import find_session_dirs
 
 
 @dataclass(frozen=True)
@@ -91,8 +102,25 @@ class EdfDownsampler:
 
     def output_path(self, edf_path: Path) -> Path:
         relative_path = edf_path.relative_to(self.source_dir)
+        session_relative_dir = self._session_relative_dir(relative_path)
         output_name = f"{edf_path.stem}_resampled-{self._sample_rate_label()}hz_raw.fif"
-        return self.sink_dir / relative_path.parent / output_name
+        return self.sink_dir / session_relative_dir / output_dir_name("downsample") / output_name
+
+    def _session_relative_dir(self, relative_path: Path) -> Path:
+        """The recording's subject/session folder, dropping its raw modality folder.
+
+        Falls back to the full parent path when a recording does not sit inside the
+        shared `sub-XXX/ses-YYY_date-.../<modality>/` layout, so ad hoc source
+        directories still resolve to somewhere sensible.
+        """
+        parts = relative_path.parts
+        if (
+            len(parts) >= 3
+            and parse_subject_dirname(parts[0]) is not None
+            and parse_session_dirname(parts[1]) is not None
+        ):
+            return Path(*parts[:2])
+        return relative_path.parent
 
     def preview(self) -> list[DownsampleResult]:
         return [
@@ -199,12 +227,23 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        default=None,
-        help="YAML config path. CLI values override config values.",
+        default=str(DEFAULT_PREPROCESSING_CONFIG_PATH),
+        help=f"YAML config path (default: {DEFAULT_PREPROCESSING_CONFIG_PATH}). "
+        "CLI values override config values.",
     )
     parser.add_argument("--source-dir", default=None, help="Mounted raw EDF root.")
     parser.add_argument("--sink-dir", default=None, help="Derivative output root.")
     parser.add_argument("--edf-pattern", default=None, help="Glob used below source-dir.")
+    parser.add_argument(
+        "--subject", "--subjid", dest="subject", default=None,
+        help="Subject ID, for example 66 or sub-066. Restricts downsampling to one "
+        "session. Alternative to --edf-pattern.",
+    )
+    session_selector = parser.add_mutually_exclusive_group()
+    session_selector.add_argument("--date", default=None, help="Session date: YYYYMMDD.")
+    session_selector.add_argument(
+        "--session", default=None, help="Session number, for example 1 or ses-1."
+    )
     parser.add_argument(
         "--target-sfreq",
         type=float,
@@ -222,9 +261,31 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
 
-    source_dir = coalesce(args.source_dir, nested_get(config, ("source", "uri")), get_rawdata_root())
+    has_selector = args.subject is not None or args.date is not None or args.session is not None
+    if has_selector and args.edf_pattern is not None:
+        parser.error("--edf-pattern cannot be combined with --subject/--date/--session selectors")
+    if args.subject is not None and args.date is None and args.session is None:
+        parser.error("--subject requires either --date or --session")
+    if (args.date is not None or args.session is not None) and args.subject is None:
+        parser.error("--date/--session require --subject")
+
+    source_dir = Path(
+        coalesce(args.source_dir, nested_get(config, ("source", "uri")), get_rawdata_root())
+    ).resolve(strict=False)
     sink_dir = coalesce(args.sink_dir, nested_get(config, ("sink", "uri")), get_derivatives_root())
-    edf_pattern = coalesce(args.edf_pattern, nested_get(config, ("source", "glob")), "**/*.edf")
+    if has_selector:
+        session_dirs = find_session_dirs(
+            source_dir, subject=args.subject, date=args.date, session=args.session
+        )
+        if len(session_dirs) != 1:
+            parser.error(
+                f"Selection matched {len(session_dirs)} sessions; "
+                "narrow --date/--session to one"
+            )
+        relative_session = session_dirs[0].relative_to(source_dir).as_posix()
+        edf_pattern = f"{relative_session}/**/*.edf"
+    else:
+        edf_pattern = coalesce(args.edf_pattern, nested_get(config, ("source", "glob")), "**/*.edf")
     configured_target_sfreq = coalesce(
         args.target_sfreq,
         nested_get(config, ("preprocessing", "downsample", "target_sfreq")),
