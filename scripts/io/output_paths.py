@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from hypnose_helpers.io.layout import parse_session_dirname, parse_subject_dirname
 
 from scripts.io.input_paths import resolve_session_dir
+from scripts.utils.recording_selection import source_stem_from_fif
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -33,23 +34,28 @@ def _session_dir_from_derivative_path(path: Path) -> Path | None:
 
 
 def artifact_output_paths(
-    sleep_parquet_path: str | Path,
+    fif_path: str | Path,
     *,
-    remove_from_stem: str,
     output_suffix: str,
     output_dir: str | Path | None = None,
 ) -> tuple[Path, Path]:
-    """Return CSV and parquet destinations for artifact detection output."""
-    scoring = Path(sleep_parquet_path)
+    """Return CSV and parquet destinations for artifact detection output.
+
+    Named after the analyzed recording's source stem (its data location within the
+    shared session layout), not after whichever sleep-scoring file happened to
+    produce the states used to detect artifacts, and with MNE/downsampling naming
+    detail (`_raw`, `_resampled-<rate>hz`) stripped back out.
+    """
+    recording = Path(fif_path)
     if output_dir is not None:
         destination = Path(output_dir)
     else:
-        session_dir = _session_dir_from_derivative_path(scoring)
-        destination = (session_dir or scoring.parent) / "artifacts"
-    stem = scoring.stem.replace(remove_from_stem, "").rstrip("_-")
+        session_dir = _session_dir_from_derivative_path(recording)
+        destination = (session_dir or recording.parent) / "artifacts"
+    stem = f"{source_stem_from_fif(recording)}_{output_suffix}"
     return (
-        destination / f"{stem}_{output_suffix}.csv",
-        destination / f"{stem}_{output_suffix}.parquet",
+        destination / f"{stem}.csv",
+        destination / f"{stem}.parquet",
     )
 
 

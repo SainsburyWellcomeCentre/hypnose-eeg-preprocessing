@@ -73,8 +73,7 @@ class ArtifactDetectionTests(unittest.TestCase):
         )
 
         csv_path, parquet_path = artifact_output_paths(
-            "/results/sample_somnotate_predictions.parquet",
-            remove_from_stem="somnotate_predictions",
+            "/results/sample_raw.fif",
             output_suffix="artifact_epochs",
         )
         self.assertEqual(
@@ -86,14 +85,20 @@ class ArtifactDetectionTests(unittest.TestCase):
         )
 
         csv_path, parquet_path = artifact_output_paths(
-            "/derivatives/sub-066/ses-1_date-20260717/sleep_scoring/"
-            "sample_somnotate_predictions.parquet",
-            remove_from_stem="somnotate_predictions",
+            "/derivatives/sub-066/ses-1_date-20260717/ephys/sample_raw.fif",
             output_suffix="artifact_epochs",
         )
         expected = Path(
             "/derivatives/sub-066/ses-1_date-20260717/artifacts/"
             "sample_artifact_epochs"
+        )
+        self.assertEqual(csv_path, expected.with_suffix(".csv"))
+        self.assertEqual(parquet_path, expected.with_suffix(".parquet"))
+
+        csv_path, parquet_path = artifact_output_paths(
+            "/derivatives/sub-066/ses-1_date-20260717/ephys/"
+            "sample_resampled-250hz_raw.fif",
+            output_suffix="artifact_epochs",
         )
         self.assertEqual(csv_path, expected.with_suffix(".csv"))
         self.assertEqual(parquet_path, expected.with_suffix(".parquet"))

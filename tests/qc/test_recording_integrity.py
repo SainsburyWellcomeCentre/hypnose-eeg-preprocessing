@@ -15,7 +15,7 @@ from scripts.qc.recording_integrity import (
     check_pair,
     detect_signal_gaps,
 )
-from scripts.utils.recording_selection import _source_stem_from_fif, select_recordings
+from scripts.utils.recording_selection import select_recordings, source_stem_from_fif
 
 
 class FakeRaw:
@@ -135,7 +135,7 @@ class RecordingIntegrityTests(unittest.TestCase):
 
     def test_fif_name_maps_back_to_edf_stem(self) -> None:
         path = Path("sub-066_recording-concat_resampled-128hz_raw.fif")
-        self.assertEqual(_source_stem_from_fif(path), "sub-066_recording-concat")
+        self.assertEqual(source_stem_from_fif(path), "sub-066_recording-concat")
 
     def test_gap_scan_finds_runs_across_chunk_boundaries(self) -> None:
         data = np.arange(40, dtype=float)[None, :]

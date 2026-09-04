@@ -44,6 +44,5 @@ artifact_detection:
       - "emg_max_derivative_uv_per_sample"
 
   output:
-    remove_from_stem: "somnotate_predictions"
     suffix: "artifact_epochs"
     overwrite: false

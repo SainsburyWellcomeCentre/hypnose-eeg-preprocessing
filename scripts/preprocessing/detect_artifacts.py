@@ -67,7 +67,6 @@ class ArtifactDetector:
     emg_supported_eeg_features_required: int
     eeg_score_features: tuple[str, ...]
     emg_score_features: tuple[str, ...]
-    remove_from_stem: str
     output_suffix: str
     overwrite: bool
 
@@ -122,7 +121,6 @@ class ArtifactDetector:
             ),
             eeg_score_features=tuple(value(("features", "eeg_score_features"))),
             emg_score_features=tuple(value(("features", "emg_score_features"))),
-            remove_from_stem=str(value(("output", "remove_from_stem"))),
             output_suffix=str(value(("output", "suffix"))),
             overwrite=bool(value(("output", "overwrite"))),
         )
@@ -484,8 +482,7 @@ def _detect_fif_artifacts(
         raise ValueError("epoch_seconds and chunk_memory_mb must be positive.")
 
     csv_path, parquet_path = artifact_output_paths(
-        sleep_parquet_path,
-        remove_from_stem=detector.remove_from_stem,
+        fif_path,
         output_suffix=detector.output_suffix,
         output_dir=output_dir,
     )

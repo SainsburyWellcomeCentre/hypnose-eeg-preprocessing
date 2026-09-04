@@ -8,7 +8,8 @@ from pathlib import Path
 from hypnose_helpers.io.layout import SessionLayout, normalize_subjid
 
 
-def _source_stem_from_fif(path: Path) -> str:
+def source_stem_from_fif(path: Path) -> str:
+    """Strip MNE/downsampling naming detail to recover the source recording's stem."""
     stem = re.sub(r"_raw$", "", path.stem, flags=re.IGNORECASE)
     return re.sub(r"_resampled-[0-9p.]+hz$", "", stem, flags=re.IGNORECASE)
 
@@ -71,7 +72,7 @@ def pair_recordings(
     )
     fif_by_stem: dict[str, list[Path]] = {}
     for fif_path in fif_files:
-        fif_by_stem.setdefault(_source_stem_from_fif(fif_path), []).append(fif_path)
+        fif_by_stem.setdefault(source_stem_from_fif(fif_path), []).append(fif_path)
 
     pairs: list[tuple[Path, Path]] = []
     for edf_path in edfs:
