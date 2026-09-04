@@ -81,9 +81,11 @@ exercises.
 ~~Resolve duplication by ensuring that the repo root is specified in each repo and thus
 each scripts package is only referenced once.~~
 
-## 7. inspect_and_trim_channels.py needs better method for running and provided info
+~~ ## 7. inspect_and_trim_channels.py needs better method for running and provided info ~~
 
-## 8. Check for any for loops that would limit speed on large recordings - vectorisation
+~~ - For the moment keep as it is with manual curating until issues arise with ~~
+
+~~ ## 8. Check for any for loops that would limit speed on large recordings - vectorisation ~~
 
 ## 9. Artifact detection naming not based on somnotate_predictions and based on derivatives location
 
@@ -101,3 +103,13 @@ hatch for ad hoc files, mutually exclusive with the selectors, same as
 `downsample_recordings.py` and `concatenate_recordings.py` were left as-is —
 they sweep a whole directory tree rather than pointing at one recording, so
 converting them would be a larger design change, not a straight conversion.
+
+## 11. Change folder naming to downsample for downsampling rather than ephys
+
+## 12. Best method for sleep scoring, either before or after concatenation
+
+## 13. Rename to hypnose-eeg-preprocessing
+
+## 14. Update readme to make more concise
+
+## 15. Create executable scripts for each separate section with API

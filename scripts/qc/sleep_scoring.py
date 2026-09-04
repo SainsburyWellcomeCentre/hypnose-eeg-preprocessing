@@ -56,10 +56,16 @@ def prepare_scoring_output(
     output["predicted_state"] = labels.map(
         lambda value: SLEEP_STATE_NAMES.get(value, str(value))
     )
-    output["predicted_probability"] = [
-        probabilities[index, label] if label in STATE_PROBABILITY_COLUMNS else np.nan
-        for index, label in enumerate(labels)
+    label_to_column_index = {
+        label: index for index, label in enumerate(STATE_PROBABILITY_COLUMNS)
+    }
+    column_indices = labels.map(label_to_column_index)
+    valid_label = column_indices.notna().to_numpy()
+    predicted_probability = np.full(len(labels), np.nan)
+    predicted_probability[valid_label] = probabilities[
+        np.flatnonzero(valid_label), column_indices[valid_label].astype(int)
     ]
+    output["predicted_probability"] = predicted_probability
     output["maximum_probability"] = np.nanmax(probabilities, axis=1)
     output["probability_margin"] = (
         sorted_probabilities[:, -1] - sorted_probabilities[:, -2]

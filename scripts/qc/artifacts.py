@@ -68,45 +68,131 @@ def channels_from_row(row: pd.Series) -> list[str]:
 
 
 def expand_artifact_channels(artifact_epochs: pd.DataFrame) -> pd.DataFrame:
-    """Expand flagged epoch rows to one row per affected channel."""
+    """Expand flagged epoch rows to one row per affected channel.
+
+    Mirrors ``channels_from_row`` with vectorized pandas string operations
+    instead of a Python loop per epoch, since a full recording can flag
+    thousands of epochs.
+    """
     required = {"epoch_id", "time_s", "sleep_state", "artifact"}
     missing = required - set(artifact_epochs.columns)
     if missing:
         raise ValueError(f"Artifact parquet is missing columns: {sorted(missing)}")
 
-    rows: list[dict[str, object]] = []
+    empty_result = pd.DataFrame(
+        columns=["epoch_id", "time_s", "hour", "sleep_state", "channel"]
+    )
     flagged = artifact_epochs.loc[artifact_epochs["artifact"].astype(bool)]
-    for _, row in flagged.iterrows():
-        for channel in channels_from_row(row):
-            rows.append(
-                {
-                    "epoch_id": int(row["epoch_id"]),
-                    "time_s": float(row["time_s"]),
-                    "hour": int(np.floor(float(row["time_s"]) / 3600.0)),
-                    "sleep_state": sleep_state_name(row["sleep_state"]),
-                    "channel": channel,
-                }
-            )
-    return pd.DataFrame(
-        rows,
-        columns=["epoch_id", "time_s", "hour", "sleep_state", "channel"],
-    ).drop_duplicates()
+    if flagged.empty:
+        return empty_result
+
+    features = (
+        flagged["artifact_features"]
+        if "artifact_features" in flagged.columns
+        else pd.Series(pd.NA, index=flagged.index)
+    )
+    features_notna = features.notna()
+    features_str = features.fillna("").astype(str)
+
+    if "artifact_channels" in flagged.columns:
+        explicit_str = flagged["artifact_channels"].fillna("").astype(str).str.strip()
+        use_explicit = explicit_str.ne("")
+    else:
+        explicit_str = pd.Series("", index=flagged.index)
+        use_explicit = pd.Series(False, index=flagged.index)
+
+    explicit_channels = (
+        explicit_str[use_explicit].str.split(r"\s*[;|]\s*").explode().str.strip()
+    )
+    explicit_channels = explicit_channels[explicit_channels.ne("")]
+
+    fallback_index = flagged.index[~use_explicit & features_notna]
+    fallback_entries = features_str.loc[fallback_index].str.split(r"\s*\|\s*").explode()
+    partitioned = fallback_entries.str.partition(":")
+    feature_channels = partitioned[0].str.strip().where(partitioned[1].ne(""))
+    feature_channels = feature_channels.dropna()
+    feature_channels = feature_channels[feature_channels.ne("")]
+
+    emg_extreme = (
+        flagged["emg_extreme"]
+        if "emg_extreme" in flagged.columns
+        else pd.Series(False, index=flagged.index)
+    )
+    emg_mask = (
+        emg_extreme.fillna(False).astype(bool)
+        & features_notna
+        & features_str.str.contains("emg_outlier_with_eeg_outlier", regex=False)
+    )
+    emg_channels = pd.Series("EMG (combined)", index=flagged.index[emg_mask])
+
+    channel_by_row = pd.concat([explicit_channels, feature_channels, emg_channels])
+    if channel_by_row.empty:
+        return empty_result
+
+    row_metadata = pd.DataFrame(
+        {
+            "epoch_id": flagged["epoch_id"].astype(int),
+            "time_s": flagged["time_s"].astype(float),
+            "hour": np.floor(flagged["time_s"].astype(float) / 3600.0).astype(int),
+            "sleep_state": flagged["sleep_state"].map(sleep_state_name),
+        }
+    )
+    expanded = row_metadata.loc[channel_by_row.index].copy()
+    expanded["channel"] = channel_by_row.to_numpy()
+    return expanded.reset_index(drop=True).drop_duplicates()
 
 
 def _period_lengths(times: pd.Series, epoch_seconds: float) -> list[float]:
     ordered = np.sort(times.astype(float).unique())
     if not len(ordered):
         return []
-    lengths: list[float] = []
-    run_epochs = 1
-    for difference in np.diff(ordered):
-        if difference <= epoch_seconds * 1.5:
-            run_epochs += 1
-        else:
-            lengths.append(run_epochs * epoch_seconds)
-            run_epochs = 1
-    lengths.append(run_epochs * epoch_seconds)
-    return lengths
+    breaks = np.diff(ordered) > epoch_seconds * 1.5
+    run_ids = np.concatenate(([0], np.cumsum(breaks)))
+    run_lengths = np.bincount(run_ids) * epoch_seconds
+    return run_lengths.tolist()
+
+
+def _channel_group_report(
+    expanded: pd.DataFrame,
+    *,
+    channels: list[str],
+    group_column: str,
+    totals: pd.Series,
+    duration: float,
+    percent_column: str,
+) -> pd.DataFrame:
+    """Build one row per (channel, group) combination, including zero-artifact cells.
+
+    Replaces a channel x group nested Python loop that re-filtered ``expanded``
+    with a boolean mask on every iteration. A single grouped pass computes
+    ``_period_lengths`` only for combinations that actually have flagged
+    epochs; the full channel x group grid (needed for zero-artifact cells) is
+    then filled in by reindexing.
+    """
+    full_index = pd.MultiIndex.from_product(
+        [channels, totals.index], names=["channel", group_column]
+    )
+    grouped = expanded.groupby(["channel", group_column])
+    artifact_epochs = grouped["epoch_id"].nunique().reindex(full_index, fill_value=0)
+    periods_by_group = grouped["time_s"].apply(
+        lambda values: _period_lengths(values, duration)
+    ).reindex(full_index)
+
+    rows = full_index.to_frame(index=False)
+    rows["artifact_periods"] = [
+        len(periods) if isinstance(periods, list) else 0
+        for periods in periods_by_group.to_numpy()
+    ]
+    rows["artifact_epochs"] = artifact_epochs.to_numpy()
+    rows["artifact_duration_s"] = rows["artifact_epochs"] * duration
+    rows[percent_column] = (
+        100.0 * rows["artifact_epochs"] / rows[group_column].map(totals)
+    )
+    rows["longest_artifact_s"] = [
+        max(periods, default=0.0) if isinstance(periods, list) else 0.0
+        for periods in periods_by_group.to_numpy()
+    ]
+    return rows
 
 
 def build_artifact_report(
@@ -140,54 +226,33 @@ def build_artifact_report(
         )
     overall = pd.DataFrame(overall_rows)
 
+    channels = sorted(expanded["channel"].unique())
+
     epoch_hours = artifact_epochs.assign(
         hour=np.floor(artifact_epochs["time_s"].astype(float) / 3600.0).astype(int)
     )
     hour_totals = epoch_hours.groupby("hour")["epoch_id"].nunique()
-    hourly_rows: list[dict[str, object]] = []
-    channels = sorted(expanded["channel"].unique())
-    for channel in channels:
-        channel_rows = expanded.loc[expanded["channel"] == channel]
-        for hour, total_epochs in hour_totals.items():
-            rows = channel_rows.loc[channel_rows["hour"] == hour]
-            artifact_count = rows["epoch_id"].nunique()
-            periods = _period_lengths(rows["time_s"], duration)
-            hourly_rows.append(
-                {
-                    "channel": channel,
-                    "hour": int(hour),
-                    "artifact_periods": len(periods),
-                    "artifact_epochs": artifact_count,
-                    "artifact_duration_s": artifact_count * duration,
-                    "hour_percent": 100.0 * artifact_count / total_epochs,
-                    "longest_artifact_s": max(periods, default=0.0),
-                }
-            )
-    hourly = pd.DataFrame(hourly_rows)
+    hourly = _channel_group_report(
+        expanded,
+        channels=channels,
+        group_column="hour",
+        totals=hour_totals,
+        duration=duration,
+        percent_column="hour_percent",
+    )
 
     epoch_states = artifact_epochs.assign(
         sleep_state=artifact_epochs["sleep_state"].map(sleep_state_name)
     )
     state_totals = epoch_states.groupby("sleep_state")["epoch_id"].nunique()
-    state_rows: list[dict[str, object]] = []
-    for channel in channels:
-        channel_rows = expanded.loc[expanded["channel"] == channel]
-        for state, total_epochs in state_totals.items():
-            rows = channel_rows.loc[channel_rows["sleep_state"] == state]
-            artifact_count = rows["epoch_id"].nunique()
-            periods = _period_lengths(rows["time_s"], duration)
-            state_rows.append(
-                {
-                    "channel": channel,
-                    "sleep_state": state,
-                    "artifact_periods": len(periods),
-                    "artifact_epochs": artifact_count,
-                    "artifact_duration_s": artifact_count * duration,
-                    "state_percent": 100.0 * artifact_count / total_epochs,
-                    "longest_artifact_s": max(periods, default=0.0),
-                }
-            )
-    sleep_state = pd.DataFrame(state_rows)
+    sleep_state = _channel_group_report(
+        expanded,
+        channels=channels,
+        group_column="sleep_state",
+        totals=state_totals,
+        duration=duration,
+        percent_column="state_percent",
+    )
     return ArtifactReport(duration, overall, hourly, sleep_state)
 
 

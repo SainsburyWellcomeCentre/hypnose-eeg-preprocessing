@@ -388,18 +388,23 @@ def run_qc(
         epoch_seconds=args.analysis_epoch_seconds,
         chunk_epochs=args.chunk_epochs,
     )
-    correlation_flags = np.zeros(len(correlations), dtype=bool)
-    thresholds = np.full(len(correlations), np.nan)
-    for position, row in enumerate(correlations.itertuples(index=False)):
-        threshold = _correlation_threshold(
-            str(row.channel_1_type),
-            str(row.channel_2_type),
+    pair_types = list(
+        zip(
+            correlations["channel_1_type"].astype(str).str.lower(),
+            correlations["channel_2_type"].astype(str).str.lower(),
+        )
+    )
+    threshold_by_pair = {
+        pair: _correlation_threshold(
+            pair[0],
+            pair[1],
             eeg_eeg_threshold=args.eeg_eeg_threshold,
             eeg_emg_threshold=args.eeg_emg_threshold,
         )
-        if threshold is not None:
-            thresholds[position] = threshold
-            correlation_flags[position] = abs(float(row.pearson_r)) > threshold
+        for pair in set(pair_types)
+    }
+    thresholds = pd.Series(pair_types, index=correlations.index).map(threshold_by_pair).to_numpy(dtype=float)
+    correlation_flags = np.abs(correlations["pearson_r"].to_numpy(dtype=float)) > thresholds
     flagged_correlations = correlations.loc[correlation_flags].copy()
     flagged_correlations["review_threshold"] = thresholds[correlation_flags]
     flagged_epoch_count = flagged_correlations["epoch_id"].nunique()

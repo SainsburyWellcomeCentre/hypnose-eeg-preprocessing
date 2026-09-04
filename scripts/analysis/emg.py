@@ -58,10 +58,7 @@ def compute_state_emg_rms(
         for first_epoch in range(0, n_epochs, chunk_epochs):
             last_epoch = min(first_epoch + chunk_epochs, n_epochs)
             epoch_ids = np.arange(first_epoch, last_epoch)
-            labels = np.array(
-                [epoch_states.get(int(epoch_id), 3) for epoch_id in epoch_ids],
-                dtype=int,
-            )
+            labels = epoch_states.reindex(epoch_ids, fill_value=3).to_numpy(dtype=int)
             keep = np.isin(labels, SLEEP_STATE_CODES)
             if excluded_artifacts:
                 keep &= ~np.isin(epoch_ids, list(excluded_artifacts))
