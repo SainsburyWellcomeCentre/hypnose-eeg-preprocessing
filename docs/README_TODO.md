@@ -124,7 +124,11 @@ resolves each recording's `sub-XXX/ses-YYY_date-.../` folder and writes under
 
 ## 12. Best method for sleep scoring, either before or after concatenation
 
-## 13. Ensure concatenation maintains zeitgeber time
+~~## 13. Ensure concatenation maintains zeitgeber time~~
+
+~~Instead of zeitgeber time, the real gap is considered when concatenating so that 
+once all preprocessing is completed the real start time and length of recording can
+be used to analyse considering ZT.~~
 
 ## 14. Rename to hypnose-eeg-preprocessing
 
