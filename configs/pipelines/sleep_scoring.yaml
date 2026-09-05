@@ -3,14 +3,16 @@ name: somnotate_sleep_scoring
 sleep_scoring:
   # Required. An absolute path, a path relative to the derivatives root, or a
   # model name resolved as derivatives/somnotate_training/<name>/model.pickle.
-  model_path: null
+  model_path: somnotate_training/somno_model_1/model.pickle
 
-  # These must match the raw EDF and the model's training assumptions.
+  # These must match the raw EDF and the model's training assumptions. Either
+  # spelling works -- with or without the repeated "EEG "/"EMG " modality prefix
+  # (score_recordings.py resolves against whichever the actual EDF has).
   sampling_rate_hz: 512
   channel_labels:
-    - "EEG EEG1A-B"
-    - "EEG EEG2A-B"
-    - "EMG EMG"
+    - "EEG1A-B"
+    - "EEG2A-B"
+    - "EMG"
 
   export_visbrain: true
 

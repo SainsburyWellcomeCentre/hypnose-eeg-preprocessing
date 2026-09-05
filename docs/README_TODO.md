@@ -124,10 +124,12 @@ resolves each recording's `sub-XXX/ses-YYY_date-.../` folder and writes under
 
 ## 12. Best method for sleep scoring, either before or after concatenation
 
-## 13. Rename to hypnose-eeg-preprocessing
+## 13. Ensure concatenation maintains zeitgeber time
 
-## 14. Update readme to make more concise
+## 14. Rename to hypnose-eeg-preprocessing
 
-## 15. Create executable scripts for each separate section with API
+## 15. Update readme to make more concise
 
-## 16. Automate running of the preprocessing for hypnose dataset with reports of errors
+## 16. Create executable scripts for each separate section with API
+
+## 17. Automate running of the preprocessing for hypnose dataset with reports of errors

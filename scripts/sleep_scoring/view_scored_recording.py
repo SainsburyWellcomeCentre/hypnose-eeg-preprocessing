@@ -379,6 +379,8 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
     from pyedflib import EdfReader
     from six import ensure_str
 
+    from scripts.sleep_scoring.score_recordings import _match_channel_labels
+
     dates = [settings.date] if settings.date is not None else None
     recordings = find_recordings(settings.repo_root, [settings.subject], dates=dates)
     if settings.session is not None:
@@ -436,13 +438,10 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
             ensure_str(reader.signal_label(i)).strip()
             for i in range(reader.signals_in_file)
         ]
-        try:
-            channel_indices = [labels.index(label) for label in channel_labels]
-        except ValueError as exc:
-            raise ValueError(
-                f"Could not find channels {channel_labels!r} in {recording.edf_path.name}; "
-                f"available channels are {labels!r}"
-            ) from exc
+        channel_labels = _match_channel_labels(
+            channel_labels, set(labels), source=recording.edf_path.name
+        )
+        channel_indices = [labels.index(label) for label in channel_labels]
 
         sample_rates = [float(reader.getSampleFrequency(i)) for i in channel_indices]
         if len(set(sample_rates)) != 1:

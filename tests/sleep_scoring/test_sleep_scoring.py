@@ -8,37 +8,37 @@ from pathlib import Path
 from scripts.sleep_scoring.score_recordings import (
     SleepScoringSettings,
     _as_date_range,
-    _relocate_scoring_outputs,
+    _channel_label_alias,
+    _match_channel_labels,
     _resolve_model_path,
     run_scoring,
 )
 
 
 class SleepScoringTests(unittest.TestCase):
-    def test_native_scoring_outputs_are_relocated_from_saved_results(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            session = Path(directory) / "sub-066" / "ses-1_date-20260717"
-            saved_results = session / "saved_results"
-            saved_results.mkdir(parents=True)
-            filenames = (
-                "recording_somnotate_predictions.parquet",
-                "recording_somnotate_segments.json",
-                "recording_somnotate_predictions.txt",
-            )
-            for filename in filenames:
-                (saved_results / filename).touch()
+    def test_channel_label_alias_round_trips_prefix(self) -> None:
+        self.assertEqual(_channel_label_alias("EEG EEG1A-B"), "EEG1A-B")
+        self.assertEqual(_channel_label_alias("EEG1A-B"), "EEG EEG1A-B")
+        self.assertEqual(_channel_label_alias("EMG EMG"), "EMG")
+        self.assertEqual(_channel_label_alias("EMG"), "EMG EMG")
 
-            relocated = _relocate_scoring_outputs(
-                [saved_results / "recording_somnotate_predictions.parquet"]
-            )
+    def test_match_channel_labels_accepts_either_spelling(self) -> None:
+        prefixed = {"EEG EEG1A-B", "EEG EEG2A-B", "EMG EMG"}
+        bare = {"EEG1A-B", "EEG2A-B", "EMG"}
+        requested = ["EEG EEG1A-B", "EEG EEG2A-B", "EMG EMG"]
 
-            destination = session / "sleep_scoring"
-            self.assertEqual(
-                relocated,
-                [destination / "recording_somnotate_predictions.parquet"],
-            )
-            self.assertTrue(all((destination / name).is_file() for name in filenames))
-            self.assertFalse(saved_results.exists())
+        self.assertEqual(
+            _match_channel_labels(requested, prefixed, source="raw.edf"),
+            requested,
+        )
+        self.assertEqual(
+            _match_channel_labels(requested, bare, source="concat.edf"),
+            ["EEG1A-B", "EEG2A-B", "EMG"],
+        )
+
+    def test_match_channel_labels_raises_when_neither_spelling_present(self) -> None:
+        with self.assertRaises(ValueError):
+            _match_channel_labels(["EEG EEG1A-B"], {"ECG"}, source="raw.edf")
 
     def test_model_name_resolves_below_derivatives(self) -> None:
         derivatives = Path("/data/derivatives")
@@ -88,6 +88,8 @@ class SleepScoringTests(unittest.TestCase):
             self.assertEqual(calls[0]["dates"], ["20260717"])
             self.assertEqual(calls[0]["model_path"], model)
             self.assertFalse(calls[0]["export_visbrain"])
+            self.assertEqual(calls[0]["output_subdir"], "sleep_scoring")
+            self.assertEqual(calls[0]["channel_labels"], ["EEG1", "EEG2", "EMG"])
             self.assertEqual(os.environ["HYPNOSE_EEG_RAWDATA_ROOT"], str(rawdata))
             self.assertEqual(os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"], str(derivatives))
 
@@ -126,6 +128,8 @@ class SleepScoringTests(unittest.TestCase):
             self.assertEqual(calls[0]["subjids"], ["66"])
             self.assertEqual(calls[0]["dates"], ["20260718"])
             self.assertIsNone(calls[0]["date_range"])
+            self.assertEqual(calls[0]["output_subdir"], "sleep_scoring")
+            self.assertEqual(calls[0]["channel_labels"], ["EEG1", "EEG2", "EMG"])
 
 
 if __name__ == "__main__":

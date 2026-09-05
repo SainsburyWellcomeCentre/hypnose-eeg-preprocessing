@@ -226,6 +226,45 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     )
 
 
+def _channel_label_alias(label: str) -> str:
+    """The other spelling of one channel label -- with or without its modality prefix.
+
+    Recordings are inconsistent about this: most raw EDFs name channels
+    ``EEG EEG1A-B`` / ``EMG EMG``, but some derived files (e.g. concatenated
+    recordings) drop the repeated prefix down to ``EEG1A-B`` / ``EMG``. Either
+    spelling is accepted in config/CLI input; this derives the one not given.
+    """
+    for prefix in ("EEG ", "EMG "):
+        if label.startswith(prefix):
+            return label[len(prefix):]
+    modality = "EMG" if label.upper().startswith("EMG") else "EEG"
+    return f"{modality} {label}"
+
+
+def _match_channel_labels(
+    channel_labels: list[str], available: set[str], *, source: str
+) -> list[str]:
+    """Resolve each configured label against a file's real signal labels.
+
+    Falls back to each label's alias spelling (see `_channel_label_alias`) when
+    the configured spelling isn't present in `available`.
+    """
+    resolved = []
+    for label in channel_labels:
+        if label in available:
+            resolved.append(label)
+            continue
+        alias = _channel_label_alias(label)
+        if alias in available:
+            resolved.append(alias)
+            continue
+        raise ValueError(
+            f"Channel label {label!r} (or {alias!r}) not found in {source}; "
+            f"available signals: {sorted(available)}"
+        )
+    return resolved
+
+
 def _import_score_recordings() -> Callable[..., list[Path]]:
     try:
         from hypnose_somnotate.scoring import score_recordings
@@ -236,33 +275,6 @@ def _import_score_recordings() -> Callable[..., list[Path]]:
             "'hypnose-somnotate[scoring]'."
         ) from exc
     return score_recordings
-
-
-def _relocate_scoring_outputs(output_paths: Sequence[str | Path]) -> list[Path]:
-    """Move Somnotate's native outputs from saved_results into sleep_scoring."""
-    relocated: list[Path] = []
-    prediction_suffix = "_somnotate_predictions.parquet"
-    for value in output_paths:
-        prediction = Path(value)
-        if (
-            prediction.parent.name != "saved_results"
-            or not prediction.name.endswith(prediction_suffix)
-        ):
-            relocated.append(prediction)
-            continue
-
-        destination_dir = prediction.parent.parent / output_dir_name("sleep_scoring")
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        recording_stem = prediction.name.removesuffix(prediction_suffix)
-        for source in sorted(prediction.parent.glob(f"{recording_stem}_somnotate_*")):
-            source.replace(destination_dir / source.name)
-        try:
-            prediction.parent.rmdir()
-        except OSError:
-            # Preserve the directory when it contains legacy or unrelated outputs.
-            pass
-        relocated.append(destination_dir / prediction.name)
-    return relocated
 
 
 def run_scoring(
@@ -289,6 +301,7 @@ def run_scoring(
         "channel_labels": settings.channel_labels,
         "export_visbrain": settings.export_visbrain,
         "sampling_rate_hz": settings.sampling_rate_hz,
+        "output_subdir": output_dir_name("sleep_scoring"),
     }
     if settings.sessions is None:
         output_paths = scorer(
@@ -311,7 +324,7 @@ def run_scoring(
                     **common_arguments,
                 )
             )
-    return _relocate_scoring_outputs(output_paths)
+    return output_paths
 
 
 def main(argv: Sequence[str] | None = None) -> int:
