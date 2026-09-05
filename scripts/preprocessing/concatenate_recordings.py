@@ -15,8 +15,11 @@ import gc
 import re
 import sys
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Iterable
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -39,6 +42,7 @@ class ConcatenationResult:
     sample_rate_hz: float | None = None
     n_samples: int | None = None
     duration_seconds: float | None = None
+    gap_seconds: list[float] | None = None
     existing_outputs: list[str] | None = None
     error: str | None = None
 
@@ -257,8 +261,9 @@ class EdfSessionConcatenator:
                 error=info_error,
             )
 
-        boundary_onsets = self._boundary_onsets(raws)
-        concatenated = mne.concatenate_raws(raws)
+        gaps_seconds = self._gaps_seconds(raws)
+        boundary_onsets = self._boundary_onsets(raws, gaps_seconds)
+        concatenated = self._build_concatenated_raw(mne, raws, gaps_seconds)
         self._add_boundary_annotations(concatenated, boundary_onsets, boundary_markers)
 
         edf_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,6 +280,7 @@ class EdfSessionConcatenator:
             sample_rate_hz=float(concatenated.info["sfreq"]),
             n_samples=concatenated.n_times,
             duration_seconds=concatenated.n_times / float(concatenated.info["sfreq"]),
+            gap_seconds=gaps_seconds,
             status="written",
         )
         del concatenated, raws
@@ -335,6 +341,7 @@ class EdfSessionConcatenator:
             "sample_rate_hz",
             "n_samples",
             "duration_seconds",
+            "gap_seconds",
             "existing_outputs",
             "error",
         ]
@@ -353,12 +360,88 @@ class EdfSessionConcatenator:
             for previous, current in zip(files, files[1:])
         ]
 
-    def _boundary_onsets(self, raws: list[Any]) -> list[float]:
+    def _gaps_seconds(self, raws: list[Any]) -> list[float]:
+        return [
+            self._gap_seconds(previous_raw, current_raw)
+            for previous_raw, current_raw in zip(raws, raws[1:])
+        ]
+
+    def _gap_seconds(self, previous_raw: Any, current_raw: Any) -> float:
+        previous_meas_date = previous_raw.info.get("meas_date")
+        current_meas_date = current_raw.info.get("meas_date")
+        if previous_meas_date is None or current_meas_date is None:
+            return 0.0
+
+        previous_end = previous_meas_date + timedelta(
+            seconds=previous_raw.n_times / float(previous_raw.info["sfreq"])
+        )
+        return max((current_meas_date - previous_end).total_seconds(), 0.0)
+
+    def _build_concatenated_raw(
+        self,
+        mne: Any,
+        raws: list[Any],
+        gaps_seconds: list[float],
+    ) -> Any:
+        # mne.concatenate_raws() requires every raw to be the same concrete
+        # type (mne/io/base.py:_check_raw_compatibility), so a RawArray gap
+        # filler can't be spliced between RawEDF segments that way. Building
+        # the padded array by hand and wrapping it once in a single RawArray
+        # sidesteps that check while still landing on the same laziness
+        # tradeoff: raw.export() already calls raw.get_data() internally, so
+        # materialising the data here doesn't add peak memory usage.
+        sfreq = float(raws[0].info["sfreq"])
+        n_channels = len(raws[0].ch_names)
+        last_index = len(raws) - 1
+
+        segments_data = [raws[0].get_data()]
+        join_sample_onsets: list[int] = []
+        gap_annotations: list[tuple[float, float, str]] = []
+        elapsed_samples = raws[0].n_times
+
+        for index, (raw, gap_seconds) in enumerate(zip(raws[1:], gaps_seconds), start=1):
+            n_gap_samples = int(round(gap_seconds * sfreq))
+            if n_gap_samples > 0:
+                join_sample_onsets.append(elapsed_samples)
+                gap_annotations.append(
+                    (
+                        elapsed_samples / sfreq,
+                        n_gap_samples / sfreq,
+                        self._gap_annotation_description(gap_seconds),
+                    )
+                )
+                segments_data.append(np.zeros((n_channels, n_gap_samples)))
+                elapsed_samples += n_gap_samples
+                join_sample_onsets.append(elapsed_samples)
+
+            segments_data.append(raw.get_data())
+            elapsed_samples += raw.n_times
+            if index != last_index:
+                join_sample_onsets.append(elapsed_samples)
+
+        full_data = np.concatenate(segments_data, axis=1)
+        concatenated = mne.io.RawArray(full_data, raws[0].info.copy(), verbose=False)
+
+        for sample_onset in join_sample_onsets:
+            onset = sample_onset / sfreq
+            concatenated.annotations.append(onset, 0.0, "BAD boundary")
+            concatenated.annotations.append(onset, 0.0, "EDGE boundary")
+
+        for onset, duration, description in gap_annotations:
+            concatenated.annotations.append(onset, duration, description)
+
+        return concatenated
+
+    def _gap_annotation_description(self, gap_seconds: float) -> str:
+        return f"BAD_ACQ_SKIP_CONCAT_GAP {gap_seconds:.3f}s"
+
+    def _boundary_onsets(self, raws: list[Any], gaps_seconds: list[float]) -> list[float]:
         onsets = []
         elapsed = 0.0
 
-        for raw in raws[:-1]:
+        for raw, gap_seconds in zip(raws[:-1], gaps_seconds):
             elapsed += raw.n_times / float(raw.info["sfreq"])
+            elapsed += gap_seconds
             onsets.append(elapsed)
 
         return onsets
@@ -424,6 +507,7 @@ def _result_to_row(result: ConcatenationResult) -> dict[str, Any]:
     row = result.__dict__.copy()
     row["recordings"] = "|".join(result.recordings)
     row["boundary_markers"] = "|".join(result.boundary_markers)
+    row["gap_seconds"] = "|".join(f"{gap:.3f}" for gap in result.gap_seconds or [])
     row["existing_outputs"] = "|".join(result.existing_outputs or [])
     row["error"] = result.error or ""
     return row
