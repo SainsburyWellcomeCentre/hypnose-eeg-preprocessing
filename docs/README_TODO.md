@@ -124,16 +124,20 @@ resolves each recording's `sub-XXX/ses-YYY_date-.../` folder and writes under
 
 ## 12. Best method for sleep scoring, either before or after concatenation
 
+- Use downsample recording to reduce memory load
+
 ~~## 13. Ensure concatenation maintains zeitgeber time~~
 
 ~~Instead of zeitgeber time, the real gap is considered when concatenating so that 
 once all preprocessing is completed the real start time and length of recording can
 be used to analyse considering ZT.~~
 
-## 14. Rename to hypnose-eeg-preprocessing
+## 14. Run all steps individually for sub-63
 
-## 15. Update readme to make more concise
+## 15. Rename to hypnose-eeg-preprocessing
 
-## 16. Create executable scripts for each separate section with API
+## 16. Update readme to make more concise
 
-## 17. Automate running of the preprocessing for hypnose dataset with reports of errors
+## 17. Create executable scripts for each separate section with API
+
+## 18. Automate running of the preprocessing for hypnose dataset with reports of errors
