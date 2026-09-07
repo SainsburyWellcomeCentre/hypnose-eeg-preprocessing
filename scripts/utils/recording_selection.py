@@ -8,6 +8,49 @@ from pathlib import Path
 from hypnose_helpers.io.layout import SessionLayout, normalize_subjid
 
 
+def is_concatenated_recording(path: Path) -> bool:
+    """Whether `path` looks like a `concatenate_recordings.py`-produced file."""
+    name = path.name.lower()
+    return name.endswith("recording-concat.edf") or "_recording-concat" in name
+
+
+def prefer_concatenated_recording(edf_paths: list[Path]) -> list[Path]:
+    """Within one folder's EDFs, keep only the concatenated recording if several exist.
+
+    `concatenate_recordings.py` combines a session's raw per-part EDFs into one
+    `_recording-concat.edf` file alongside them. Once that has been run, processing
+    every file in the folder duplicates work on the same underlying recording --
+    and for the individual parts, without any of the gap-aware handling
+    (concatenate_recordings.py's own gap-padding, or somnotate's
+    `prepare_recording`) that only applies within a single file.
+
+    If several EDFs are present but none is a concatenated recording, an empty
+    list is returned rather than falling back to the ambiguous raw parts --
+    callers should treat that as "not ready to process yet" and warn rather than
+    silently score/downsample the parts independently.
+    """
+    if len(edf_paths) <= 1:
+        return edf_paths
+    return [path for path in edf_paths if is_concatenated_recording(path)]
+
+
+def group_and_prefer_concatenated_recordings(edf_paths) -> list[Path]:
+    """Apply `prefer_concatenated_recording` within each EDF's parent folder.
+
+    For a flat, single-session list of EDFs, call `prefer_concatenated_recording`
+    directly instead -- this is for callers (like `downsample_recordings.py`) whose
+    glob spans many session folders in one flat list.
+    """
+    files_by_folder: dict[Path, list[Path]] = {}
+    for edf_path in edf_paths:
+        files_by_folder.setdefault(edf_path.parent, []).append(edf_path)
+
+    selected: list[Path] = []
+    for folder_files in files_by_folder.values():
+        selected.extend(prefer_concatenated_recording(folder_files))
+    return sorted(selected)
+
+
 def source_stem_from_fif(path: Path) -> str:
     """Strip MNE/downsampling naming detail to recover the source recording's stem."""
     stem = re.sub(r"_raw$", "", path.stem, flags=re.IGNORECASE)

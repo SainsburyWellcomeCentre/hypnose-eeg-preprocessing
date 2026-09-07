@@ -1,9 +1,18 @@
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from hypnose_somnotate.preprocessing.gap_correction import (
+    PreparedRecording,
+    RecordingSegment,
+    ScoringChunk,
+)
 
 from scripts.sleep_scoring.score_recordings import (
     SleepScoringSettings,
@@ -13,6 +22,47 @@ from scripts.sleep_scoring.score_recordings import (
     _resolve_model_path,
     run_scoring,
 )
+
+
+def _fake_prepared(duration_s: float = 10.0) -> PreparedRecording:
+    """A minimal, valid PreparedRecording -- one signal segment, no gaps."""
+    return PreparedRecording(
+        segments=[RecordingSegment(0, "signal", 0.0, duration_s)],
+        scoring_chunks=[ScoringChunk(0.0, duration_s, np.zeros((1, 3)))],
+        strategy="trim_only",
+        original_duration_s=duration_s,
+        total_missing_s=0.0,
+        missing_fraction=0.0,
+        longest_gap_s=0.0,
+        sampling_rate_hz=512.0,
+        time_resolution_s=1.0,
+    )
+
+
+def _fake_predictions_df(n: int = 1) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "time_s": np.arange(n, dtype=float),
+            "label": np.zeros(n, dtype=int),
+            "label_model": np.ones(n, dtype=int),
+            "label_output": np.zeros(n, dtype=int),
+            "segment_id": np.zeros(n, dtype=int),
+            "kind": ["signal"] * n,
+            "prob_wake": np.ones(n),
+            "prob_nrem": np.zeros(n),
+            "prob_rem": np.zeros(n),
+            "prob_undef": np.zeros(n),
+        }
+    )
+
+
+def _make_session(rawdata: Path, sub_label: str, session_dirname: str, edf_names: list[str]) -> Path:
+    """Create a session's ephys/ folder with empty stand-in EDF files."""
+    ephys_dir = rawdata / sub_label / session_dirname / "ephys"
+    ephys_dir.mkdir(parents=True)
+    for name in edf_names:
+        (ephys_dir / name).touch()
+    return ephys_dir
 
 
 class SleepScoringTests(unittest.TestCase):
@@ -51,7 +101,7 @@ class SleepScoringTests(unittest.TestCase):
         self.assertEqual(_as_date_range(["20260707", "20260718"]), ("20260707", "20260718"))
         self.assertEqual(_as_date_range("20260707-20260718"), ("20260707", "20260718"))
 
-    def test_run_scoring_bridges_data_roots_and_forwards_settings(self) -> None:
+    def test_run_scoring_scores_the_matched_recording_per_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             rawdata = root / "rawdata"
@@ -60,12 +110,14 @@ class SleepScoringTests(unittest.TestCase):
             derivatives.mkdir()
             model = derivatives / "model.pickle"
             model.touch()
-            expected_output = derivatives / "predictions.parquet"
+            ephys_dir = _make_session(
+                rawdata, "sub-066", "ses-001_date-20260717", ["sub-066_ses-001_recording-001.edf"]
+            )
             calls: list[dict] = []
 
-            def fake_score_recordings(**kwargs):
-                calls.append(kwargs)
-                return [expected_output]
+            def fake_score_recording(edf_path, model_path, **kwargs):
+                calls.append({"edf_path": edf_path, "model_path": model_path, **kwargs})
+                return _fake_predictions_df(), _fake_prepared()
 
             settings = SleepScoringSettings(
                 subjids=["66"],
@@ -81,32 +133,35 @@ class SleepScoringTests(unittest.TestCase):
                 sampling_rate_hz=512,
             )
 
-            outputs = run_scoring(settings, score_function=fake_score_recordings)
+            outputs = run_scoring(settings, score_function=fake_score_recording)
 
+            expected_output = (
+                derivatives / "sub-066" / "ses-001_date-20260717" / "sleep_scoring"
+                / "sub-066_ses-001_recording-001_somnotate_predictions.parquet"
+            )
             self.assertEqual(outputs, [expected_output])
-            self.assertEqual(calls[0]["subjids"], ["66"])
-            self.assertEqual(calls[0]["dates"], ["20260717"])
+            self.assertTrue(expected_output.is_file())
+            self.assertEqual(calls[0]["edf_path"], ephys_dir / "sub-066_ses-001_recording-001.edf")
             self.assertEqual(calls[0]["model_path"], model)
-            self.assertFalse(calls[0]["export_visbrain"])
-            self.assertEqual(calls[0]["output_subdir"], "sleep_scoring")
             self.assertEqual(calls[0]["channel_labels"], ["EEG1", "EEG2", "EMG"])
-            self.assertEqual(os.environ["HYPNOSE_EEG_RAWDATA_ROOT"], str(rawdata))
-            self.assertEqual(os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"], str(derivatives))
+            self.assertEqual(calls[0]["sampling_rate_hz"], 512)
 
     def test_run_scoring_resolves_session_numbers_per_subject(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             rawdata = root / "rawdata"
             derivatives = root / "derivatives"
-            (rawdata / "sub-066" / "ses-2_date-20260718").mkdir(parents=True)
             derivatives.mkdir()
             model = derivatives / "model.pickle"
             model.touch()
+            _make_session(
+                rawdata, "sub-066", "ses-002_date-20260718", ["sub-066_ses-002_recording-001.edf"]
+            )
             calls: list[dict] = []
 
-            def fake_score_recordings(**kwargs):
-                calls.append(kwargs)
-                return [derivatives / "predictions.parquet"]
+            def fake_score_recording(edf_path, model_path, **kwargs):
+                calls.append({"edf_path": edf_path, **kwargs})
+                return _fake_predictions_df(), _fake_prepared()
 
             settings = SleepScoringSettings(
                 subjids=["66"],
@@ -122,14 +177,100 @@ class SleepScoringTests(unittest.TestCase):
                 sampling_rate_hz=512,
             )
 
-            outputs = run_scoring(settings, score_function=fake_score_recordings)
+            outputs = run_scoring(settings, score_function=fake_score_recording)
 
-            self.assertEqual(outputs, [derivatives / "predictions.parquet"])
-            self.assertEqual(calls[0]["subjids"], ["66"])
-            self.assertEqual(calls[0]["dates"], ["20260718"])
-            self.assertIsNone(calls[0]["date_range"])
-            self.assertEqual(calls[0]["output_subdir"], "sleep_scoring")
-            self.assertEqual(calls[0]["channel_labels"], ["EEG1", "EEG2", "EMG"])
+            self.assertEqual(len(outputs), 1)
+            self.assertEqual(
+                calls[0]["edf_path"].name, "sub-066_ses-002_recording-001.edf"
+            )
+
+    def test_run_scoring_prefers_the_concatenated_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            derivatives.mkdir()
+            model = derivatives / "model.pickle"
+            model.touch()
+            _make_session(
+                rawdata,
+                "sub-066",
+                "ses-001_date-20260717",
+                [
+                    "sub-066_ses-001_recording-001.edf",
+                    "sub-066_ses-001_recording-002.edf",
+                    "sub-066_ses-001_recording-concat.edf",
+                ],
+            )
+            calls: list[dict] = []
+
+            def fake_score_recording(edf_path, model_path, **kwargs):
+                calls.append({"edf_path": edf_path, **kwargs})
+                return _fake_predictions_df(), _fake_prepared()
+
+            settings = SleepScoringSettings(
+                subjids=["66"],
+                model_path=model,
+                repo_root=root,
+                rawdata_root=rawdata,
+                derivatives_root=derivatives,
+                dates=["20260717"],
+                sessions=None,
+                date_range=None,
+                channel_labels=["EEG1", "EEG2", "EMG"],
+                export_visbrain=False,
+                sampling_rate_hz=512,
+            )
+
+            outputs = run_scoring(settings, score_function=fake_score_recording)
+
+            self.assertEqual(len(outputs), 1)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0]["edf_path"].name, "sub-066_ses-001_recording-concat.edf")
+
+    def test_run_scoring_skips_multi_part_session_without_a_concat_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            derivatives.mkdir()
+            model = derivatives / "model.pickle"
+            model.touch()
+            _make_session(
+                rawdata,
+                "sub-066",
+                "ses-001_date-20260717",
+                ["sub-066_ses-001_recording-001.edf", "sub-066_ses-001_recording-002.edf"],
+            )
+            calls: list[dict] = []
+
+            def fake_score_recording(edf_path, model_path, **kwargs):
+                calls.append({"edf_path": edf_path, **kwargs})
+                return _fake_predictions_df(), _fake_prepared()
+
+            settings = SleepScoringSettings(
+                subjids=["66"],
+                model_path=model,
+                repo_root=root,
+                rawdata_root=rawdata,
+                derivatives_root=derivatives,
+                dates=["20260717"],
+                sessions=None,
+                date_range=None,
+                channel_labels=["EEG1", "EEG2", "EMG"],
+                export_visbrain=False,
+                sampling_rate_hz=512,
+            )
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                outputs = run_scoring(settings, score_function=fake_score_recording)
+
+            self.assertEqual(outputs, [])
+            self.assertEqual(calls, [])
+            self.assertTrue(
+                any("none is a concatenated recording" in str(w.message) for w in caught)
+            )
 
 
 if __name__ == "__main__":

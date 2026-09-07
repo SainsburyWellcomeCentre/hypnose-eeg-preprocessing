@@ -33,7 +33,7 @@ from scripts.utils.config import (
     load_config,
     nested_get,
 )
-from scripts.utils.recording_selection import find_session_dirs
+from scripts.utils.recording_selection import find_session_dirs, group_and_prefer_concatenated_recordings
 
 
 @dataclass(frozen=True)
@@ -80,25 +80,7 @@ class EdfDownsampler:
         return self._prefer_concatenated_recordings(edf_files)
 
     def _prefer_concatenated_recordings(self, edf_files: list[Path]) -> list[Path]:
-        files_by_folder: dict[Path, list[Path]] = {}
-        for edf_path in edf_files:
-            files_by_folder.setdefault(edf_path.parent, []).append(edf_path)
-
-        selected = []
-        for folder_files in files_by_folder.values():
-            if len(folder_files) == 1:
-                selected.extend(folder_files)
-                continue
-
-            concat_files = [
-                path
-                for path in folder_files
-                if path.name.lower().endswith("recording-concat.edf")
-                or "_recording-concat" in path.name.lower()
-            ]
-            selected.extend(concat_files)
-
-        return sorted(selected)
+        return group_and_prefer_concatenated_recordings(edf_files)
 
     def output_path(self, edf_path: Path) -> Path:
         relative_path = edf_path.relative_to(self.source_dir)

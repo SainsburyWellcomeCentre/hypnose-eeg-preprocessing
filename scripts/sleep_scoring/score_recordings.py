@@ -2,21 +2,30 @@
 
 The command reads its defaults from ``configs/pipelines/sleep_scoring.yaml``.
 Command-line arguments override YAML values. Data roots are resolved through
-this repository's active data-location profile and exposed through the
-``HYPNOSE_EEG_*`` variables understood by hypnose-somnotate.
+this repository's active data-location profile.
+
+This module owns every path/layout decision: which sessions match the
+subject/date/date-range/session selectors, which EDF to score when a session
+folder holds several parts (only the concatenated recording, once
+``scripts/preprocessing/concatenate_recordings.py`` has produced one -- see
+``run_scoring``), and where outputs are written.
+``hypnose_somnotate.scoring.score_recording`` only ever receives one already-
+resolved EDF path and model path at a time; it has no layout knowledge of its
+own.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
+import json
 import re
 import sys
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from hypnose_helpers.io.layout import SessionLayout
+from hypnose_helpers.io.layout import SessionLayout, normalize_subjid
 from hypnose_helpers.io.selectors import parse_sessions
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -29,6 +38,7 @@ from scripts.utils.config import (
     load_config,
     nested_get,
 )
+from scripts.utils.recording_selection import prefer_concatenated_recording
 
 
 @dataclass(frozen=True)
@@ -146,7 +156,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Model name or model.pickle path. Relative paths use the derivatives root.",
     )
-    parser.add_argument("--repo-root", default=None, help="Repository root passed to Somnotate.")
+    parser.add_argument(
+        "--repo-root",
+        default=None,
+        help="Repository root (kept for CLI compatibility; unused by scoring itself).",
+    )
     parser.add_argument("--rawdata-root", default=None, help="Override the configured raw-data root.")
     parser.add_argument(
         "--derivatives-root", default=None, help="Override the configured derivatives root."
@@ -265,22 +279,90 @@ def _match_channel_labels(
     return resolved
 
 
-def _import_score_recordings() -> Callable[..., list[Path]]:
+@dataclass(frozen=True)
+class _ScoringDependencies:
+    score_recording: Callable[..., tuple[Any, Any]]
+    prediction_path: Callable[[Any], Path]
+    segments_path: Callable[[Any], Path]
+    hypnogram_path: Callable[[Any], Path]
+    recording_ref_cls: type
+    print_recording_plan: Callable[[Any, Any], None]
+    convert_state_vector_to_state_intervals: Callable[..., tuple[list, list]]
+    export_hypnogram: Callable[..., None]
+    configuration: Any
+
+
+def _import_scoring_dependencies() -> _ScoringDependencies:
     try:
-        from hypnose_somnotate.scoring import score_recordings
+        from hypnose_somnotate.io.loading import hypnogram_path, prediction_path, segments_path
+        from hypnose_somnotate.io.paths import RecordingRef
+        from hypnose_somnotate.scoring import score_recording
+        from hypnose_somnotate.scoring.scoring import _print_recording_plan
+        from hypnose_somnotate.somnotate._utils import convert_state_vector_to_state_intervals
+        from hypnose_somnotate.somnotate_pipeline.io.data_io import export_hypnogram
+        from hypnose_somnotate.somnotate_pipeline.utils import configuration
     except ImportError as exc:
         raise ImportError(
             "Sleep scoring requires hypnose-somnotate with its scoring dependencies. "
             "Create the environment from environment.yml or install "
             "'hypnose-somnotate[scoring]'."
         ) from exc
-    return score_recordings
+    return _ScoringDependencies(
+        score_recording=score_recording,
+        prediction_path=prediction_path,
+        segments_path=segments_path,
+        hypnogram_path=hypnogram_path,
+        recording_ref_cls=RecordingRef,
+        print_recording_plan=_print_recording_plan,
+        convert_state_vector_to_state_intervals=convert_state_vector_to_state_intervals,
+        export_hypnogram=export_hypnogram,
+        configuration=configuration,
+    )
+
+
+def _warn_missing_selection(
+    sub_label: str, sessions: list, dates: list[str] | None, session_numbers: list[int] | None
+) -> None:
+    """Warn about specifically requested dates/sessions that resolved to nothing.
+
+    A subject missing *some* of several requested dates/sessions still gets
+    scored for the rest -- this only reports the gaps, it never aborts the batch.
+    """
+    if dates is not None:
+        found = {s.date for s in sessions}
+        for missing in sorted(set(dates) - found):
+            warnings.warn(
+                f"No session directory for {sub_label} on requested date {missing}.",
+                UserWarning,
+                stacklevel=3,
+            )
+    elif session_numbers is not None:
+        found = {s.ses for s in sessions}
+        for missing in sorted(set(session_numbers) - found):
+            warnings.warn(
+                f"No session directory for {sub_label} with requested session {missing}.",
+                UserWarning,
+                stacklevel=3,
+            )
+    elif not sessions:
+        warnings.warn(f"No session directory found for {sub_label}.", UserWarning, stacklevel=3)
 
 
 def run_scoring(
     settings: SleepScoringSettings,
-    score_function: Callable[..., list[Path]] | None = None,
+    score_function: Callable[..., tuple[Any, Any]] | None = None,
 ) -> list[Path]:
+    """Discover recordings under `settings.rawdata_root` and score each one.
+
+    Owns every path/layout decision itself -- which sessions match the
+    subject/date/date-range/session selectors (via `SessionLayout`), which EDF
+    to score when a session folder holds several
+    (`prefer_concatenated_recording`), and where outputs are written
+    (`settings.derivatives_root/<sub>/<ses>/sleep_scoring/`). `score_function`
+    (default: `hypnose_somnotate.scoring.score_recording`) only ever sees one
+    resolved EDF path and model path at a time -- it has no say in any of the
+    above.
+    """
     if not settings.rawdata_root.is_dir():
         raise FileNotFoundError(f"Raw-data root not found: {settings.rawdata_root}")
     if not settings.derivatives_root.is_dir():
@@ -288,42 +370,112 @@ def run_scoring(
     if not settings.model_path.is_file():
         raise FileNotFoundError(f"Somnotate model not found: {settings.model_path}")
 
-    # hypnose-somnotate resolves these variables at call time. Assign rather than
-    # setdefault so explicit CLI/config values override the ambient environment.
-    os.environ["HYPNOSE_EEG_RAWDATA_ROOT"] = str(settings.rawdata_root)
-    os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"] = str(settings.derivatives_root)
+    deps = _import_scoring_dependencies()
+    scorer = score_function or deps.score_recording
+    RecordingRef = deps.recording_ref_cls
 
-    scorer = score_function or _import_score_recordings()
-    common_arguments = {
-        "model_path": settings.model_path,
-        "repo_root": settings.repo_root,
-        "date_range": settings.date_range,
-        "channel_labels": settings.channel_labels,
-        "export_visbrain": settings.export_visbrain,
-        "sampling_rate_hz": settings.sampling_rate_hz,
-        "output_subdir": output_dir_name("sleep_scoring"),
-    }
-    if settings.sessions is None:
-        output_paths = scorer(
-            subjids=settings.subjids,
-            dates=settings.dates,
-            **common_arguments,
+    channel_labels = settings.channel_labels
+    output_subdir = output_dir_name("sleep_scoring")
+    layout = SessionLayout(settings.rawdata_root, name="rawdata")
+
+    output_paths: list[Path] = []
+    for subjid in settings.subjids:
+        sub_label = normalize_subjid(subjid)
+        sessions = layout.find_sessions(
+            subjid,
+            date=settings.dates,
+            date_range=settings.date_range,
+            ses=settings.sessions,
+            missing_ok=True,
         )
-    else:
-        layout = SessionLayout(settings.rawdata_root, name="rawdata")
-        output_paths = []
-        for subject in settings.subjids:
-            dates = [
-                layout.find_session(subject, ses=session).date
-                for session in settings.sessions
-            ]
-            output_paths.extend(
-                scorer(
-                    subjids=[subject],
-                    dates=dates,
-                    **common_arguments,
+        _warn_missing_selection(sub_label, sessions, settings.dates, settings.sessions)
+
+        for session in sessions:
+            session_label = session.path.name.split("_date-")[0]
+            ephys_dir = session.path / "ephys"
+            if not ephys_dir.is_dir():
+                warnings.warn(
+                    f"No ephys/ directory for {sub_label} {session_label} (date {session.date}).",
+                    UserWarning,
+                    stacklevel=2,
                 )
-            )
+                continue
+
+            edf_paths = sorted(ephys_dir.glob(f"{sub_label}_ses-*recording-*.edf"))
+            if not edf_paths:
+                pvfs_files = list(ephys_dir.glob("*.pvfs"))
+                if pvfs_files:
+                    warnings.warn(
+                        f"No EDF file for {sub_label} {session_label} (date {session.date}); "
+                        f"found only .pvfs files in {ephys_dir}. "
+                        "Convert the .pvfs to .edf before scoring.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    warnings.warn(
+                        f"No EEG data files for {sub_label} {session_label} (date {session.date}); "
+                        f"{ephys_dir} contains no .edf or .pvfs files.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                continue
+
+            preferred_edf_paths = prefer_concatenated_recording(edf_paths)
+            if not preferred_edf_paths:
+                warnings.warn(
+                    f"{sub_label} {session_label} (date {session.date}) has "
+                    f"{len(edf_paths)} EDF files but none is a concatenated recording "
+                    "('_recording-concat.edf'); skipping until "
+                    "scripts/preprocessing/concatenate_recordings.py has been run "
+                    "for this session.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+
+            for edf_path in preferred_edf_paths:
+                output_dir = (
+                    settings.derivatives_root
+                    / session.subject_dir.name
+                    / session.path.name
+                    / output_subdir
+                )
+                recording = RecordingRef(
+                    subject=sub_label,
+                    session=session_label,
+                    date=session.date,
+                    edf_path=edf_path,
+                    output_dir=output_dir,
+                )
+
+                df, prepared = scorer(
+                    edf_path,
+                    settings.model_path,
+                    channel_labels=channel_labels,
+                    sampling_rate_hz=settings.sampling_rate_hz,
+                )
+                deps.print_recording_plan(recording, prepared)
+
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = deps.prediction_path(recording)
+                sidecar_path = deps.segments_path(recording)
+
+                df.to_parquet(output_path, index=False)
+                with open(sidecar_path, "w") as f:
+                    json.dump(prepared.to_dict(), f, indent=2)
+
+                if settings.export_visbrain:
+                    hyp_path = deps.hypnogram_path(recording)
+                    states, intervals = deps.convert_state_vector_to_state_intervals(
+                        df["label_model"].to_numpy(dtype=int),
+                        mapping=deps.configuration.int_to_state,
+                        time_resolution=deps.configuration.time_resolution,
+                    )
+                    deps.export_hypnogram(str(hyp_path), states, intervals)
+
+                output_paths.append(output_path)
+
     return output_paths
 
 
