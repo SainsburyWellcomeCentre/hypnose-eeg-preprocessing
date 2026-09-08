@@ -54,6 +54,7 @@ class SleepScoringSettings:
     channel_labels: list[str] | None
     export_visbrain: bool
     sampling_rate_hz: int
+    global_normalization: bool
 
 
 def _as_list(value: Any, *, option_name: str) -> list[str] | None:
@@ -178,6 +179,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Enable or disable Visbrain hypnogram export.",
     )
+    parser.add_argument(
+        "--global-normalization",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Normalize every scoring chunk against statistics pooled across the "
+            "whole recording (gap/too_short epochs excluded), instead of each "
+            "chunk's own statistics. Matters most for recordings split into "
+            "several chunks by long gaps. Default: true (see "
+            "configs/pipelines/sleep_scoring.yaml)."
+        ),
+    )
     return parser
 
 
@@ -225,6 +238,11 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     if sampling_rate_hz <= 0:
         raise ValueError("sampling_rate_hz must be positive")
 
+    global_normalization_value = coalesce(
+        args.global_normalization, scoring.get("global_normalization"), False
+    )
+    global_normalization = _as_bool(global_normalization_value, option_name="global_normalization")
+
     return SleepScoringSettings(
         subjids=subjids,
         model_path=model_path,
@@ -237,6 +255,7 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
         channel_labels=channel_labels,
         export_visbrain=export_visbrain,
         sampling_rate_hz=sampling_rate_hz,
+        global_normalization=global_normalization,
     )
 
 
@@ -454,6 +473,7 @@ def run_scoring(
                     settings.model_path,
                     channel_labels=channel_labels,
                     sampling_rate_hz=settings.sampling_rate_hz,
+                    global_normalization=settings.global_normalization,
                 )
                 deps.print_recording_plan(recording, prepared)
 

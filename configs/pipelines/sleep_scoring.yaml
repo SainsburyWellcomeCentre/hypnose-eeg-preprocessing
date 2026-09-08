@@ -16,6 +16,13 @@ sleep_scoring:
 
   export_visbrain: true
 
+  # If true, every scoring chunk is normalized against robust statistics pooled
+  # across the whole recording (gap/too_short epochs excluded) instead of each
+  # chunk's own statistics -- see hypnose_somnotate.preprocessing.preprocessing.
+  # compute_global_normalization_stats. Matters most for recordings split into
+  # several independent chunks by long gaps.
+  global_normalization: true
+
   # Predicted-state display labels, shared by every QC report. "Undefined" covers
   # unscored epochs and has no display color.
   sleep_state_names:

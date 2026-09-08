@@ -65,6 +65,28 @@ def _make_session(rawdata: Path, sub_label: str, session_dirname: str, edf_names
     return ephys_dir
 
 
+def _settings(
+    *, root: Path, rawdata: Path, derivatives: Path, model: Path, **overrides
+) -> SleepScoringSettings:
+    """SleepScoringSettings with test-friendly defaults; pass overrides to vary one field."""
+    fields = dict(
+        subjids=["66"],
+        model_path=model,
+        repo_root=root,
+        rawdata_root=rawdata,
+        derivatives_root=derivatives,
+        dates=None,
+        sessions=None,
+        date_range=None,
+        channel_labels=["EEG1", "EEG2", "EMG"],
+        export_visbrain=False,
+        sampling_rate_hz=512,
+        global_normalization=False,
+    )
+    fields.update(overrides)
+    return SleepScoringSettings(**fields)
+
+
 class SleepScoringTests(unittest.TestCase):
     def test_channel_label_alias_round_trips_prefix(self) -> None:
         self.assertEqual(_channel_label_alias("EEG EEG1A-B"), "EEG1A-B")
@@ -119,18 +141,9 @@ class SleepScoringTests(unittest.TestCase):
                 calls.append({"edf_path": edf_path, "model_path": model_path, **kwargs})
                 return _fake_predictions_df(), _fake_prepared()
 
-            settings = SleepScoringSettings(
-                subjids=["66"],
-                model_path=model,
-                repo_root=root,
-                rawdata_root=rawdata,
-                derivatives_root=derivatives,
-                dates=["20260717"],
-                sessions=None,
-                date_range=None,
-                channel_labels=["EEG1", "EEG2", "EMG"],
-                export_visbrain=False,
-                sampling_rate_hz=512,
+            settings = _settings(
+                root=root, rawdata=rawdata, derivatives=derivatives, model=model,
+                dates=["20260717"], global_normalization=True,
             )
 
             outputs = run_scoring(settings, score_function=fake_score_recording)
@@ -145,6 +158,7 @@ class SleepScoringTests(unittest.TestCase):
             self.assertEqual(calls[0]["model_path"], model)
             self.assertEqual(calls[0]["channel_labels"], ["EEG1", "EEG2", "EMG"])
             self.assertEqual(calls[0]["sampling_rate_hz"], 512)
+            self.assertTrue(calls[0]["global_normalization"])
 
     def test_run_scoring_resolves_session_numbers_per_subject(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -163,18 +177,9 @@ class SleepScoringTests(unittest.TestCase):
                 calls.append({"edf_path": edf_path, **kwargs})
                 return _fake_predictions_df(), _fake_prepared()
 
-            settings = SleepScoringSettings(
-                subjids=["66"],
-                model_path=model,
-                repo_root=root,
-                rawdata_root=rawdata,
-                derivatives_root=derivatives,
-                dates=None,
+            settings = _settings(
+                root=root, rawdata=rawdata, derivatives=derivatives, model=model,
                 sessions=[2],
-                date_range=None,
-                channel_labels=["EEG1", "EEG2", "EMG"],
-                export_visbrain=False,
-                sampling_rate_hz=512,
             )
 
             outputs = run_scoring(settings, score_function=fake_score_recording)
@@ -208,18 +213,9 @@ class SleepScoringTests(unittest.TestCase):
                 calls.append({"edf_path": edf_path, **kwargs})
                 return _fake_predictions_df(), _fake_prepared()
 
-            settings = SleepScoringSettings(
-                subjids=["66"],
-                model_path=model,
-                repo_root=root,
-                rawdata_root=rawdata,
-                derivatives_root=derivatives,
+            settings = _settings(
+                root=root, rawdata=rawdata, derivatives=derivatives, model=model,
                 dates=["20260717"],
-                sessions=None,
-                date_range=None,
-                channel_labels=["EEG1", "EEG2", "EMG"],
-                export_visbrain=False,
-                sampling_rate_hz=512,
             )
 
             outputs = run_scoring(settings, score_function=fake_score_recording)
@@ -248,18 +244,9 @@ class SleepScoringTests(unittest.TestCase):
                 calls.append({"edf_path": edf_path, **kwargs})
                 return _fake_predictions_df(), _fake_prepared()
 
-            settings = SleepScoringSettings(
-                subjids=["66"],
-                model_path=model,
-                repo_root=root,
-                rawdata_root=rawdata,
-                derivatives_root=derivatives,
+            settings = _settings(
+                root=root, rawdata=rawdata, derivatives=derivatives, model=model,
                 dates=["20260717"],
-                sessions=None,
-                date_range=None,
-                channel_labels=["EEG1", "EEG2", "EMG"],
-                export_visbrain=False,
-                sampling_rate_hz=512,
             )
 
             with warnings.catch_warnings(record=True) as caught:
