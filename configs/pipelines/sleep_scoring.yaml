@@ -42,10 +42,16 @@ sleep_scoring:
 sleep_scoring_view:
   recording_index: 0
   eeg_channel: 0       # 0=EEG1, 1=EEG2
-  view_length_s: 120.0
+  view_length_s: 600
   hours: null           # Optional [start, end] elapsed hours, e.g. [3, 6]
   # Alternative real-time range, e.g. ["20260717 03:00:00", "20260717 06:00:00"]
   time_range: null
-  display_rate_hz: null # Optional display downsampling, e.g. 128
+  # Optional display downsampling, e.g. 128. A pre-downsampled FIF under
+  # derivatives (scripts/preprocessing/downsample_recordings.py) is used
+  # instead of the EDF whenever one is available and its rate satisfies this
+  # -- even left null, in which case any available FIF is still used, at its
+  # own rate, since it's faster to read than the full-rate EDF. Set this
+  # higher than any available FIF's rate to force reading the EDF.
+  display_rate_hz: 128
   show_artifacts: false # Shade regions flagged by artifact_epochs.parquet
   show_gaps: true # Shade 'gap'/'too_short' spans from the predictions parquet's kind column

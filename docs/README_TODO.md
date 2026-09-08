@@ -130,7 +130,7 @@ resolves each recording's `sub-XXX/ses-YYY_date-.../` folder and writes under
 once all preprocessing is completed the real start time and length of recording can
 be used to analyse considering ZT.~~
 
-## 13. Use of downsampled data for view_scored_recordings to reduce computing costs
+~~## 13. Use of downsampled data for view_scored_recordings to reduce computing costs~~
 
 ## 14. Insert an output of sleep score qc which is saved into own folder
 

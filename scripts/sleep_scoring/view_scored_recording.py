@@ -10,12 +10,14 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from hypnose_helpers.io.selectors import parse_sessions
 
@@ -141,7 +143,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         metavar="HZ",
-        help="Downsample the selected signals before display (for example: 128).",
+        help=(
+            "Downsample the selected signals before display (for example: 128). "
+            "A pre-downsampled FIF under derivatives (see "
+            "scripts/preprocessing/downsample_recordings.py) is used instead of "
+            "the EDF whenever one is available and its rate can satisfy this -- "
+            "even with this option unset, in which case any available FIF is "
+            "still used, at its own rate, since it's faster to read than the "
+            "full-rate EDF."
+        ),
     )
     parser.add_argument(
         "--show-artifacts",
@@ -302,6 +312,160 @@ def _downsample_signals(raw_signals: Any, source_hz: float, target_hz: float):
     return resample_poly(raw_signals, ratio.numerator, ratio.denominator, axis=0)
 
 
+_FIF_RATE_RE = re.compile(r"_resampled-([0-9]+(?:p[0-9]+)?)hz_raw\.fif$")
+
+
+def _fif_rate_hz(fif_path: Path) -> float | None:
+    """Parse the sample rate encoded in a downsample_recordings.py FIF filename."""
+    match = _FIF_RATE_RE.search(fif_path.name)
+    if not match:
+        return None
+    return float(match.group(1).replace("p", "."))
+
+
+def _find_downsampled_fif(
+    edf_path: Path,
+    rawdata_root: Path,
+    derivatives_root: Path,
+    *,
+    min_rate_hz: float,
+) -> Path | None:
+    """Locate a pre-downsampled FIF for this EDF under derivatives, if one exists.
+
+    Reading an already-downsampled FIF (written by
+    scripts/preprocessing/downsample_recordings.py) is much faster than reading
+    the full-rate EDF and downsampling here -- but only when its rate is at or
+    above what the caller wants displayed, since a FIF can't be upsampled back.
+    Pass `min_rate_hz=0.0` (the caller's default when no display rate was
+    requested) to accept any available FIF, since even the lowest-rate one
+    beats reading the full-rate EDF. Returns the candidate needing the least
+    further downsampling, or None when nothing under the recording's
+    derivatives session folder qualifies (for example, no downsample run has
+    been made for this recording yet).
+    """
+    try:
+        relative_path = edf_path.relative_to(rawdata_root)
+    except ValueError:
+        return None
+    if len(relative_path.parts) < 2:
+        return None
+    session_dir = derivatives_root.joinpath(*relative_path.parts[:2])
+    if not session_dir.is_dir():
+        return None
+
+    candidates = [
+        (rate_hz, fif_path)
+        for fif_path in session_dir.glob(f"**/{edf_path.stem}_resampled-*hz_raw.fif")
+        if (rate_hz := _fif_rate_hz(fif_path)) is not None and rate_hz >= min_rate_hz
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+@dataclass(frozen=True)
+class _SignalSource:
+    """A window-readable signal source, backed by either an EDF or a FIF."""
+
+    path: Path
+    sampling_rate_hz: float
+    total_samples: int
+    channel_labels: list[str]
+    recording_start: datetime | None
+    read_window: Callable[[int, int], Any]
+
+
+@contextmanager
+def _open_edf_signal_source(
+    edf_path: Path, channel_labels: Sequence[str]
+) -> Iterator[_SignalSource]:
+    from pyedflib import EdfReader
+    from six import ensure_str
+    import numpy as np
+
+    from scripts.sleep_scoring.score_recordings import _match_channel_labels
+
+    with EdfReader(str(edf_path)) as reader:
+        labels = [
+            ensure_str(reader.signal_label(i)).strip()
+            for i in range(reader.signals_in_file)
+        ]
+        resolved_labels = _match_channel_labels(
+            list(channel_labels), set(labels), source=edf_path.name
+        )
+        channel_indices = [labels.index(label) for label in resolved_labels]
+        sample_rates = [float(reader.getSampleFrequency(i)) for i in channel_indices]
+        if len(set(sample_rates)) != 1:
+            raise ValueError(
+                f"Selected channels have different sample rates: {sample_rates}"
+            )
+
+        def read_window(first_sample: int, last_sample: int) -> Any:
+            return np.column_stack(
+                [
+                    reader.readSignal(i, first_sample, last_sample - first_sample)
+                    for i in channel_indices
+                ]
+            )
+
+        yield _SignalSource(
+            path=edf_path,
+            sampling_rate_hz=sample_rates[0],
+            total_samples=min(reader.getNSamples()[i] for i in channel_indices),
+            channel_labels=resolved_labels,
+            recording_start=reader.getStartdatetime(),
+            read_window=read_window,
+        )
+
+
+@contextmanager
+def _open_fif_signal_source(
+    fif_path: Path, channel_labels: Sequence[str]
+) -> Iterator[_SignalSource]:
+    """Open a downsample_recordings.py FIF, converting Volts back to the EDF's µV.
+
+    MNE stores EEG/EMG channel data in Volts (its SI-unit convention)
+    regardless of the source file's physical dimension, while the EDF path
+    reads physical values directly -- µV for these recordings. Multiplying by
+    1e6 here keeps both sources on the same scale, so amplitude-dependent
+    plotting and thresholds behave identically no matter which source loaded.
+    """
+    import mne
+
+    from scripts.sleep_scoring.score_recordings import _match_channel_labels
+
+    raw = mne.io.read_raw_fif(str(fif_path), preload=False, verbose=False)
+    try:
+        resolved_labels = _match_channel_labels(
+            list(channel_labels), set(raw.ch_names), source=fif_path.name
+        )
+        meas_date = raw.info.get("meas_date")
+
+        def read_window(first_sample: int, last_sample: int) -> Any:
+            data = raw.get_data(picks=resolved_labels, start=first_sample, stop=last_sample)
+            return data.T * 1e6
+
+        yield _SignalSource(
+            path=fif_path,
+            sampling_rate_hz=float(raw.info["sfreq"]),
+            total_samples=int(raw.n_times),
+            channel_labels=resolved_labels,
+            recording_start=meas_date,
+            read_window=read_window,
+        )
+    finally:
+        raw.close()
+
+
+def _open_signal_source(
+    path: Path, channel_labels: Sequence[str]
+) -> Any:
+    """Dispatch to the EDF or FIF signal-source reader based on file suffix."""
+    if path.suffix.lower() == ".fif":
+        return _open_fif_signal_source(path, channel_labels)
+    return _open_edf_signal_source(path, channel_labels)
+
+
 def _artifact_file(recording: Any) -> Path:
     """Resolve artifacts from the dedicated directory, with legacy fallback."""
     scoring_dir = Path(recording.output_dir)
@@ -402,9 +566,6 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
     from hypnose_somnotate.io.paths import find_recordings
     from hypnose_somnotate.visualization import plot_detailed_comparison
     from pyedflib import EdfReader
-    from six import ensure_str
-
-    from scripts.sleep_scoring.score_recordings import _match_channel_labels
 
     dates = [settings.date] if settings.date is not None else None
     recordings = find_recordings(settings.repo_root, [settings.subject], dates=dates)
@@ -457,30 +618,32 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
             f"No somnotate predictions at {pred_path}. Score this recording first."
         )
 
-    channel_labels = list(DEFAULT_CHANNEL_LABELS)
-    with EdfReader(str(recording.edf_path)) as reader:
-        labels = [
-            ensure_str(reader.signal_label(i)).strip()
-            for i in range(reader.signals_in_file)
-        ]
-        channel_labels = _match_channel_labels(
-            channel_labels, set(labels), source=recording.edf_path.name
-        )
-        channel_indices = [labels.index(label) for label in channel_labels]
+    # With no explicit --display-rate, any pre-downsampled FIF is still faster
+    # to read than the full-rate EDF, so use one at its own (lowest available)
+    # rate; an explicit --display-rate only accepts a FIF that can satisfy it
+    # without upsampling.
+    signal_path = recording.edf_path
+    fif_path = _find_downsampled_fif(
+        recording.edf_path,
+        settings.rawdata_root,
+        settings.derivatives_root,
+        min_rate_hz=settings.display_rate_hz or 0.0,
+    )
+    if fif_path is not None:
+        signal_path = fif_path
+        print(f"Using pre-downsampled {fif_path.name} instead of the full-rate EDF")
 
-        sample_rates = [float(reader.getSampleFrequency(i)) for i in channel_indices]
-        if len(set(sample_rates)) != 1:
-            raise ValueError(
-                f"Selected channels have different sample rates: {sample_rates}"
-            )
-        sampling_rate_hz = sample_rates[0]
-        total_samples = min(reader.getNSamples()[i] for i in channel_indices)
+    with _open_signal_source(signal_path, DEFAULT_CHANNEL_LABELS) as source:
+        sampling_rate_hz = source.sampling_rate_hz
+        total_samples = source.total_samples
         # Subject and session always identify the plot; hours/time_range only add
         # detail about which slice of that recording is shown.
         recording_label = f"{recording.subject} {recording.session} (date {recording.date})"
         if settings.hours is not None or settings.time_range is not None:
+            if source.recording_start is None:
+                raise ValueError(f"{signal_path.name} has no recording start time recorded")
             start_s, end_s, range_description, detail = _elapsed_range(
-                settings, reader.getStartdatetime()
+                settings, source.recording_start
             )
             title = f"{recording_label} — {detail}"
         else:
@@ -496,14 +659,7 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
                 f"selected START is beyond the {duration_h:.3g}-hour recording"
             )
 
-        import numpy as np
-
-        raw_signals = np.column_stack(
-            [
-                reader.readSignal(i, first_sample, last_sample - first_sample)
-                for i in channel_indices
-            ]
-        )
+        raw_signals = source.read_window(first_sample, last_sample)
 
     plotted_rate_hz = sampling_rate_hz
     if settings.display_rate_hz is not None:
@@ -525,7 +681,7 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
         raise ValueError(f"No scoring predictions overlap {range_description}")
 
     print(
-        f"Loading {range_description} from {recording.edf_path.name} "
+        f"Loading {range_description} from {signal_path.name} "
         f"({len(raw_signals):,} samples at {plotted_rate_hz:g} Hz)\u2026"
     )
     fig, _viewer = plot_detailed_comparison(

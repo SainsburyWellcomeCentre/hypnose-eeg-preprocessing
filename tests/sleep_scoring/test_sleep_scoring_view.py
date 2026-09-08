@@ -18,6 +18,8 @@ from scripts.sleep_scoring.view_scored_recording import (
     _downsample_signals,
     _edf_contains_time,
     _elapsed_range,
+    _find_downsampled_fif,
+    _fif_rate_hz,
     _require_graphical_display,
     _single_value,
     build_parser,
@@ -100,6 +102,109 @@ class SleepScoringViewTests(unittest.TestCase):
         ):
             downsampled = _downsample_signals(signals, 512.0, 128.0)
         self.assertEqual(downsampled.shape, (128, 3))
+
+    def test_fif_rate_hz_parses_integer_and_fractional_labels(self) -> None:
+        self.assertEqual(
+            _fif_rate_hz(Path("recording_resampled-128hz_raw.fif")), 128.0
+        )
+        self.assertEqual(
+            _fif_rate_hz(Path("recording_resampled-99p5hz_raw.fif")), 99.5
+        )
+        self.assertIsNone(_fif_rate_hz(Path("recording_raw.fif")))
+
+    def test_find_downsampled_fif_picks_lowest_sufficient_rate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            edf_path = (
+                rawdata / "sub-066_id-1" / "ses-001_date-20260717" / "ephys"
+                / "sub-066_ses-001_recording-concat.edf"
+            )
+            edf_path.parent.mkdir(parents=True)
+            edf_path.touch()
+
+            downsample_dir = (
+                derivatives / "sub-066_id-1" / "ses-001_date-20260717" / "downsample"
+            )
+            downsample_dir.mkdir(parents=True)
+            low_rate = downsample_dir / "sub-066_ses-001_recording-concat_resampled-64hz_raw.fif"
+            target_rate = (
+                downsample_dir / "sub-066_ses-001_recording-concat_resampled-128hz_raw.fif"
+            )
+            high_rate = (
+                downsample_dir / "sub-066_ses-001_recording-concat_resampled-256hz_raw.fif"
+            )
+            for path in (low_rate, target_rate, high_rate):
+                path.touch()
+
+            found = _find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=100.0)
+            self.assertEqual(found, target_rate)
+
+    def test_find_downsampled_fif_with_zero_min_rate_picks_lowest_available(self) -> None:
+        """min_rate_hz=0.0 is what callers pass when no display rate was requested --
+        any FIF beats the full-rate EDF, so the lowest-rate one (cheapest to read)
+        should win."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            edf_path = (
+                rawdata / "sub-066_id-1" / "ses-001_date-20260717" / "ephys"
+                / "sub-066_ses-001_recording-concat.edf"
+            )
+            edf_path.parent.mkdir(parents=True)
+            edf_path.touch()
+
+            downsample_dir = (
+                derivatives / "sub-066_id-1" / "ses-001_date-20260717" / "downsample"
+            )
+            downsample_dir.mkdir(parents=True)
+            low_rate = downsample_dir / "sub-066_ses-001_recording-concat_resampled-64hz_raw.fif"
+            high_rate = (
+                downsample_dir / "sub-066_ses-001_recording-concat_resampled-256hz_raw.fif"
+            )
+            for path in (low_rate, high_rate):
+                path.touch()
+
+            found = _find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=0.0)
+            self.assertEqual(found, low_rate)
+
+    def test_find_downsampled_fif_returns_none_when_no_rate_is_sufficient(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            edf_path = (
+                rawdata / "sub-066_id-1" / "ses-001_date-20260717" / "ephys"
+                / "sub-066_ses-001_recording-concat.edf"
+            )
+            edf_path.parent.mkdir(parents=True)
+            edf_path.touch()
+
+            downsample_dir = (
+                derivatives / "sub-066_id-1" / "ses-001_date-20260717" / "downsample"
+            )
+            downsample_dir.mkdir(parents=True)
+            low_rate = downsample_dir / "sub-066_ses-001_recording-concat_resampled-64hz_raw.fif"
+            low_rate.touch()
+
+            found = _find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=128.0)
+            self.assertIsNone(found)
+
+    def test_find_downsampled_fif_returns_none_outside_rawdata_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            rawdata.mkdir()
+            derivatives.mkdir()
+            scratch_edf = root / "scratch" / "recording.edf"
+            scratch_edf.parent.mkdir(parents=True)
+            scratch_edf.touch()
+
+            found = _find_downsampled_fif(scratch_edf, rawdata, derivatives, min_rate_hz=128.0)
+            self.assertIsNone(found)
 
     def test_artifact_regions_are_clipped_and_merged_for_selected_range(self) -> None:
         table = pd.DataFrame(
