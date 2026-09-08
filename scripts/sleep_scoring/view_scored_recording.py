@@ -49,6 +49,7 @@ class ScoringViewSettings:
     time_range: tuple[datetime, datetime] | None = None
     display_rate_hz: float | None = None
     show_artifacts: bool = False
+    show_gaps: bool = True
     session: int | None = None
 
 
@@ -148,6 +149,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Shade epochs flagged in the session artifacts directory.",
     )
+    parser.add_argument(
+        "--show-gaps",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Shade 'gap'/'too_short' spans from the predictions parquet's own "
+            "kind column (concatenation gaps, dropouts, segments too short to "
+            "score). Default: true."
+        ),
+    )
     ranges = parser.add_mutually_exclusive_group()
     ranges.add_argument(
         "--hours",
@@ -236,6 +247,7 @@ def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
         None if configured_display_rate is None else float(configured_display_rate)
     )
     show_artifacts = bool(coalesce(args.show_artifacts, view.get("show_artifacts"), False))
+    show_gaps = bool(coalesce(args.show_gaps, view.get("show_gaps"), True))
     if recording_index < 0:
         raise ValueError("recording_index must not be negative")
     if eeg_channel not in (0, 1):
@@ -270,6 +282,7 @@ def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
         time_range=time_range,
         display_rate_hz=display_rate_hz,
         show_artifacts=show_artifacts,
+        show_gaps=show_gaps,
         session=session,
     )
 
@@ -348,26 +361,38 @@ def _artifact_regions(
     return merged
 
 
-def _label_artifacts(fig: Any, regions: list[tuple[float, float]]) -> None:
-    """Shade artifact spans on every viewer axis and label the signal axis."""
+def _shade_regions(
+    fig: Any,
+    regions: list[tuple[float, float]],
+    *,
+    color: str,
+    label: str,
+    text_color: str | None = None,
+) -> None:
+    """Shade spans on every viewer axis and label them on the signal axis."""
     if not regions or not fig.axes:
         return
     for axis in fig.axes:
         for start_s, end_s in regions:
-            axis.axvspan(start_s, end_s, color="red", alpha=0.16, zorder=0)
+            axis.axvspan(start_s, end_s, color=color, alpha=0.16, zorder=0)
     signal_axis = fig.axes[0]
     for start_s, end_s in regions:
         signal_axis.text(
             (start_s + end_s) / 2.0,
             0.98,
-            "Artifact",
+            label,
             transform=signal_axis.get_xaxis_transform(),
-            color="darkred",
+            color=text_color or color,
             fontsize=8,
             ha="center",
             va="top",
             rotation=90,
         )
+
+
+def _label_artifacts(fig: Any, regions: list[tuple[float, float]]) -> None:
+    """Shade artifact spans on every viewer axis and label the signal axis."""
+    _shade_regions(fig, regions, color="red", label="Artifact", text_color="darkred")
 
 
 def _run_custom_view(settings: ScoringViewSettings) -> int:
@@ -450,15 +475,19 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
             )
         sampling_rate_hz = sample_rates[0]
         total_samples = min(reader.getNSamples()[i] for i in channel_indices)
+        # Subject and session always identify the plot; hours/time_range only add
+        # detail about which slice of that recording is shown.
+        recording_label = f"{recording.subject} {recording.session} (date {recording.date})"
         if settings.hours is not None or settings.time_range is not None:
-            start_s, end_s, range_description, title = _elapsed_range(
+            start_s, end_s, range_description, detail = _elapsed_range(
                 settings, reader.getStartdatetime()
             )
+            title = f"{recording_label} — {detail}"
         else:
             start_s = 0.0
             end_s = total_samples / sampling_rate_hz
             range_description = "the complete recording"
-            title = recording.edf_path.name
+            title = f"{recording_label} — {recording.edf_path.name}"
         first_sample = int(start_s * sampling_rate_hz)
         last_sample = min(int(end_s * sampling_rate_hz), total_samples)
         if first_sample >= total_samples:
@@ -506,6 +535,19 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
         eeg_channel=settings.eeg_channel,
         view_length_s=settings.view_length_s,
     )
+    if settings.show_gaps:
+        import pandas as pd
+
+        kind_table = pd.read_parquet(pred_path, columns=["time_s", "kind"])
+        for kind_value, color, label in (
+            ("gap", "dimgray", "Gap"),
+            ("too_short", "darkorange", "Too short"),
+        ):
+            flagged = kind_table.assign(artifact=kind_table["kind"] == kind_value)
+            regions = _artifact_regions(flagged[["time_s", "artifact"]], start_s, loaded_end_s)
+            _shade_regions(fig, regions, color=color, label=label)
+            if regions:
+                print(f"Shaded {len(regions)} '{kind_value}' region(s) from the predictions parquet")
     if settings.show_artifacts:
         import pandas as pd
 

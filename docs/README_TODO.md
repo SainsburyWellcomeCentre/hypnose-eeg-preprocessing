@@ -122,9 +122,7 @@ resolves each recording's `sub-XXX/ses-YYY_date-.../` folder and writes under
 `.../downsample/` instead, matching the `artifacts`/`sleep_scoring`/
 `quality_control` output-group convention from item 9.
 
-## 12. Best method for sleep scoring, either before or after concatenation
-
-- Use downsample recording to reduce memory load
+~~## 12. Best method for sleep scoring, either before or after concatenation~~
 
 ~~## 13. Ensure concatenation maintains zeitgeber time~~
 
@@ -132,12 +130,16 @@ resolves each recording's `sub-XXX/ses-YYY_date-.../` folder and writes under
 once all preprocessing is completed the real start time and length of recording can
 be used to analyse considering ZT.~~
 
-## 14. Run all steps individually for sub-63
+## 13. Use of downsampled data for view_scored_recordings to reduce computing costs
 
-## 15. Rename to hypnose-eeg-preprocessing
+## 14. Insert an output of sleep score qc which is saved into own folder
 
-## 16. Update readme to make more concise
+## 15. Run all steps individually for sub-63
 
-## 17. Create executable scripts for each separate section with API
+## 16. Rename to hypnose-eeg-preprocessing
 
-## 18. Automate running of the preprocessing for hypnose dataset with reports of errors
+## 17. Update readme to make more concise
+
+## 18. Create executable scripts for each separate section with API
+
+## 19. Automate running of the preprocessing for hypnose dataset with reports of errors

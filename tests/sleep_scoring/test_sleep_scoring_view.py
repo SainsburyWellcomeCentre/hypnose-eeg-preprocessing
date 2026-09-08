@@ -76,6 +76,15 @@ class SleepScoringViewTests(unittest.TestCase):
         self.assertEqual(settings.display_rate_hz, 128.0)
         self.assertTrue(settings.show_artifacts)
 
+    def test_show_gaps_defaults_true_and_can_be_disabled(self) -> None:
+        default_args = build_parser().parse_args(["--subject", "66", "--date", "20260717"])
+        self.assertTrue(settings_from_args(default_args).show_gaps)
+
+        disabled_args = build_parser().parse_args(
+            ["--subject", "66", "--date", "20260717", "--no-show-gaps"]
+        )
+        self.assertFalse(settings_from_args(disabled_args).show_gaps)
+
     def test_display_downsampling_reduces_samples(self) -> None:
         import numpy as np
 

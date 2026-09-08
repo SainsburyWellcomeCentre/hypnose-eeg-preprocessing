@@ -48,3 +48,4 @@ sleep_scoring_view:
   time_range: null
   display_rate_hz: null # Optional display downsampling, e.g. 128
   show_artifacts: false # Shade regions flagged by artifact_epochs.parquet
+  show_gaps: true # Shade 'gap'/'too_short' spans from the predictions parquet's kind column
