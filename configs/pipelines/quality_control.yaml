@@ -20,6 +20,14 @@ quality_control:
     max_low_confidence_percent: 10.0
     max_undefined_percent: 5.0
 
+  # Flags a recording for review when its predicted sleep-state mix looks
+  # physiologically implausible -- percentages are of scored signal epochs
+  # (kind == "signal"), excluding gap/too_short/unscored time.
+  sleep_state_proportions:
+    max_wake_percent: 75.0
+    max_nrem_percent: 75.0
+    max_rem_percent: 20.0
+
   artifacts:
     max_artifact_percent: 5.0
 

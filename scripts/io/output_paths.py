@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 OUTPUT_GROUPS = {
     "sleep_scoring",
+    "sleep_scoring_qc",
     "artifacts",
     "quality_control",
 }
@@ -120,6 +121,29 @@ def sleep_scoring_output_path(
         rawdata_root,
         derivatives_root,
         "sleep_scoring",
+    )
+
+
+def sleep_scoring_qc_output_path(
+    output: str | Path,
+    recording_path: str | Path,
+    rawdata_root: str | Path,
+    derivatives_root: str | Path,
+) -> Path:
+    """Resolve an output beneath the session's sleep-scoring QC directory.
+
+    Distinct from `sleep_scoring_output_path`: that one holds the Somnotate
+    predictions themselves (written by score_recordings.py), while this one
+    holds QC reports derived from them (written by scripts/qc/sleep_scoring.py
+    and scripts/qc/summary_qc.py) -- the same split already used for
+    `artifacts` (detector output) versus `quality_control` (QC reports).
+    """
+    return session_output_path(
+        output,
+        recording_path,
+        rawdata_root,
+        derivatives_root,
+        "sleep_scoring_qc",
     )
 
 

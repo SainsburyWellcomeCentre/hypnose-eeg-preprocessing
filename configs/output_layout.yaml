@@ -8,5 +8,6 @@ name: output_layout
 output_dirs:
   downsample: downsample
   sleep_scoring: sleep_scoring
+  sleep_scoring_qc: sleep_scoring_qc
   artifacts: artifacts
   quality_control: quality_control

@@ -26,6 +26,9 @@ class QCThresholds:
     confidence_threshold: float
     max_low_confidence_percent: float
     max_undefined_percent: float
+    max_wake_percent: float
+    max_nrem_percent: float
+    max_rem_percent: float
     max_artifact_percent: float
     eeg_eeg_threshold: float
     eeg_emg_threshold: float
@@ -52,15 +55,16 @@ def load_qc_thresholds(path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH) -
     config = load_config(path)
     integrity = nested_get(config, ("quality_control", "recording_integrity"))
     scoring = nested_get(config, ("quality_control", "somnotate_scoring"))
+    proportions = nested_get(config, ("quality_control", "sleep_state_proportions"))
     artifacts = nested_get(config, ("quality_control", "artifacts"))
     correlation = nested_get(config, ("quality_control", "channel_correlation"))
     if not all(
         isinstance(section, Mapping)
-        for section in (integrity, scoring, artifacts, correlation)
+        for section in (integrity, scoring, proportions, artifacts, correlation)
     ):
         raise ValueError(
             "Quality-control config requires recording_integrity, somnotate_scoring, "
-            "artifacts, and channel_correlation mappings"
+            "sleep_state_proportions, artifacts, and channel_correlation mappings"
         )
     return QCThresholds(
         duration_tolerance_s=float(integrity["duration_tolerance_s"]),
@@ -71,6 +75,9 @@ def load_qc_thresholds(path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH) -
         confidence_threshold=float(scoring["confidence_threshold"]),
         max_low_confidence_percent=float(scoring["max_low_confidence_percent"]),
         max_undefined_percent=float(scoring["max_undefined_percent"]),
+        max_wake_percent=float(proportions["max_wake_percent"]),
+        max_nrem_percent=float(proportions["max_nrem_percent"]),
+        max_rem_percent=float(proportions["max_rem_percent"]),
         max_artifact_percent=float(artifacts["max_artifact_percent"]),
         eeg_eeg_threshold=float(correlation["eeg_eeg_threshold"]),
         eeg_emg_threshold=float(correlation["eeg_emg_threshold"]),

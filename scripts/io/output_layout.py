@@ -14,6 +14,7 @@ from scripts.utils.config import DEFAULT_OUTPUT_LAYOUT_CONFIG_PATH, load_config,
 DEFAULT_OUTPUT_DIR_NAMES = {
     "downsample": "downsample",
     "sleep_scoring": "sleep_scoring",
+    "sleep_scoring_qc": "sleep_scoring_qc",
     "artifacts": "artifacts",
     "quality_control": "quality_control",
 }

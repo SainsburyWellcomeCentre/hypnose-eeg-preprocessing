@@ -14,7 +14,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.io.input_paths import scoring_path
-from scripts.io.output_paths import save_csv, sleep_scoring_output_path
+from scripts.io.output_paths import save_csv, sleep_scoring_qc_output_path
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.utils.recording_selection import select_recordings
 from scripts.qc.thresholds import load_qc_thresholds
@@ -107,7 +107,65 @@ def scoring_summary(output: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _print_report(output: pd.DataFrame, summary: pd.DataFrame) -> None:
+def sleep_state_proportions(output: pd.DataFrame) -> pd.DataFrame:
+    """Each predicted sleep state's share of *scored signal* epochs.
+
+    Unlike `scoring_summary`'s `recording_percent` (which divides by every
+    epoch, including gap/too_short/unscored time), this divides by scored
+    signal epochs only -- the same denominator `prepare_scoring_output`
+    already uses for `low_confidence`, so gap-heavy recordings don't dilute
+    the state mix used for the pass/review call below.
+    """
+    signal = (
+        output["kind"].astype(str).eq("signal")
+        if "kind" in output
+        else output["predicted_state"].ne("Undefined")
+    )
+    signal_output = output.loc[signal]
+    signal_epochs = len(signal_output)
+    rows = []
+    for state in SLEEP_STATE_NAMES.values():
+        epochs = int((signal_output["predicted_state"] == state).sum())
+        rows.append(
+            {
+                "sleep_state": state,
+                "epochs": epochs,
+                "signal_percent": 100.0 * epochs / signal_epochs if signal_epochs else 0.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def sleep_state_proportion_report(
+    proportions: pd.DataFrame,
+    *,
+    max_wake_percent: float,
+    max_nrem_percent: float,
+    max_rem_percent: float,
+) -> pd.DataFrame:
+    """Flag states whose share of signal epochs exceeds its configured limit.
+
+    "Undefined" has no proportion threshold here -- it's covered separately by
+    max_undefined_percent (see scoring_summary/run_qc's somnotate_scoring check).
+    """
+    limits = {
+        "Wake": max_wake_percent,
+        "NREM": max_nrem_percent,
+        "REM": max_rem_percent,
+    }
+    report = proportions.copy()
+    report["threshold_percent"] = report["sleep_state"].map(limits)
+    over_threshold = report["threshold_percent"].notna() & (
+        report["signal_percent"] > report["threshold_percent"]
+    )
+    report["status"] = np.where(over_threshold, "review", "pass")
+    report.loc[report["threshold_percent"].isna(), "status"] = "n/a"
+    return report
+
+
+def _print_report(
+    output: pd.DataFrame, summary: pd.DataFrame, proportion_report: pd.DataFrame
+) -> None:
     epoch_seconds = infer_epoch_seconds(output)
     duration_s = len(output) * epoch_seconds
     signal = (
@@ -143,6 +201,20 @@ def _print_report(output: pd.DataFrame, summary: pd.DataFrame) -> None:
         )
     print(f"Low-confidence signal epochs: {int(output['low_confidence'].sum()):,}")
 
+    print("Sleep state proportions (of scored signal epochs):")
+    for row in proportion_report.itertuples(index=False):
+        threshold = (
+            f"{row.threshold_percent:.1f}%" if pd.notna(row.threshold_percent) else "n/a"
+        )
+        print(
+            f"  {str(row.status).upper():6s} {row.sleep_state}: "
+            f"{row.signal_percent:.2f}% (limit {threshold})"
+        )
+    overall = (
+        "REVIEW" if (proportion_report["status"] == "review").any() else "PASS"
+    )
+    print(f"Sleep state proportion check: {overall}")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -165,18 +237,47 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: from --qc-config).",
     )
     parser.add_argument(
+        "--max-wake-percent",
+        type=float,
+        default=None,
+        help="Flag for review when Wake exceeds this percent of scored signal "
+        "epochs (default: from --qc-config).",
+    )
+    parser.add_argument(
+        "--max-nrem-percent",
+        type=float,
+        default=None,
+        help="Flag for review when NREM exceeds this percent of scored signal "
+        "epochs (default: from --qc-config).",
+    )
+    parser.add_argument(
+        "--max-rem-percent",
+        type=float,
+        default=None,
+        help="Flag for review when REM exceeds this percent of scored signal "
+        "epochs (default: from --qc-config).",
+    )
+    parser.add_argument(
         "--save",
         nargs="?",
         const="somnotate_scoring_epochs.csv",
         default=None,
-        help="Optionally save epoch output in the session Somnotate directory.",
+        help="Optionally save epoch output in the session sleep-scoring QC directory.",
     )
     parser.add_argument(
         "--summary",
         nargs="?",
         const="somnotate_scoring_summary.csv",
         default=None,
-        help="Optionally save the state summary in the session Somnotate directory.",
+        help="Optionally save the state summary in the session sleep-scoring QC directory.",
+    )
+    parser.add_argument(
+        "--proportions",
+        nargs="?",
+        const="somnotate_scoring_state_proportions.csv",
+        default=None,
+        help="Optionally save the state proportion report in the session "
+        "sleep-scoring QC directory.",
     )
     return parser
 
@@ -196,6 +297,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         or not 0 <= args.confidence_threshold <= 1
     ):
         parser.error("--confidence-threshold must be between 0 and 1")
+    args.max_wake_percent = coalesce(args.max_wake_percent, qc_thresholds.max_wake_percent)
+    args.max_nrem_percent = coalesce(args.max_nrem_percent, qc_thresholds.max_nrem_percent)
+    args.max_rem_percent = coalesce(args.max_rem_percent, qc_thresholds.max_rem_percent)
+    for name in ("max_wake_percent", "max_nrem_percent", "max_rem_percent"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or not 0 <= value <= 100:
+            parser.error(f"--{name.replace('_', '-')} must be between 0 and 100")
 
     rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
     derivatives_root = Path(
@@ -223,21 +331,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             confidence_threshold=args.confidence_threshold,
         )
         summary = scoring_summary(output)
+        proportion_report = sleep_state_proportion_report(
+            sleep_state_proportions(output),
+            max_wake_percent=args.max_wake_percent,
+            max_nrem_percent=args.max_nrem_percent,
+            max_rem_percent=args.max_rem_percent,
+        )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
-    _print_report(output, summary)
+    _print_report(output, summary, proportion_report)
 
     if args.save is not None:
-        save_path = sleep_scoring_output_path(
+        save_path = sleep_scoring_qc_output_path(
             args.save, edf_path, rawdata_root, derivatives_root
         )
         save_csv(output, save_path)
     if args.summary is not None:
-        summary_path = sleep_scoring_output_path(
+        summary_path = sleep_scoring_qc_output_path(
             args.summary, edf_path, rawdata_root, derivatives_root
         )
         save_csv(summary, summary_path)
-    return 0
+    if args.proportions is not None:
+        proportions_path = sleep_scoring_qc_output_path(
+            args.proportions, edf_path, rawdata_root, derivatives_root
+        )
+        save_csv(proportion_report, proportions_path)
+    return 1 if (proportion_report["status"] == "review").any() else 0
 
 
 if __name__ == "__main__":

@@ -22,7 +22,11 @@ from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.qc.recording_integrity import check_pair
 from scripts.utils.recording_selection import select_recordings
 from scripts.qc.artifacts import build_artifact_report, channels_from_row
-from scripts.qc.sleep_scoring import prepare_scoring_output
+from scripts.qc.sleep_scoring import (
+    prepare_scoring_output,
+    sleep_state_proportion_report,
+    sleep_state_proportions,
+)
 from scripts.qc.spectra import (
     SpectraConfig,
     build_spectral_quality_report,
@@ -121,6 +125,37 @@ def spectral_quality_sections(
             ),
         },
     ]
+
+
+def sleep_state_proportion_section(proportion_report: pd.DataFrame) -> dict[str, object]:
+    """Convert a `sleep_state_proportion_report` table into one QC section.
+
+    Only rows with a configured threshold ("n/a" rows, i.e. Undefined, are
+    excluded) count toward the section's pass/review status.
+    """
+    checked = proportion_report.loc[proportion_report["status"] != "n/a"]
+    status = "review" if (checked["status"] == "review").any() else "pass"
+    return {
+        "section": "sleep_state_proportions",
+        "status": status,
+        "metric": "signal_percent_by_state",
+        "value": "; ".join(
+            f"{row.sleep_state}={row.signal_percent:.2f}%"
+            for row in checked.itertuples(index=False)
+        ),
+        "threshold": "; ".join(
+            f"{row.sleep_state}<={row.threshold_percent:g}%"
+            for row in checked.itertuples(index=False)
+        ),
+        "detail": (
+            "; ".join(
+                f"{row.sleep_state} {row.status}"
+                for row in checked.itertuples(index=False)
+                if row.status == "review"
+            )
+            or "within thresholds"
+        ),
+    }
 
 
 def _section(
@@ -232,6 +267,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confidence-threshold", type=float, default=None)
     parser.add_argument("--max-low-confidence-percent", type=float, default=None)
     parser.add_argument("--max-undefined-percent", type=float, default=None)
+    parser.add_argument("--max-wake-percent", type=float, default=None)
+    parser.add_argument("--max-nrem-percent", type=float, default=None)
+    parser.add_argument("--max-rem-percent", type=float, default=None)
     parser.add_argument("--max-artifact-percent", type=float, default=None)
     parser.add_argument("--eeg-eeg-threshold", type=float, default=None)
     parser.add_argument("--eeg-emg-threshold", type=float, default=None)
@@ -346,6 +384,14 @@ def run_qc(
             threshold=args.confidence_threshold,
             reason="undefined/unscored epoch" if is_undefined else "low prediction confidence",
         )
+
+    proportion_report = sleep_state_proportion_report(
+        sleep_state_proportions(scored),
+        max_wake_percent=args.max_wake_percent,
+        max_nrem_percent=args.max_nrem_percent,
+        max_rem_percent=args.max_rem_percent,
+    )
+    sections.append(sleep_state_proportion_section(proportion_report))
 
     artifact_epochs = pd.read_parquet(artifact_file)
     artifact_report = build_artifact_report(artifact_epochs)
@@ -540,6 +586,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.max_undefined_percent = coalesce(
         args.max_undefined_percent, qc_thresholds.max_undefined_percent
     )
+    args.max_wake_percent = coalesce(args.max_wake_percent, qc_thresholds.max_wake_percent)
+    args.max_nrem_percent = coalesce(args.max_nrem_percent, qc_thresholds.max_nrem_percent)
+    args.max_rem_percent = coalesce(args.max_rem_percent, qc_thresholds.max_rem_percent)
     args.max_artifact_percent = coalesce(
         args.max_artifact_percent, qc_thresholds.max_artifact_percent
     )
@@ -557,6 +606,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     for name in (
         "max_low_confidence_percent",
         "max_undefined_percent",
+        "max_wake_percent",
+        "max_nrem_percent",
+        "max_rem_percent",
         "max_artifact_percent",
         "max_correlation_review_percent",
         "max_gap_percent",
