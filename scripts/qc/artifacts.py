@@ -16,7 +16,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.io.output_paths import save_csv
-from scripts.utils.epochs import infer_epoch_seconds
+from scripts.utils.epochs import continuous_epoch_ids, infer_epoch_seconds
 from scripts.utils.sleep_states import load_sleep_states
 
 
@@ -195,6 +195,26 @@ def _channel_group_report(
     return rows
 
 
+def restrict_to_continuous_epochs(
+    artifact_epochs: pd.DataFrame,
+    scores: pd.DataFrame,
+    *,
+    epoch_seconds: float | None = None,
+) -> pd.DataFrame:
+    """Drop artifact epochs outside sections deemed continuous by `score_recordings`.
+
+    Concatenation gaps, dropouts, and too-short segments are stitched into the
+    recording but aren't real signal, so artifact burden should only be
+    reported over the continuous ("signal") sections, matching how
+    `epoch_sleep_states` already restricts spectra/correlation/EMG checks.
+    """
+    duration = epoch_seconds or infer_epoch_seconds(artifact_epochs)
+    continuous = continuous_epoch_ids(scores, epoch_seconds=duration)
+    if continuous is None:
+        return artifact_epochs
+    return artifact_epochs.loc[artifact_epochs["epoch_id"].isin(continuous)]
+
+
 def build_artifact_report(
     artifact_epochs: pd.DataFrame,
     *,
@@ -332,7 +352,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
     from scripts.utils.recording_selection import select_recordings
-    from scripts.io.input_paths import artifact_path
+    from scripts.io.input_paths import artifact_path, scoring_path
     from scripts.io.output_paths import artifact_output_path
 
     rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
@@ -352,6 +372,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise FileNotFoundError(f"No artifact parquet found for {edf_path.name}")
         print(f"Artifacts: {artifacts}")
         artifact_epochs = pd.read_parquet(artifacts)
+        scores = pd.read_parquet(scoring_path(edf_path, rawdata_root, derivatives_root))
+        artifact_epochs = restrict_to_continuous_epochs(
+            artifact_epochs, scores, epoch_seconds=args.epoch_seconds
+        )
         report = build_artifact_report(
             artifact_epochs, epoch_seconds=args.epoch_seconds
         )

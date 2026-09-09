@@ -60,6 +60,29 @@ def align_epoch_states(
     return epoch_states
 
 
+def continuous_epoch_ids(
+    scores: pd.DataFrame, *, epoch_seconds: float
+) -> set[int] | None:
+    """Return analysis epoch IDs entirely within continuous scoring sections.
+
+    Returns ``None`` when `scores` has no `kind` column, meaning every epoch
+    counts as continuous (recordings scored before `kind` was tracked). An
+    epoch is excluded as soon as any of its underlying score rows are not
+    `kind == "signal"` -- a concatenation gap, dropout, or too-short segment
+    from `score_recordings`.
+    """
+    if "kind" not in scores.columns:
+        return None
+    selected = scores[["time_s"]].copy()
+    selected["epoch_id"] = np.floor(
+        selected["time_s"].astype(float) / epoch_seconds
+    ).astype("int64")
+    kind = scores["kind"].astype(str)
+    non_signal_epochs = set(selected.loc[kind != "signal", "epoch_id"].tolist())
+    signal_epochs = set(selected.loc[kind == "signal", "epoch_id"].tolist())
+    return signal_epochs - non_signal_epochs
+
+
 def epoch_sleep_states(
     scores: pd.DataFrame,
     *,
@@ -77,15 +100,9 @@ def epoch_sleep_states(
     selected["epoch_id"] = np.floor(
         selected["time_s"].astype(float) / epoch_seconds
     ).astype("int64")
-    if "kind" in scores.columns:
-        selected["kind"] = scores["kind"].astype(str)
-        non_signal_epochs = set(
-            selected.loc[selected["kind"] != "signal", "epoch_id"].tolist()
-        )
-        selected = selected.loc[
-            (selected["kind"] == "signal")
-            & ~selected["epoch_id"].isin(non_signal_epochs)
-        ]
+    continuous = continuous_epoch_ids(scores, epoch_seconds=epoch_seconds)
+    if continuous is not None:
+        selected = selected.loc[selected["epoch_id"].isin(continuous)]
     selected = selected.loc[
         (selected["epoch_id"] >= 0) & (selected["epoch_id"] < n_epochs)
     ]

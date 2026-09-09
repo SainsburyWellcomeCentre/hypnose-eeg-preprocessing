@@ -132,13 +132,19 @@ be used to analyse considering ZT.~~
 
 ~~## 13. Use of downsampled data for view_scored_recordings to reduce computing costs~~
 
-## 14. Insert an output of sleep score qc which is saved into own folder
+~~## 14. Insert an output of sleep score qc which is saved into own folder~~
 
 ## 15. Run all steps individually for sub-63
+
+## 16. Does qc use .edf or can .fif be used for quicker processing
+
+## 17. Insert info that inspect_and_trim_channels.py should only be necessary for errors in concatenation
 
 ## 16. Rename to hypnose-eeg-preprocessing
 
 ## 17. Update readme to make more concise
+
+- Reflect the fact that sleep scoring needs to occur before artifact detection
 
 ## 18. Create executable scripts for each separate section with API
 

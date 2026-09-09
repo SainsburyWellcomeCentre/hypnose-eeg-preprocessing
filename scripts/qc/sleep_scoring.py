@@ -145,8 +145,9 @@ def sleep_state_proportion_report(
 ) -> pd.DataFrame:
     """Flag states whose share of signal epochs exceeds its configured limit.
 
-    "Undefined" has no proportion threshold here -- it's covered separately by
-    max_undefined_percent (see scoring_summary/run_qc's somnotate_scoring check).
+    "Undefined" has no proportion threshold here -- run_qc's somnotate_scoring
+    check reports its share via max_undefined_percent but, unlike Wake/NREM/REM
+    here, that share is informational only and never determines pass/review.
     """
     limits = {
         "Wake": max_wake_percent,

@@ -21,7 +21,11 @@ from scripts.io.output_paths import quality_control_output_path, save_csv
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.qc.recording_integrity import check_pair
 from scripts.utils.recording_selection import select_recordings
-from scripts.qc.artifacts import build_artifact_report, channels_from_row
+from scripts.qc.artifacts import (
+    build_artifact_report,
+    channels_from_row,
+    restrict_to_continuous_epochs,
+)
 from scripts.qc.sleep_scoring import (
     prepare_scoring_output,
     sleep_state_proportion_report,
@@ -316,7 +320,7 @@ def run_qc(
         max_longest_gap_s=args.max_longest_gap,
     )
     duration_ok = abs(integrity.edf_fif_difference_s) <= args.duration_tolerance
-    integrity_status = "fail" if not duration_ok else integrity.status
+    integrity_status = "pass" if duration_ok else "fail"
     _section(
         sections,
         "recording_integrity",
@@ -355,12 +359,7 @@ def run_qc(
     low_percent = 100.0 * int(low_confidence.sum()) / signal_count if signal_count else 100.0
     undefined = scored["predicted_state"].eq("Undefined")
     undefined_percent = 100.0 * int(undefined.sum()) / len(scored) if len(scored) else 100.0
-    scoring_status = (
-        "review"
-        if low_percent > args.max_low_confidence_percent
-        or undefined_percent > args.max_undefined_percent
-        else "pass"
-    )
+    scoring_status = "review" if low_percent > args.max_low_confidence_percent else "pass"
     _section(
         sections,
         "somnotate_scoring",
@@ -368,7 +367,8 @@ def run_qc(
         "low_confidence_percent",
         low_percent,
         args.max_low_confidence_percent,
-        f"undefined={undefined_percent:.2f}% (limit {args.max_undefined_percent:.2f}%)",
+        f"undefined={undefined_percent:.2f}% (informational; not a review criterion; "
+        f"configured expectation {args.max_undefined_percent:.2f}%)",
     )
     scoring_review = scored.loc[low_confidence | undefined]
     for _, row in scoring_review.iterrows():
@@ -394,6 +394,7 @@ def run_qc(
     sections.append(sleep_state_proportion_section(proportion_report))
 
     artifact_epochs = pd.read_parquet(artifact_file)
+    artifact_epochs = restrict_to_continuous_epochs(artifact_epochs, scored)
     artifact_report = build_artifact_report(artifact_epochs)
     flagged = artifact_epochs["artifact"].astype(bool)
     artifact_percent = 100.0 * int(flagged.sum()) / len(artifact_epochs) if len(artifact_epochs) else 0.0

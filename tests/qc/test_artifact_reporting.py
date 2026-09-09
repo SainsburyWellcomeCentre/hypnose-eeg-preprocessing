@@ -5,7 +5,7 @@ import unittest
 import pandas as pd
 
 from scripts.qc.artifacts import build_parser
-from scripts.qc.artifacts import build_artifact_report
+from scripts.qc.artifacts import build_artifact_report, restrict_to_continuous_epochs
 
 
 class ArtifactReportingTests(unittest.TestCase):
@@ -48,6 +48,45 @@ class ArtifactReportingTests(unittest.TestCase):
         ].iloc[0]
         self.assertEqual(eeg2_rem["artifact_epochs"], 2)
         self.assertEqual(eeg2_rem["state_percent"], 100.0)
+
+    def test_restrict_to_continuous_epochs_drops_gap_sections(self) -> None:
+        artifact_epochs = pd.DataFrame(
+            {
+                "epoch_id": [0, 1, 2, 3],
+                "time_s": [0.0, 4.0, 8.0, 12.0],
+                "sleep_state": [0, 0, 1, 1],
+                "artifact": [True, True, True, False],
+                "artifact_features": ["EEG1:flatline"] * 3 + [""],
+                "emg_extreme": [False, False, False, False],
+            }
+        )
+        scores = pd.DataFrame(
+            {
+                "time_s": [0.0, 4.0, 8.0, 12.0],
+                "kind": ["signal", "signal", "gap", "too_short"],
+            }
+        )
+        restricted = restrict_to_continuous_epochs(artifact_epochs, scores)
+        self.assertEqual(sorted(restricted["epoch_id"]), [0, 1])
+
+        report = build_artifact_report(restricted)
+        overall = report.overall.set_index("channel")
+        self.assertEqual(overall.loc["EEG1", "artifact_epochs"], 2)
+
+    def test_restrict_to_continuous_epochs_is_noop_without_kind_column(self) -> None:
+        artifact_epochs = pd.DataFrame(
+            {
+                "epoch_id": [0, 1],
+                "time_s": [0.0, 4.0],
+                "sleep_state": [0, 0],
+                "artifact": [True, False],
+                "artifact_features": ["EEG1:flatline", ""],
+                "emg_extreme": [False, False],
+            }
+        )
+        scores = pd.DataFrame({"time_s": [0.0, 4.0]})
+        restricted = restrict_to_continuous_epochs(artifact_epochs, scores)
+        pd.testing.assert_frame_equal(restricted, artifact_epochs)
 
     def test_cli_selects_subject_by_date_or_session(self) -> None:
         self.assertEqual(

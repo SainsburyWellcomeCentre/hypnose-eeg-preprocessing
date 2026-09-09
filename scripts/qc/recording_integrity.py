@@ -21,7 +21,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-from scripts.io.mne_io import import_mne
+from scripts.io.mne_io import import_mne, load_channel_labels, set_configured_channel_types
 from scripts.io.output_paths import quality_control_output_path, save_csv_rows
 from scripts.qc.thresholds import load_qc_thresholds
 from scripts.utils.config import (
@@ -32,6 +32,7 @@ from scripts.utils.recording_selection import pair_recordings, select_recordings
 
 
 GAP_ANNOTATION_TERMS = ("gap", "boundary", "discontinu", "dropout", "missing")
+CHANNEL_LABELS = load_channel_labels()
 
 
 @dataclass(frozen=True)
@@ -198,6 +199,7 @@ def check_pair(
     edf = mne.io.read_raw_edf(
         edf_path, preload=False, infer_types=True, verbose="ERROR"
     )
+    set_configured_channel_types(edf, CHANNEL_LABELS)
     fif = mne.io.read_raw_fif(fif_path, preload=False, verbose="ERROR")
     try:
         edf_duration_s = edf.n_times / float(edf.info["sfreq"])

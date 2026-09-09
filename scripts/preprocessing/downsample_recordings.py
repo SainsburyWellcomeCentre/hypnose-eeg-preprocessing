@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hypnose_helpers.io.layout import parse_session_dirname, parse_subject_dirname
 
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-from scripts.io.mne_io import import_mne
+from scripts.io.mne_io import import_mne, load_channel_labels, set_configured_channel_types
 from scripts.io.output_layout import output_dir_name
 from scripts.io.output_paths import save_csv_rows
 from scripts.utils.config import (
@@ -34,6 +34,9 @@ from scripts.utils.config import (
     nested_get,
 )
 from scripts.utils.recording_selection import find_session_dirs, group_and_prefer_concatenated_recordings
+
+
+CHANNEL_LABELS = load_channel_labels()
 
 
 @dataclass(frozen=True)
@@ -130,6 +133,7 @@ class EdfDownsampler:
             )
 
         raw = mne.io.read_raw_edf(edf_path, preload=True, infer_types=True, verbose=True)
+        set_configured_channel_types(raw, CHANNEL_LABELS)
         original_sample_rate_hz = float(raw.info["sfreq"])
 
         if original_sample_rate_hz != self.target_sample_rate_hz:
