@@ -134,13 +134,15 @@ be used to analyse considering ZT.~~
 
 ~~## 14. Insert an output of sleep score qc which is saved into own folder~~
 
-## 15. Run all steps individually for sub-63
+#~~# 15. Run all steps individually for sub-63~~
 
-## 16. Does qc use .edf or can .fif be used for quicker processing
+~~## 16. Does qc use .edf or can .fif be used for quicker processing~~
+
+~~- No they all use .fif and can't be further optimised~~
 
 ## 17. Insert info that inspect_and_trim_channels.py should only be necessary for errors in concatenation
 
-## 16. Rename to hypnose-eeg-preprocessing
+~~## 16. Rename to hypnose-eeg-preprocessing~~
 
 ## 17. Update readme to make more concise
 

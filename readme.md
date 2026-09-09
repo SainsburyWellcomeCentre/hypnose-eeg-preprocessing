@@ -1,6 +1,6 @@
-# Hypnose EEG Analysis
+# Hypnose EEG Preprocessing
 
-Tools and notebooks for inspecting, concatenating, and downsampling Hypnose EEG
+Tools and notebooks for inspecting, concatenating, downsampling and qc Hypnose EEG
 recordings.
 
 ## Environment
