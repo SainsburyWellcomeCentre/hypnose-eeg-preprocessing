@@ -6,14 +6,14 @@ Each stage is one of `src/preprocessing.py`, `src/sleep_scoring.py`, or
 artifact detection depends on sleep scoring, so it is deferred until after
 scoring even though it is a preprocessing step:
 
-  1. preprocessing: concatenate, downsample
+  1. preprocessing: trim, concatenate, downsample
   2. sleep_scoring: score
   3. preprocessing: detect_artifacts
   4. qc: summary
 
 Restricting to one or more `--stage` values runs each named stage's own
 default step set instead (for example `--stage preprocessing` runs
-concatenate, downsample, and detect_artifacts together, which assumes sleep
+trim, concatenate, downsample, and detect_artifacts together, which assumes sleep
 scoring has already been done for that session).
 
 A step whose outputs already exist is skipped and the run continues with the
@@ -97,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         if stages is None:
             preprocessing.run_steps(
                 **common, overwrite=args.overwrite,
-                steps=["concatenate", "downsample"], extra_args=extra,
+                steps=["trim", "concatenate", "downsample"], extra_args=extra,
             )
             sleep_scoring.run_steps(
                 **common, model=args.model, overwrite=args.overwrite,
