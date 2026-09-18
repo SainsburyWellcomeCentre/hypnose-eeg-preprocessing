@@ -9,13 +9,18 @@ from src._pipeline import StepFailed
 
 class RunStepsTests(unittest.TestCase):
     @patch("src.preprocessing.run_step")
-    def test_default_steps_exclude_trim_and_run_in_order(self, mock_run_step):
+    def test_default_steps_run_trim_first_then_the_rest_in_order(self, mock_run_step):
         preprocessing.run_steps(subject="66", session="1")
 
         labels = [c.kwargs["label"] for c in mock_run_step.call_args_list]
         self.assertEqual(
             labels,
-            ["preprocessing:concatenate", "preprocessing:downsample", "preprocessing:detect_artifacts"],
+            [
+                "preprocessing:trim",
+                "preprocessing:concatenate",
+                "preprocessing:downsample",
+                "preprocessing:detect_artifacts",
+            ],
         )
 
     @patch("src.preprocessing.run_step")
@@ -62,10 +67,10 @@ class RunStepsTests(unittest.TestCase):
         self.assertNotIn("--sink-dir", args)
 
     @patch("src.preprocessing.run_step")
-    def test_dry_run_only_forwarded_to_concatenate_and_downsample(self, mock_run_step):
+    def test_dry_run_forwarded_to_every_step_but_detect_artifacts(self, mock_run_step):
         preprocessing.run_steps(
             subject="66", date="20260717", dry_run=True,
-            steps=["concatenate", "downsample", "detect_artifacts"],
+            steps=["trim", "concatenate", "downsample", "detect_artifacts"],
         )
 
         for c in mock_run_step.call_args_list:

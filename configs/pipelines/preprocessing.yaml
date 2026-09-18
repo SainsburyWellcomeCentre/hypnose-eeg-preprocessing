@@ -15,6 +15,11 @@ preprocessing:
     target_sfreq: 128
     manifest: null
   trim_channels:
+    # Duplicate channel labels are dropped automatically; --keep-first N on the
+    # command line is the manual alternative and is deliberately not configurable.
+    # n_samples: initial samples compared between duplicate channels and printed
+    # with --dry-run. output_suffix is also read by concatenate_recordings.py so it
+    # picks trimmed parts; the downsample/scoring/QC selection helpers only
+    # recognise the default "_trimmed" (scripts/utils/recording_selection.py).
     n_samples: 100
-    keep_first: 3
     output_suffix: "_trimmed"

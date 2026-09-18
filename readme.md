@@ -48,9 +48,9 @@ such as `--source-dir` and `--sink-dir` take precedence over both.
 ## Unified pipeline entry points
 
 `src/run_pipeline.py` runs the full pipeline for one subject/session in the
-order the stages actually require — concatenate and downsample, then sleep
-scoring, then artifact detection (which depends on the sleep-scoring output),
-then the QC summary:
+order the stages actually require — trim, concatenate and downsample, then
+sleep scoring, then artifact detection (which depends on the sleep-scoring
+output), then the QC summary:
 
 ```bash
 python -m src.run_pipeline --subject 66 --session 1 --model my-model
@@ -60,7 +60,7 @@ Each stage also has its own entry point that can be run on its own, with a
 `--steps` selector for that stage's individual scripts:
 
 ```bash
-python -m src.preprocessing --subject 66 --session 1 --steps concatenate downsample
+python -m src.preprocessing --subject 66 --session 1 --steps trim concatenate downsample
 python -m src.sleep_scoring --subject 66 --session 1 --model my-model
 python -m src.qc --subject 66 --session 1
 ```
@@ -71,8 +71,9 @@ default step set.
 
 Every step whose output already exists is skipped and the run continues with
 the next one, so an interrupted or partially-completed session is resumed by
-rerunning the same command: concatenation, downsampling, sleep scoring, and
-artifact detection each leave their existing outputs in place. Pass
+rerunning the same command: channel trimming, concatenation, downsampling,
+sleep scoring, and artifact detection each leave their existing outputs in
+place. Pass
 `--overwrite` to recompute them regardless. The QC summary is the exception --
 it is cheap and always refreshed.
 
@@ -115,13 +116,34 @@ failing.
 
 Run processing stages in this order:
 
-1. **Concatenate recordings** — `scripts/preprocessing/concatenate_recordings.py`
-2. **Inspect and trim channels** — `scripts/preprocessing/inspect_and_trim_channels.py`
-   (only needed to fix a channel-count error surfaced by concatenation; not part
-   of `src/preprocessing.py`'s default steps)
+1. **Trim duplicate channels** — `scripts/preprocessing/trim_duplicate_channels.py`
+2. **Concatenate recordings** — `scripts/preprocessing/concatenate_recordings.py`
 3. **Downsample recordings** — `scripts/preprocessing/downsample_recordings.py`
 4. **Sleep scoring** — `scripts/sleep_scoring/score_recordings.py`
 5. **Detect artifacts** — `scripts/preprocessing/detect_artifacts.py`
+
+Trimming is automatic and usually a no-op. Some recordings list the same
+channel label twice in their EDF header, which breaks concatenation (channel
+layouts must match) and sleep scoring (MNE renames non-unique labels to
+`EEG1A-B-0`, `EEG1A-B-1`, ...). For every source recording in the session the
+step reads the header and, only when a label repeats, writes a
+`<stem>_trimmed.edf` copy beside it that keeps the first occurrence of each
+label; the source file is never modified. Every later step prefers a trimmed
+copy over its source, so a session with duplicates flows through concatenation,
+downsampling, scoring, and QC without further action. Use `--dry-run` to see
+the channel list, the duplicates found, and whether each repeat carries the
+same samples as the channel it duplicates:
+
+```bash
+python scripts/preprocessing/trim_duplicate_channels.py --subject 66 --session 1 --dry-run
+```
+
+For a recording whose surplus channels are *not* duplicates by name, the manual
+`--keep-first N` mode keeps the leading N channels by position instead; check
+the printed channel list with `--dry-run` first, since that rule cannot verify
+itself. If a session was concatenated before its parts were trimmed, rerun
+concatenation with `--overwrite` so the concatenated file is rebuilt from the
+trimmed parts.
 
 The preprocessing pipeline config leaves source and sink locations unset so
 they are supplied by the active data-location profile:

@@ -1,15 +1,16 @@
-"""Run the Hypnose preprocessing pipeline: concatenate, trim, downsample, detect_artifacts.
+"""Run the Hypnose preprocessing pipeline: trim, concatenate, downsample, detect_artifacts.
 
 Each step wraps its matching `scripts/preprocessing/*.py` CLI (run as a
 subprocess) rather than duplicating that logic here. Run this module directly
 for just the preprocessing stage, or use `src/run_pipeline.py` for the full
 preprocessing -> sleep_scoring -> qc pipeline.
 
-`trim` (`inspect_and_trim_channels.py`) is deliberately excluded from the
-default step set: it is a manual remediation step for channel-count errors
-surfaced by concatenation, not a routine stage (see `docs/README_TODO.md`).
-Select it explicitly with `--steps trim` when needed, and note that it only
-inspects unless `--write-trimmed` is also forwarded.
+`trim` (`trim_duplicate_channels.py`) runs first so that concatenation and
+everything after it see duplicate-free recordings: it writes a `_trimmed` copy
+of any source EDF whose header repeats a channel label and leaves clean
+recordings untouched, so it is a no-op for most sessions. Its manual
+`--keep-first N` mode is not part of the pipeline; run the script directly for
+that.
 
 Unrecognized arguments are forwarded verbatim to every selected step (for
 example `--target-sfreq 256` for `downsample`); step-specific flags that only
@@ -27,14 +28,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src._pipeline import StepFailed, add_selector_arguments, run_step
 
-STEP_ORDER = ["concatenate", "trim", "downsample", "detect_artifacts"]
+STEP_ORDER = ["trim", "concatenate", "downsample", "detect_artifacts"]
 STEP_MODULES = {
+    "trim": "scripts.preprocessing.trim_duplicate_channels",
     "concatenate": "scripts.preprocessing.concatenate_recordings",
-    "trim": "scripts.preprocessing.inspect_and_trim_channels",
     "downsample": "scripts.preprocessing.downsample_recordings",
     "detect_artifacts": "scripts.preprocessing.detect_artifacts",
 }
-DEFAULT_STEPS = ["concatenate", "downsample", "detect_artifacts"]
+DEFAULT_STEPS = list(STEP_ORDER)
 
 
 def _step_args(
@@ -61,13 +62,13 @@ def _step_args(
             args += ["--source-dir", rawdata_root]
         if derivatives_root:
             args += ["--sink-dir", derivatives_root]
-        if dry_run:
-            args.append("--dry-run")
     else:
         if rawdata_root:
             args += ["--rawdata-root", rawdata_root]
         if derivatives_root and step == "detect_artifacts":
             args += ["--derivatives-root", derivatives_root]
+    if dry_run and step != "detect_artifacts":
+        args.append("--dry-run")
 
     if overwrite:
         args.append("--overwrite")
@@ -114,12 +115,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs.")
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="Preview matching sessions/files without writing (concatenate/downsample only).",
+        help="Preview matching sessions/files without writing (trim/concatenate/downsample only).",
     )
     parser.add_argument(
         "--steps", nargs="+", choices=STEP_ORDER, default=None,
-        help=f"Steps to run, in pipeline order (default: {' '.join(DEFAULT_STEPS)}; "
-        "trim is manual/on-demand).",
+        help=f"Steps to run, in pipeline order (default: {' '.join(DEFAULT_STEPS)}).",
     )
     return parser
 

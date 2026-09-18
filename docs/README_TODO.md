@@ -140,7 +140,16 @@ be used to analyse considering ZT.~~
 
 ~~- No they all use .fif and can't be further optimised~~
 
-## 17. Insert info that inspect_and_trim_channels.py should only be necessary for errors in concatenation
+## ~~17. Insert info that inspect_and_trim_channels.py should only be necessary for errors in concatenation~~
+
+~~Insert info that inspect_and_trim_channels.py should only be necessary for
+errors in concatenation~~ — superseded: `inspect_and_trim_channels.py` (since renamed
+`trim_duplicate_channels.py`) now detects duplicate channel labels from the EDF header itself and drops them
+automatically, so it runs as the first default step of `src/preprocessing.py`
+(before concatenation) and is a no-op on clean recordings. Downstream selection
+(`scripts/utils/recording_selection.py:prefer_trimmed_recordings()`) prefers a
+`_trimmed` copy over its source, so single-recording sessions with duplicates
+are handled too. `--keep-first N` remains the manual, positional fallback.
 
 ~~## 16. Rename to hypnose-eeg-preprocessing~~
 

@@ -27,7 +27,7 @@ from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.io.mne_io import export_raw_edf, import_mne
 from scripts.io.output_paths import save_csv_rows
 from scripts.utils.config import coalesce, load_config, nested_get
-from scripts.utils.recording_selection import find_session_dirs
+from scripts.utils.recording_selection import DEFAULT_TRIMMED_SUFFIX, find_session_dirs
 
 
 @dataclass(frozen=True)
@@ -56,13 +56,13 @@ class EdfSessionConcatenator:
         sink_dir: str | Path | None = None,
         edf_pattern: str = "**/*.edf",
         overwrite: bool = False,
-        trimmed_suffix: str = "_trimmed",
+        trimmed_suffix: str = DEFAULT_TRIMMED_SUFFIX,
     ) -> None:
         self.source_dir = Path(source_dir)
         self.sink_dir = Path(sink_dir) if sink_dir is not None else None
         self.edf_pattern = edf_pattern
         self.overwrite = overwrite
-        # Matches inspect_and_trim_channels.py's preprocessing.trim_channels.output_suffix
+        # Matches trim_duplicate_channels.py's preprocessing.trim_channels.output_suffix
         # so a trimmed recording is preferred here under whatever suffix that step used.
         self.trimmed_suffix = trimmed_suffix.lower()
 
@@ -606,7 +606,7 @@ def main() -> None:
     trimmed_suffix = str(
         coalesce(
             nested_get(config, ("preprocessing", "trim_channels", "output_suffix")),
-            "_trimmed",
+            DEFAULT_TRIMMED_SUFFIX,
         )
     )
 

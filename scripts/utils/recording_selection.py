@@ -8,10 +8,45 @@ from pathlib import Path
 from hypnose_helpers.io.layout import SessionLayout, normalize_subjid
 
 
+# Suffix `trim_duplicate_channels.py` appends to a recording's stem when it
+# writes a trimmed copy beside it. `preprocessing.trim_channels.output_suffix`
+# in configs/pipelines/preprocessing.yaml can override it for that script and
+# for concatenation, but the selection helpers below only recognise this value.
+DEFAULT_TRIMMED_SUFFIX = "_trimmed"
+
+
 def is_concatenated_recording(path: Path) -> bool:
     """Whether `path` looks like a `concatenate_recordings.py`-produced file."""
     name = path.name.lower()
     return name.endswith("recording-concat.edf") or "_recording-concat" in name
+
+
+def is_trimmed_recording(path: Path, trimmed_suffix: str = DEFAULT_TRIMMED_SUFFIX) -> bool:
+    """Whether `path` looks like an `trim_duplicate_channels.py`-produced file."""
+    return path.stem.lower().endswith(trimmed_suffix.lower())
+
+
+def prefer_trimmed_recordings(
+    edf_paths: list[Path], trimmed_suffix: str = DEFAULT_TRIMMED_SUFFIX
+) -> list[Path]:
+    """Drop every EDF whose `<stem>_trimmed.edf` sibling is also in the list.
+
+    `trim_duplicate_channels.py` writes a duplicate-free copy of a recording
+    beside its source rather than editing the source, so wherever both are
+    present the trimmed copy is the one to process. Siblings are matched by
+    path, so a flat list spanning several folders is safe.
+    """
+    available = {path.parent / path.name.lower() for path in edf_paths}
+
+    def has_trimmed_sibling(path: Path) -> bool:
+        sibling = path.parent / f"{path.stem}{trimmed_suffix}{path.suffix}".lower()
+        return sibling in available
+
+    return [
+        path
+        for path in edf_paths
+        if is_trimmed_recording(path, trimmed_suffix) or not has_trimmed_sibling(path)
+    ]
 
 
 def prefer_concatenated_recording(edf_paths: list[Path]) -> list[Path]:
@@ -24,11 +59,16 @@ def prefer_concatenated_recording(edf_paths: list[Path]) -> list[Path]:
     (concatenate_recordings.py's own gap-padding, or somnotate's
     `prepare_recording`) that only applies within a single file.
 
+    A trimmed copy replaces its source first (`prefer_trimmed_recordings`), so a
+    single-recording session whose only extra file is the trimmed copy resolves
+    to that copy rather than looking like unconcatenated parts.
+
     If several EDFs are present but none is a concatenated recording, an empty
     list is returned rather than falling back to the ambiguous raw parts --
     callers should treat that as "not ready to process yet" and warn rather than
     silently score/downsample the parts independently.
     """
+    edf_paths = prefer_trimmed_recordings(edf_paths)
     if len(edf_paths) <= 1:
         return edf_paths
     return [path for path in edf_paths if is_concatenated_recording(path)]
@@ -108,8 +148,14 @@ def pair_recordings(
     edf_pattern: str = "**/*.edf",
     fif_pattern: str = "**/*_raw.fif",
 ) -> list[tuple[Path, Path]]:
-    """Pair EDF/FIF files by source stem, preferring matching relative folders."""
-    edfs = sorted(path for path in rawdata_root.glob(edf_pattern) if path.is_file())
+    """Pair EDF/FIF files by source stem, preferring matching relative folders.
+
+    A trimmed copy stands in for its source EDF (`prefer_trimmed_recordings`),
+    so a FIF left over from downsampling the untrimmed source is not paired.
+    """
+    edfs = prefer_trimmed_recordings(
+        sorted(path for path in rawdata_root.glob(edf_pattern) if path.is_file())
+    )
     fif_files = sorted(
         path for path in derivatives_root.glob(fif_pattern) if path.is_file()
     )
