@@ -50,6 +50,22 @@ class RunStepsTests(unittest.TestCase):
             )
 
     @patch("src.qc.run_step")
+    def test_output_folder_overrides_reach_every_step_as_env(self, mock_run_step):
+        qc.run_steps(
+            subject="66", session="1", steps=["integrity", "summary"],
+            output_dirs={"quality_control": "reports/qc"},
+        )
+        for c in mock_run_step.call_args_list:
+            self.assertEqual(c.kwargs["env"], {"HYPNOSE_EEG_OUTPUT_DIR_QUALITY_CONTROL": "reports/qc"})
+
+    @patch("src.qc.run_step")
+    def test_cli_output_flags_are_forwarded(self, mock_run_step):
+        qc.main(["--subject", "66", "--session", "1", "--output-layout", "/x/layout.yaml"])
+        self.assertEqual(
+            mock_run_step.call_args.kwargs["env"], {"HYPNOSE_EEG_OUTPUT_LAYOUT": "/x/layout.yaml"}
+        )
+
+    @patch("src.qc.run_step")
     def test_step_failure_propagates(self, mock_run_step):
         mock_run_step.side_effect = StepFailed("qc:summary", "scripts.qc.summary_qc", 1)
         with self.assertRaises(StepFailed):

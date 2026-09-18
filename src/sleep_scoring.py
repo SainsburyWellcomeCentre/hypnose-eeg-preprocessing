@@ -21,7 +21,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src._pipeline import StepFailed, add_selector_arguments, run_step
+from src._pipeline import (
+    StepFailed,
+    add_selector_arguments,
+    output_layout_env,
+    output_dir_overrides,
+    run_step,
+)
 
 STEP_ORDER = ["score", "view"]
 STEP_MODULES = {
@@ -71,10 +77,18 @@ def run_steps(
     overwrite: bool = False,
     steps: list[str] | None = None,
     extra_args: list[str] | None = None,
+    output_layout: str | Path | None = None,
+    output_dirs: dict[str, str] | None = None,
 ) -> None:
-    """Run the selected sleep-scoring steps, in order."""
+    """Run the selected sleep-scoring steps, in order.
+
+    `output_layout`/`output_dirs` relocate named output folders within each
+    session's derivatives directory (see `src._pipeline.output_layout_env`);
+    leave both unset to keep the repository's `configs/output_layout.yaml`.
+    """
     selected = steps if steps is not None else DEFAULT_STEPS
     extra_args = list(extra_args or [])
+    env = output_layout_env(output_layout, output_dirs)
     for step in STEP_ORDER:
         if step not in selected:
             continue
@@ -88,7 +102,7 @@ def run_steps(
             model=model,
             overwrite=overwrite,
         ) + extra_args
-        run_step(STEP_MODULES[step], args, label=f"sleep_scoring:{step}")
+        run_step(STEP_MODULES[step], args, label=f"sleep_scoring:{step}", env=env)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -127,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
             overwrite=args.overwrite,
             steps=args.steps,
             extra_args=extra,
+            output_layout=args.output_layout,
+            output_dirs=output_dir_overrides(parser, args),
         )
     except StepFailed as exc:
         print(f"FAILED: {exc}", file=sys.stderr)

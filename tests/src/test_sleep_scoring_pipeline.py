@@ -46,6 +46,26 @@ class RunStepsTests(unittest.TestCase):
         self.assertNotIn("--overwrite", score_args)
 
     @patch("src.sleep_scoring.run_step")
+    def test_output_folder_overrides_reach_every_step_as_env(self, mock_run_step):
+        sleep_scoring.run_steps(
+            subject="66", session="1", steps=["score", "view"],
+            output_dirs={"sleep_scoring": "scoring/somnotate"},
+        )
+        for c in mock_run_step.call_args_list:
+            self.assertEqual(
+                c.kwargs["env"], {"HYPNOSE_EEG_OUTPUT_DIR_SLEEP_SCORING": "scoring/somnotate"}
+            )
+
+    @patch("src.sleep_scoring.run_step")
+    def test_cli_output_flags_are_forwarded(self, mock_run_step):
+        sleep_scoring.main(
+            ["--subject", "66", "--session", "1", "--output-dir", "sleep_scoring=scoring"]
+        )
+        self.assertEqual(
+            mock_run_step.call_args.kwargs["env"], {"HYPNOSE_EEG_OUTPUT_DIR_SLEEP_SCORING": "scoring"}
+        )
+
+    @patch("src.sleep_scoring.run_step")
     def test_view_not_run_unless_explicitly_selected(self, mock_run_step):
         sleep_scoring.run_steps(subject="66", date="20260717", steps=["score"])
         modules = [c.args[0] for c in mock_run_step.call_args_list]

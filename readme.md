@@ -45,6 +45,39 @@ export HYPNOSE_EEG_DERIVATIVES_ROOT=/path/to/derivatives
 Environment variables take precedence over the active profile. CLI arguments
 such as `--source-dir` and `--sink-dir` take precedence over both.
 
+### Output folders within a session
+
+Every derivative lands below its recording's derivatives session directory,
+`<derivatives>/sub-XXX/ses-YYY_date-.../`, in one of five named folders --
+`downsample`, `sleep_scoring`, `sleep_scoring_qc`, `artifacts`, and
+`quality_control`. Their names come from `configs/output_layout.yaml`, so by
+default the layout follows the data location and nothing needs to be set.
+
+When this repository is driven from elsewhere (another project, a shared
+server job) and those folders should sit somewhere else *within* each session
+directory, override them without editing the checkout:
+
+```bash
+# Whole layout: a copy of configs/output_layout.yaml with your own folder names
+export HYPNOSE_EEG_OUTPUT_LAYOUT=/path/to/output_layout.yaml
+# ...or one folder at a time
+export HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS=analysis/artifacts
+
+# The same two overrides as flags on the src/ entry points
+python -m src.run_pipeline --subject 66 --session 1 --model my-model \
+    --output-layout /path/to/output_layout.yaml \
+    --output-dir artifacts=analysis/artifacts --output-dir quality_control=reports/qc
+```
+
+Precedence, highest first: `HYPNOSE_EEG_OUTPUT_DIR_<GROUP>` (or `--output-dir`),
+then `HYPNOSE_EEG_OUTPUT_LAYOUT` (or `--output-layout`), then the repository's
+`configs/output_layout.yaml`. A group the override file does not mention keeps
+its built-in name. Folders may be nested (`analysis/artifacts`) but must stay
+relative to the session directory -- absolute paths and `..` are rejected --
+because readers (`scripts/qc/*`, the viewer) locate earlier outputs through the
+same names. From Python, `run_steps(..., output_layout=..., output_dirs={...})`
+on `src.preprocessing`/`src.sleep_scoring`/`src.qc` takes the same overrides.
+
 ## Unified pipeline entry points
 
 `src/run_pipeline.py` runs the full pipeline for one subject/session in the

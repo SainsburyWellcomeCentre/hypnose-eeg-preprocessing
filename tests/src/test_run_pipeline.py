@@ -42,6 +42,42 @@ class FullRunOrderingTests(unittest.TestCase):
     @patch("src.run_pipeline.qc")
     @patch("src.run_pipeline.sleep_scoring")
     @patch("src.run_pipeline.preprocessing")
+    def test_output_folder_overrides_reach_every_stage(
+        self, mock_preprocessing, mock_sleep_scoring, mock_qc
+    ):
+        result = run_pipeline.main(
+            ["--subject", "66", "--session", "1",
+             "--output-layout", "/x/layout.yaml",
+             "--output-dir", "artifacts=analysis/artifacts",
+             "--output-dir", "quality_control=reports/qc"]
+        )
+        self.assertEqual(result, 0)
+        expected_dirs = {"artifacts": "analysis/artifacts", "quality_control": "reports/qc"}
+        for mock_stage in (mock_preprocessing, mock_sleep_scoring, mock_qc):
+            for call in mock_stage.run_steps.call_args_list:
+                self.assertEqual(call.kwargs["output_layout"], "/x/layout.yaml")
+                self.assertEqual(call.kwargs["output_dirs"], expected_dirs)
+
+    @patch("src.run_pipeline.qc")
+    @patch("src.run_pipeline.sleep_scoring")
+    @patch("src.run_pipeline.preprocessing")
+    def test_default_run_passes_no_output_overrides(
+        self, mock_preprocessing, mock_sleep_scoring, mock_qc
+    ):
+        run_pipeline.main(["--subject", "66", "--session", "1"])
+        for mock_stage in (mock_preprocessing, mock_sleep_scoring, mock_qc):
+            for call in mock_stage.run_steps.call_args_list:
+                self.assertIsNone(call.kwargs["output_layout"])
+                self.assertEqual(call.kwargs["output_dirs"], {})
+
+    def test_bad_output_dir_is_a_usage_error(self):
+        with self.assertRaises(SystemExit) as ctx:
+            run_pipeline.main(["--subject", "66", "--output-dir", "figures=x"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    @patch("src.run_pipeline.qc")
+    @patch("src.run_pipeline.sleep_scoring")
+    @patch("src.run_pipeline.preprocessing")
     def test_overwrite_reaches_every_recomputing_stage(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):

@@ -24,6 +24,38 @@ class RunStepsTests(unittest.TestCase):
         )
 
     @patch("src.preprocessing.run_step")
+    def test_output_folder_overrides_reach_every_step_as_env(self, mock_run_step):
+        preprocessing.run_steps(
+            subject="66", session="1",
+            output_layout="/x/layout.yaml", output_dirs={"artifacts": "analysis/artifacts"},
+        )
+        for c in mock_run_step.call_args_list:
+            self.assertEqual(
+                c.kwargs["env"],
+                {
+                    "HYPNOSE_EEG_OUTPUT_LAYOUT": "/x/layout.yaml",
+                    "HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS": "analysis/artifacts",
+                },
+            )
+
+    @patch("src.preprocessing.run_step")
+    def test_no_output_overrides_means_empty_env(self, mock_run_step):
+        preprocessing.run_steps(subject="66", session="1")
+        for c in mock_run_step.call_args_list:
+            self.assertEqual(c.kwargs["env"], {})
+
+    @patch("src.preprocessing.run_step")
+    def test_cli_output_flags_are_forwarded(self, mock_run_step):
+        preprocessing.main(
+            ["--subject", "66", "--session", "1", "--steps", "trim",
+             "--output-layout", "/x/layout.yaml", "--output-dir", "downsample=ds"]
+        )
+        self.assertEqual(
+            mock_run_step.call_args.kwargs["env"],
+            {"HYPNOSE_EEG_OUTPUT_LAYOUT": "/x/layout.yaml", "HYPNOSE_EEG_OUTPUT_DIR_DOWNSAMPLE": "ds"},
+        )
+
+    @patch("src.preprocessing.run_step")
     def test_concatenate_and_downsample_use_source_sink_flags(self, mock_run_step):
         preprocessing.run_steps(
             subject="66", date="20260717",

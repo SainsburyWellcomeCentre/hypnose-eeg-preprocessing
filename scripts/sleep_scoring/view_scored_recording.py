@@ -469,7 +469,10 @@ def _open_signal_source(
 def _artifact_file(recording: Any) -> Path:
     """Resolve artifacts from the dedicated directory, with legacy fallback."""
     scoring_dir = Path(recording.output_dir)
-    directories = (scoring_dir.parent / output_dir_name("artifacts"), scoring_dir)
+    # `output_dir` is `<session>/<sleep_scoring folder>`; the configured folder may
+    # be nested, so climb exactly as many levels as it has to reach the session.
+    session_dir = scoring_dir.parents[len(Path(output_dir_name("sleep_scoring")).parts) - 1]
+    directories = (session_dir / output_dir_name("artifacts"), scoring_dir)
     exact_name = f"{recording.edf_path.stem}_artifact_epochs.parquet"
     for directory in directories:
         exact = directory / exact_name

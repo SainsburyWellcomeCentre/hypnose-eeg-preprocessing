@@ -38,7 +38,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src import preprocessing, qc, sleep_scoring
-from src._pipeline import StepFailed
+from src._pipeline import (
+    StepFailed,
+    add_output_layout_arguments,
+    output_dir_overrides,
+)
 
 STAGE_ORDER = ["preprocessing", "sleep_scoring", "qc"]
 
@@ -64,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--derivatives-root", default=None,
         help="Override the active profile's derivatives root.",
     )
+    add_output_layout_arguments(parser)
     parser.add_argument(
         "--model", "--model-path", dest="model", default=None,
         help="Somnotate model name or model.pickle path (forwarded to sleep scoring).",
@@ -90,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         session=args.session,
         rawdata_root=args.rawdata_root,
         derivatives_root=args.derivatives_root,
+        output_layout=args.output_layout,
+        output_dirs=output_dir_overrides(parser, args),
     )
     stages = args.stage
 
