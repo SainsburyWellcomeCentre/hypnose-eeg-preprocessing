@@ -1,4 +1,13 @@
-"""Run all session quality-control checks and decide analysis readiness."""
+"""Run all session quality-control checks and decide analysis readiness.
+
+The section results (`qc_summary.csv`) and the unified review ranges
+(`qc_review_epochs.csv` plus its typed `.parquet` copy) are both written to
+the shared session quality-control directory on every run, each prefixed with
+the analyzed recording's stem -- for example
+`sub-066_ses-001_recording-concat_qc_summary.csv`. Pass a filename to
+`--summary`/`--review-epochs` to rename either one, or `--no-summary`/
+`--no-review-epochs` to skip writing it.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +26,11 @@ from scripts.analysis.correlation import compute_state_channel_correlations
 from scripts.analysis.emg import compute_state_emg_rms
 from scripts.analysis.power_spectra import compute_state_spectra
 from scripts.io.input_paths import artifact_path, scoring_path
-from scripts.io.output_paths import quality_control_output_path, save_csv
+from scripts.io.output_paths import (
+    quality_control_output_path,
+    recording_output_name,
+    save_csv,
+)
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.qc.recording_integrity import check_pair
 from scripts.utils.recording_selection import select_recordings
@@ -43,9 +56,12 @@ from scripts.utils.config import (
     coalesce,
 )
 from scripts.utils.epochs import infer_epoch_seconds
+from scripts.utils.provenance import write_provenance
 
 
 PERFORMANCE_CHECK = load_performance_check()
+DEFAULT_SUMMARY_FILENAME = "qc_summary.csv"
+DEFAULT_REVIEW_FILENAME = "qc_review_epochs.csv"
 SECTION_COLUMNS = ["section", "status", "metric", "value", "threshold", "detail"]
 REVIEW_COLUMNS = [
     "section",
@@ -284,16 +300,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--summary",
         nargs="?",
-        const="qc_summary.csv",
-        default=None,
-        help="Optionally save section results in the shared session QC directory.",
+        const=DEFAULT_SUMMARY_FILENAME,
+        default=DEFAULT_SUMMARY_FILENAME,
+        help="Filename for the section results saved in the shared session QC "
+        f"directory, prefixed with the recording stem (default: "
+        f"<recording>_{DEFAULT_SUMMARY_FILENAME}).",
+    )
+    parser.add_argument(
+        "--no-summary",
+        action="store_const",
+        const=None,
+        dest="summary",
+        help="Do not save the section results.",
     )
     parser.add_argument(
         "--review-epochs",
         nargs="?",
-        const="qc_review_epochs.csv",
-        default=None,
-        help="Optionally save review ranges as paired CSV and parquet files.",
+        const=DEFAULT_REVIEW_FILENAME,
+        default=DEFAULT_REVIEW_FILENAME,
+        help="Filename for the review ranges, saved as paired CSV and parquet "
+        f"files prefixed with the recording stem (default: "
+        f"<recording>_{DEFAULT_REVIEW_FILENAME}).",
+    )
+    parser.add_argument(
+        "--no-review-epochs",
+        action="store_const",
+        const=None,
+        dest="review_epochs",
+        help="Do not save the review ranges.",
     )
     return parser
 
@@ -676,14 +710,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(exc))
 
     _print_results(sections, reviews)
+    written: list[Path] = []
     if args.summary is not None:
         summary_path = quality_control_output_path(
-            args.summary, edf_path, rawdata_root, derivatives_root
+            recording_output_name(args.summary, edf_path),
+            edf_path, rawdata_root, derivatives_root,
         )
         save_csv(sections, summary_path)
+        written.append(summary_path)
     if args.review_epochs is not None:
         requested_review_path = quality_control_output_path(
-            args.review_epochs, edf_path, rawdata_root, derivatives_root
+            recording_output_name(args.review_epochs, edf_path),
+            edf_path, rawdata_root, derivatives_root,
         )
         review_csv_path, review_parquet_path = review_output_paths(
             requested_review_path
@@ -691,6 +729,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         save_csv(reviews, review_csv_path)
         reviews.to_parquet(review_parquet_path, index=False)
         print(f"Saved: {review_parquet_path}")
+        written.extend([review_parquet_path, review_csv_path])
+
+    if written:
+        write_provenance(
+            "quality_control",
+            outputs=written,
+            inputs={
+                "edf_path": str(edf_path),
+                "fif_path": str(fif_path),
+                "scoring_file": str(scoring_file),
+                "artifact_file": str(artifact_file),
+            },
+            parameters={
+                "overall_status": overall_status(sections),
+                "n_review_entries": int(len(reviews)),
+                "qc_config": str(args.qc_config),
+                "spectra_config": str(args.spectra_config),
+            },
+        )
     return 0 if overall_status(sections) != "fail" else 1
 
 

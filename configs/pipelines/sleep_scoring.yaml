@@ -16,6 +16,11 @@ sleep_scoring:
 
   export_visbrain: true
 
+  # When false, a recording whose predictions parquet already exists is skipped
+  # so a partially-completed session can be resumed without rescoring. Set true
+  # (or pass --overwrite) to rescore regardless.
+  overwrite: false
+
   # If true, every scoring chunk is normalized against robust statistics pooled
   # across the whole recording (gap/too_short epochs excluded) instead of each
   # chunk's own statistics -- see hypnose_somnotate.preprocessing.preprocessing.

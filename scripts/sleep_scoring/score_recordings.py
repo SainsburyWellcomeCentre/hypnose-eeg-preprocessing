@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.io.output_layout import output_dir_name
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
+from scripts.utils.provenance import file_fingerprint, write_provenance
 from scripts.utils.config import (
     DEFAULT_SLEEP_SCORING_CONFIG_PATH,
     coalesce,
@@ -55,6 +56,7 @@ class SleepScoringSettings:
     export_visbrain: bool
     sampling_rate_hz: int
     global_normalization: bool
+    overwrite: bool = False
 
 
 def _as_list(value: Any, *, option_name: str) -> list[str] | None:
@@ -191,6 +193,13 @@ def build_parser() -> argparse.ArgumentParser:
             "configs/pipelines/sleep_scoring.yaml)."
         ),
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        default=None,
+        help="Rescore recordings whose predictions parquet already exists "
+        "(by default such recordings are skipped).",
+    )
     return parser
 
 
@@ -243,6 +252,9 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     )
     global_normalization = _as_bool(global_normalization_value, option_name="global_normalization")
 
+    overwrite_value = coalesce(args.overwrite, scoring.get("overwrite"), False)
+    overwrite = _as_bool(overwrite_value, option_name="overwrite")
+
     return SleepScoringSettings(
         subjids=subjids,
         model_path=model_path,
@@ -256,6 +268,7 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
         export_visbrain=export_visbrain,
         sampling_rate_hz=sampling_rate_hz,
         global_normalization=global_normalization,
+        overwrite=overwrite,
     )
 
 
@@ -468,6 +481,11 @@ def run_scoring(
                     output_dir=output_dir,
                 )
 
+                output_path = deps.prediction_path(recording)
+                if output_path.exists() and not settings.overwrite:
+                    print(f"skipped, predictions exist: {output_path}")
+                    continue
+
                 df, prepared = scorer(
                     edf_path,
                     settings.model_path,
@@ -478,12 +496,31 @@ def run_scoring(
                 deps.print_recording_plan(recording, prepared)
 
                 output_dir.mkdir(parents=True, exist_ok=True)
-                output_path = deps.prediction_path(recording)
                 sidecar_path = deps.segments_path(recording)
 
                 df.to_parquet(output_path, index=False)
                 with open(sidecar_path, "w") as f:
                     json.dump(prepared.to_dict(), f, indent=2)
+
+                write_provenance(
+                    "sleep_scoring",
+                    outputs=[output_path, sidecar_path],
+                    inputs={
+                        "edf_path": str(edf_path),
+                        "subject": sub_label,
+                        "session": session_label,
+                        "date": session.date,
+                    },
+                    parameters={
+                        "model": file_fingerprint(settings.model_path)
+                        or {"path": str(settings.model_path)},
+                        "model_name": settings.model_path.parent.name,
+                        "channel_labels": channel_labels,
+                        "sampling_rate_hz": settings.sampling_rate_hz,
+                        "global_normalization": settings.global_normalization,
+                        "export_visbrain": settings.export_visbrain,
+                    },
+                )
 
                 if settings.export_visbrain:
                     hyp_path = deps.hypnogram_path(recording)

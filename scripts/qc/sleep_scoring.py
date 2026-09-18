@@ -14,7 +14,11 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.io.input_paths import scoring_path
-from scripts.io.output_paths import save_csv, sleep_scoring_qc_output_path
+from scripts.io.output_paths import (
+    recording_output_name,
+    save_csv,
+    sleep_scoring_qc_output_path,
+)
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.utils.recording_selection import select_recordings
 from scripts.qc.thresholds import load_qc_thresholds
@@ -344,17 +348,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.save is not None:
         save_path = sleep_scoring_qc_output_path(
-            args.save, edf_path, rawdata_root, derivatives_root
+            recording_output_name(args.save, edf_path),
+            edf_path, rawdata_root, derivatives_root,
         )
         save_csv(output, save_path)
     if args.summary is not None:
         summary_path = sleep_scoring_qc_output_path(
-            args.summary, edf_path, rawdata_root, derivatives_root
+            recording_output_name(args.summary, edf_path),
+            edf_path, rawdata_root, derivatives_root,
         )
         save_csv(summary, summary_path)
     if args.proportions is not None:
         proportions_path = sleep_scoring_qc_output_path(
-            args.proportions, edf_path, rawdata_root, derivatives_root
+            recording_output_name(args.proportions, edf_path),
+            edf_path, rawdata_root, derivatives_root,
         )
         save_csv(proportion_report, proportions_path)
     return 1 if (proportion_report["status"] == "review").any() else 0

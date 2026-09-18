@@ -41,6 +41,25 @@ class ArtifactDetectionTests(unittest.TestCase):
         self.assertTrue(detector.overwrite)
         self.assertEqual(detector.high_frequency_band_hz, (20.0, 45.0))
 
+    def test_process_skips_instead_of_failing_when_outputs_exist(self) -> None:
+        detector = ArtifactDetector.from_yaml(CONFIG_PATH, overwrite=False)
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            fif_path = output_dir / "sub-066_ses-001_recording-concat_raw.fif"
+            csv_path, parquet_path = artifact_output_paths(
+                fif_path, output_suffix=detector.output_suffix, output_dir=output_dir
+            )
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.touch()
+            parquet_path.touch()
+
+            result = detector.process(fif_path, output_dir / "states.parquet", output_dir)
+
+        self.assertEqual(result["status"], "skipped_exists")
+        self.assertEqual(
+            result["existing_outputs"], [str(csv_path), str(parquet_path)]
+        )
+
     def test_epoch_helpers_count_and_reshape_complete_epochs(self) -> None:
         self.assertEqual(complete_epoch_count(21, sfreq=2.0, epoch_seconds=5.0), 2)
         samples = np.arange(40).reshape(2, 20)

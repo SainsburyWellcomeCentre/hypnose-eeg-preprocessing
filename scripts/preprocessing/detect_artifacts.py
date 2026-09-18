@@ -31,6 +31,7 @@ from scripts.utils.config import (
     nested_get,
     two_float_tuple,
 )
+from scripts.utils.provenance import write_provenance
 from scripts.utils.epochs import (
     align_epoch_states,
     choose_chunk_epochs,
@@ -133,6 +134,20 @@ class ArtifactDetector:
         sleep_parquet_path: str | Path,
         output_dir: str | Path | None = None,
     ) -> dict[str, object]:
+        csv_path, parquet_path = artifact_output_paths(
+            fif_path, output_suffix=self.output_suffix, output_dir=output_dir
+        )
+        existing = [path for path in (csv_path, parquet_path) if path.exists()]
+        if existing and not self.overwrite:
+            return {
+                "fif_path": str(fif_path),
+                "sleep_parquet_path": str(sleep_parquet_path),
+                "status": "skipped_exists",
+                "csv_path": str(csv_path),
+                "parquet_path": str(parquet_path),
+                "existing_outputs": [str(path) for path in existing],
+            }
+
         artifact_epochs, csv_path, parquet_path = _detect_fif_artifacts(
             fif_path,
             sleep_parquet_path,
@@ -553,6 +568,35 @@ def _detect_fif_artifacts(
         f"epochs ({artifact_epochs['artifact'].mean():.2%})"
     )
     print(f"Saved: {parquet_path}")
+    write_provenance(
+        "artifact_detection",
+        outputs=[parquet_path, csv_path],
+        inputs={
+            "fif_path": str(fif_path),
+            "sleep_parquet_path": str(sleep_parquet_path),
+            "eeg_channels": list(eeg_channels),
+            "emg_channels": list(emg_channels),
+        },
+        parameters={
+            "epoch_seconds": detector.epoch_seconds,
+            "robust_z_threshold": detector.robust_z_threshold,
+            "extreme_z_threshold": detector.extreme_z_threshold,
+            "min_std_uv": detector.min_std_uv,
+            "max_edge_fraction": detector.max_edge_fraction,
+            "robust_mad_scale": detector.robust_mad_scale,
+            "soft_features_required": detector.soft_features_required,
+            "emg_soft_features_required": detector.emg_soft_features_required,
+            "emg_supported_eeg_features_required": (
+                detector.emg_supported_eeg_features_required
+            ),
+            "eeg_score_features": list(detector.eeg_score_features),
+            "emg_score_features": list(detector.emg_score_features),
+            "high_frequency_band_hz": list(detector.high_frequency_band_hz),
+            "line_noise_band_hz": list(detector.line_noise_band_hz),
+            "n_epochs": int(n_epochs),
+            "sampling_rate_hz": sfreq,
+        },
+    )
     return artifact_epochs, csv_path, parquet_path
 
 
@@ -681,7 +725,10 @@ def main() -> None:
         max_edge_fraction=args.max_edge_fraction,
         overwrite=args.overwrite,
     )
-    detector.process(fif_path, sleep_parquet_path, args.output_dir)
+    result = detector.process(fif_path, sleep_parquet_path, args.output_dir)
+    if result["status"] == "skipped_exists":
+        existing = ", ".join(result["existing_outputs"])
+        print(f"Skipped, output exists: {existing}. Pass --overwrite to replace it.")
 
 
 if __name__ == "__main__":

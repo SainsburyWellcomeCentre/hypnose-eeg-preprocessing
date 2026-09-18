@@ -22,7 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
 from scripts.io.mne_io import import_mne, load_channel_labels, set_configured_channel_types
-from scripts.io.output_paths import quality_control_output_path, save_csv_rows
+from scripts.io.output_paths import (
+    quality_control_output_path,
+    recording_output_name,
+    save_csv_rows,
+)
 from scripts.qc.thresholds import load_qc_thresholds
 from scripts.utils.config import (
     DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
@@ -426,7 +430,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if len(pairs) != 1:
             parser.error("relative QC outputs require a single selected recording")
         return quality_control_output_path(
-            path, pairs[0][0], rawdata_root, derivatives_root
+            recording_output_name(path, pairs[0][0]),
+            pairs[0][0], rawdata_root, derivatives_root,
         )
 
     if args.summary:

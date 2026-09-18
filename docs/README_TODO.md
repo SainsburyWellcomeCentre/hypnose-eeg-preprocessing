@@ -144,10 +144,21 @@ be used to analyse considering ZT.~~
 
 ~~## 16. Rename to hypnose-eeg-preprocessing~~
 
-## 17. Update readme to make more concise
+## 18. Update readme to make more concise
 
 - Reflect the fact that sleep scoring needs to occur before artifact detection
 
-## 18. Create executable scripts for each separate section with API
+## ~~18. Create executable scripts for each separate section with API~~
 
-## 19. Automate running of the preprocessing for hypnose dataset with reports of errors
+~~Create executable scripts for each separate section with API~~ — done:
+`src/preprocessing.py`, `src/sleep_scoring.py`, and `src/qc.py` each wrap
+their matching `scripts/*` CLIs as subprocesses and can be run standalone
+with a `--steps` selector, and `src/run_pipeline.py` runs all three in
+pipeline order by default (`--stage` restricts it to one or more). See the
+"Unified pipeline entry points" section of `readme.md`.
+
+## 19. Ensure it can be run externally with prefered file locations
+
+## 20. Batch running of pipelines
+
+## 21. Automate running of the preprocessing for hypnose dataset with reports of errors

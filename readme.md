@@ -45,12 +45,80 @@ export HYPNOSE_EEG_DERIVATIVES_ROOT=/path/to/derivatives
 Environment variables take precedence over the active profile. CLI arguments
 such as `--source-dir` and `--sink-dir` take precedence over both.
 
+## Unified pipeline entry points
+
+`src/run_pipeline.py` runs the full pipeline for one subject/session in the
+order the stages actually require — concatenate and downsample, then sleep
+scoring, then artifact detection (which depends on the sleep-scoring output),
+then the QC summary:
+
+```bash
+python -m src.run_pipeline --subject 66 --session 1 --model my-model
+```
+
+Each stage also has its own entry point that can be run on its own, with a
+`--steps` selector for that stage's individual scripts:
+
+```bash
+python -m src.preprocessing --subject 66 --session 1 --steps concatenate downsample
+python -m src.sleep_scoring --subject 66 --session 1 --model my-model
+python -m src.qc --subject 66 --session 1
+```
+
+Pass `--stage preprocessing`/`sleep_scoring`/`qc` (one or more) to
+`run_pipeline.py` to restrict a full run to those stages, each using its own
+default step set.
+
+Every step whose output already exists is skipped and the run continues with
+the next one, so an interrupted or partially-completed session is resumed by
+rerunning the same command: concatenation, downsampling, sleep scoring, and
+artifact detection each leave their existing outputs in place. Pass
+`--overwrite` to recompute them regardless. The QC summary is the exception --
+it is cheap and always refreshed.
+
+Run any of the four with `--help` for its complete option list; these wrap the `scripts/*` CLIs below as subprocesses rather than
+reimplementing them, so step-specific flags such as `--config` are best
+passed to the underlying script directly when a per-step entry point doesn't
+already expose them.
+
+## Output provenance
+
+Artifact detection, sleep scoring, and the QC summary each write a
+`<output stem>_provenance.json` sidecar beside their outputs recording the git
+commit of this checkout (with a `dirty` flag when the working tree had
+uncommitted edits), when the step ran, the command line, the inputs consumed,
+and the parameters that determine the result. Sleep scoring additionally
+records which model was used, identified by SHA-256 content hash as well as by
+path, so a replaced `model.pickle` is still distinguishable:
+
+```json
+{
+  "schema": "hypnose-eeg-provenance/1",
+  "stage": "sleep_scoring",
+  "generated_at": "2026-09-18T14:59:58+00:00",
+  "git": {"commit": "93e8648...", "branch": "main", "dirty": false},
+  "parameters": {
+    "model": {"path": ".../somno_model_1/model.pickle", "sha256": "...", "size_bytes": 4194304},
+    "model_name": "somno_model_1",
+    "sampling_rate_hz": 512
+  }
+}
+```
+
+The sidecar is written only when the output itself is written, so a step
+skipped because its output already exists keeps the provenance of the run that
+actually produced it. Outside a git checkout (an installed copy, an exported
+tarball, a machine without `git`) the `git` field is `null` rather than the run
+failing.
+
 ## Running preprocessing
 
 Run processing stages in this order:
 
 1. **Concatenate recordings** — `scripts/preprocessing/concatenate_recordings.py`
 2. **Inspect and trim channels** — `scripts/preprocessing/inspect_and_trim_channels.py`
+   (only needed to fix a channel-count error surfaced by concatenation; not part
+   of `src/preprocessing.py`'s default steps)
 3. **Downsample recordings** — `scripts/preprocessing/downsample_recordings.py`
 4. **Sleep scoring** — `scripts/sleep_scoring/score_recordings.py`
 5. **Detect artifacts** — `scripts/preprocessing/detect_artifacts.py`
@@ -116,14 +184,29 @@ decision with a unified list of epochs requiring review:
 
 ```bash
 python scripts/qc/summary_qc.py \
-  --subject 66 --session 1 \
-  --summary \
-  --review-epochs
+  --subject 66 --session 1
 ```
 
-`--review-epochs` writes both `qc_review_epochs.csv` and
-`qc_review_epochs.parquet`; the parquet copy provides typed, machine-readable
-review intervals for downstream processing.
+Both outputs are written to the session's `quality_control/` directory on every
+run, whether the command is invoked directly or through `python -m src.qc`, and
+both are named after the analyzed recording in the same
+`sub-XXX_ses-YYY_recording-ZZZ_<output>` form as every other per-recording
+derivative:
+
+```
+quality_control/
+  sub-066_ses-001_recording-concat_qc_summary.csv
+  sub-066_ses-001_recording-concat_qc_review_epochs.csv
+  sub-066_ses-001_recording-concat_qc_review_epochs.parquet
+  sub-066_ses-001_recording-concat_qc_summary_provenance.json
+```
+
+The summary holds the per-section results; the review-epoch parquet provides
+typed, machine-readable review intervals for downstream processing. Pass a
+filename to `--summary`/`--review-epochs` to rename either output (the
+recording prefix is still applied), or `--no-summary`/`--no-review-epochs` to
+skip writing it. `recording_integrity.py` and `scripts/qc/sleep_scoring.py`
+name their outputs the same way.
 
 The command checks EDF/FIF integrity and gaps, Somnotate confidence and undefined
 epochs, artifact burden, EEG/EMG channel correlation, sleep-state power spectra,

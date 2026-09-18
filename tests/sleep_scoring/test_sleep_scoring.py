@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import tempfile
 import unittest
 import warnings
@@ -154,11 +156,93 @@ class SleepScoringTests(unittest.TestCase):
             )
             self.assertEqual(outputs, [expected_output])
             self.assertTrue(expected_output.is_file())
+
+            provenance = json.loads(
+                (expected_output.parent
+                 / "sub-066_ses-001_recording-001_somnotate_predictions_provenance.json"
+                 ).read_text()
+            )
+            self.assertEqual(provenance["stage"], "sleep_scoring")
+            self.assertIn("git", provenance)
+            self.assertEqual(provenance["parameters"]["model"]["path"], str(model))
+            self.assertEqual(
+                provenance["parameters"]["model"]["sha256"],
+                hashlib.sha256(model.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(provenance["inputs"]["subject"], "sub-066")
+
             self.assertEqual(calls[0]["edf_path"], ephys_dir / "sub-066_ses-001_recording-001.edf")
             self.assertEqual(calls[0]["model_path"], model)
             self.assertEqual(calls[0]["channel_labels"], ["EEG1", "EEG2", "EMG"])
             self.assertEqual(calls[0]["sampling_rate_hz"], 512)
             self.assertTrue(calls[0]["global_normalization"])
+
+    def test_run_scoring_skips_a_recording_that_is_already_scored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            rawdata.mkdir()
+            derivatives.mkdir()
+            model = derivatives / "model.pickle"
+            model.touch()
+            _make_session(
+                rawdata, "sub-066", "ses-001_date-20260717", ["sub-066_ses-001_recording-001.edf"]
+            )
+            existing = (
+                derivatives / "sub-066" / "ses-001_date-20260717" / "sleep_scoring"
+                / "sub-066_ses-001_recording-001_somnotate_predictions.parquet"
+            )
+            existing.parent.mkdir(parents=True)
+            existing.touch()
+            calls: list[dict] = []
+
+            def fake_score_recording(edf_path, model_path, **kwargs):
+                calls.append({"edf_path": edf_path})
+                return _fake_predictions_df(), _fake_prepared()
+
+            settings = _settings(
+                root=root, rawdata=rawdata, derivatives=derivatives, model=model,
+                dates=["20260717"],
+            )
+
+            outputs = run_scoring(settings, score_function=fake_score_recording)
+
+            self.assertEqual(outputs, [])
+            self.assertEqual(calls, [])
+            self.assertEqual(existing.stat().st_size, 0)
+
+    def test_run_scoring_rescores_an_existing_recording_when_overwriting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            rawdata.mkdir()
+            derivatives.mkdir()
+            model = derivatives / "model.pickle"
+            model.touch()
+            _make_session(
+                rawdata, "sub-066", "ses-001_date-20260717", ["sub-066_ses-001_recording-001.edf"]
+            )
+            existing = (
+                derivatives / "sub-066" / "ses-001_date-20260717" / "sleep_scoring"
+                / "sub-066_ses-001_recording-001_somnotate_predictions.parquet"
+            )
+            existing.parent.mkdir(parents=True)
+            existing.touch()
+
+            def fake_score_recording(edf_path, model_path, **kwargs):
+                return _fake_predictions_df(), _fake_prepared()
+
+            settings = _settings(
+                root=root, rawdata=rawdata, derivatives=derivatives, model=model,
+                dates=["20260717"], overwrite=True,
+            )
+
+            outputs = run_scoring(settings, score_function=fake_score_recording)
+
+            self.assertEqual(outputs, [existing])
+            self.assertGreater(existing.stat().st_size, 0)
 
     def test_run_scoring_resolves_session_numbers_per_subject(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

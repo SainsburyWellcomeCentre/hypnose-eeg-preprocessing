@@ -11,7 +11,10 @@ from scripts.qc.sleep_scoring import (
     sleep_state_proportions,
 )
 from scripts.qc.spectra import DEFAULT_SPECTRA_CONFIG
+from scripts.io.output_paths import recording_output_name
 from scripts.qc.summary_qc import (
+    DEFAULT_REVIEW_FILENAME,
+    DEFAULT_SUMMARY_FILENAME,
     REVIEW_COLUMNS,
     build_parser,
     overall_status,
@@ -49,6 +52,42 @@ class SummaryQualityControlTests(unittest.TestCase):
             (Path("custom.csv"), Path("custom.parquet")),
         )
 
+    def test_outputs_are_named_after_the_analyzed_recording(self) -> None:
+        edf = Path("/raw/sub-066/ses-001/ephys/sub-066_ses-001_recording-concat.edf")
+        self.assertEqual(
+            recording_output_name(DEFAULT_SUMMARY_FILENAME, edf),
+            Path("sub-066_ses-001_recording-concat_qc_summary.csv"),
+        )
+        self.assertEqual(
+            review_output_paths(recording_output_name(DEFAULT_REVIEW_FILENAME, edf)),
+            (
+                Path("sub-066_ses-001_recording-concat_qc_review_epochs.csv"),
+                Path("sub-066_ses-001_recording-concat_qc_review_epochs.parquet"),
+            ),
+        )
+
+    def test_naming_strips_derivative_detail_and_never_doubles_the_prefix(self) -> None:
+        stem = "sub-066_ses-001_recording-concat"
+        for source in (
+            f"{stem}.edf",
+            f"{stem}_raw.fif",
+            f"{stem}_resampled-128hz_raw.fif",
+        ):
+            self.assertEqual(
+                recording_output_name("qc_summary.csv", source),
+                Path(f"{stem}_qc_summary.csv"),
+            )
+        already = f"{stem}_qc_summary.csv"
+        self.assertEqual(
+            recording_output_name(already, f"{stem}.edf"), Path(already)
+        )
+
+    def test_absolute_output_paths_are_left_alone(self) -> None:
+        self.assertEqual(
+            recording_output_name("/elsewhere/custom.csv", "sub-066_ses-001_recording-concat.edf"),
+            Path("/elsewhere/custom.csv"),
+        )
+
     def test_cli_selects_subject_by_date_or_session(self) -> None:
         parser = build_parser()
         self.assertEqual(
@@ -59,6 +98,27 @@ class SummaryQualityControlTests(unittest.TestCase):
             parser.parse_args(["--subject", "66", "--session", "1"]).session,
             "1",
         )
+
+    def test_cli_saves_summary_and_review_epochs_by_default(self) -> None:
+        args = build_parser().parse_args(["--subject", "66", "--session", "1"])
+        self.assertEqual(args.summary, DEFAULT_SUMMARY_FILENAME)
+        self.assertEqual(args.review_epochs, DEFAULT_REVIEW_FILENAME)
+
+    def test_cli_accepts_custom_output_filenames(self) -> None:
+        args = build_parser().parse_args(
+            ["--subject", "66", "--session", "1",
+             "--summary", "custom_summary.csv",
+             "--review-epochs", "custom_review.csv"],
+        )
+        self.assertEqual(args.summary, "custom_summary.csv")
+        self.assertEqual(args.review_epochs, "custom_review.csv")
+
+    def test_cli_opt_outs_disable_each_output(self) -> None:
+        args = build_parser().parse_args(
+            ["--subject", "66", "--session", "1", "--no-summary", "--no-review-epochs"],
+        )
+        self.assertIsNone(args.summary)
+        self.assertIsNone(args.review_epochs)
 
     def test_spectral_sections_use_configured_threshold_results(self) -> None:
         report = pd.DataFrame(

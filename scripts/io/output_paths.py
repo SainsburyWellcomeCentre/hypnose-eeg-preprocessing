@@ -61,6 +61,24 @@ def artifact_output_paths(
     )
 
 
+def recording_output_name(output: str | Path, recording_path: str | Path) -> Path:
+    """Prefix a relative output name with the stem of the recording it describes.
+
+    Keeps every per-recording derivative discoverable by the same
+    `sub-XXX_ses-YYY_recording-ZZZ_<output>` prefix already used by the artifact,
+    sleep-scoring, and figure outputs, so a session directory holding more than
+    one recording never collides on a shared name like `qc_summary.csv`.
+    Absolute paths, and names already carrying the prefix, are returned unchanged.
+    """
+    requested = Path(output)
+    if requested.is_absolute():
+        return requested
+    stem = source_stem_from_fif(Path(recording_path))
+    if requested.name.startswith(f"{stem}_"):
+        return requested
+    return requested.with_name(f"{stem}_{requested.name}")
+
+
 def session_output_dir(
     recording_path: str | Path,
     rawdata_root: str | Path,
