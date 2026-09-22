@@ -127,6 +127,72 @@ class SingleStageTests(unittest.TestCase):
         mock_qc.run_steps.assert_called_once()
 
 
+class ViewerTests(unittest.TestCase):
+    @patch("src.run_pipeline.qc")
+    @patch("src.run_pipeline.sleep_scoring")
+    @patch("src.run_pipeline.preprocessing")
+    def test_viewer_is_not_opened_by_default(
+        self, mock_preprocessing, mock_sleep_scoring, mock_qc
+    ):
+        run_pipeline.main(["--subject", "66", "--date", "20260717"])
+
+        steps = [c.kwargs["steps"] for c in mock_sleep_scoring.run_steps.call_args_list]
+        self.assertEqual(steps, [["score"]])
+
+    @patch("src.run_pipeline.qc")
+    @patch("src.run_pipeline.sleep_scoring")
+    @patch("src.run_pipeline.preprocessing")
+    def test_view_opens_the_viewer_after_every_other_stage(
+        self, mock_preprocessing, mock_sleep_scoring, mock_qc
+    ):
+        manager = Mock()
+        manager.attach_mock(mock_preprocessing.run_steps, "preprocessing")
+        manager.attach_mock(mock_sleep_scoring.run_steps, "sleep_scoring")
+        manager.attach_mock(mock_qc.run_steps, "qc")
+
+        result = run_pipeline.main(["--subject", "66", "--date", "20260717", "--view"])
+
+        self.assertEqual(result, 0)
+        call_names = [c[0] for c in manager.mock_calls]
+        self.assertEqual(
+            call_names,
+            ["preprocessing", "sleep_scoring", "preprocessing", "qc", "sleep_scoring"],
+        )
+        view_call = mock_sleep_scoring.run_steps.call_args_list[-1]
+        self.assertEqual(view_call.kwargs["steps"], ["view"])
+
+    @patch("src.run_pipeline.qc")
+    @patch("src.run_pipeline.sleep_scoring")
+    @patch("src.run_pipeline.preprocessing")
+    def test_view_works_without_rerunning_any_stage(
+        self, mock_preprocessing, mock_sleep_scoring, mock_qc
+    ):
+        result = run_pipeline.main(
+            ["--subject", "66", "--session", "1", "--stage", "qc", "--view"]
+        )
+
+        self.assertEqual(result, 0)
+        mock_preprocessing.run_steps.assert_not_called()
+        mock_sleep_scoring.run_steps.assert_called_once()
+        self.assertEqual(
+            mock_sleep_scoring.run_steps.call_args.kwargs["steps"], ["view"]
+        )
+
+    @patch("src.run_pipeline.qc")
+    @patch("src.run_pipeline.sleep_scoring")
+    @patch("src.run_pipeline.preprocessing")
+    def test_failing_stage_stops_before_the_viewer(
+        self, mock_preprocessing, mock_sleep_scoring, mock_qc
+    ):
+        mock_qc.run_steps.side_effect = StepFailed("qc:summary", "scripts.qc.summary_qc", 3)
+
+        result = run_pipeline.main(["--subject", "66", "--date", "20260717", "--view"])
+
+        self.assertEqual(result, 3)
+        steps = [c.kwargs["steps"] for c in mock_sleep_scoring.run_steps.call_args_list]
+        self.assertEqual(steps, [["score"]])
+
+
 class FailureTests(unittest.TestCase):
     @patch("src.run_pipeline.qc")
     @patch("src.run_pipeline.sleep_scoring")

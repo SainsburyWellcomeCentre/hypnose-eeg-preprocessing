@@ -121,6 +121,23 @@ Pass `--stage preprocessing`/`sleep_scoring`/`qc` (one or more) to
 `run_pipeline.py` to restrict a full run to those stages, each using its own
 default step set.
 
+`--view` ends the run in the interactive scoring viewer
+(`scripts/sleep_scoring/view_scored_recording.py`), so a session can be
+inspected as soon as it has been processed. It opens a plot window, so it needs
+a display (see [docs/remote_visualization.md](docs/remote_visualization.md) for
+working over SSH), and it runs after every selected stage — artifact detection
+and the QC summary included. Because it only reads what is already on disk it
+also works on its own:
+
+```bash
+# Process the session, then look at the result
+python -m src.run_pipeline --subject 66 --session 1 --model my-model --view
+# Just look at an already-processed session
+python -m src.run_pipeline --subject 66 --session 1 --stage qc --view
+# Viewer-only options (--hours, --eeg-channel, --show-artifacts, ...) go here
+python -m src.sleep_scoring --subject 66 --session 1 --steps view --hours 3 6
+```
+
 Every step whose output already exists is skipped and the run continues with
 the next one, so an interrupted or partially-completed session is resumed by
 rerunning the same command: channel trimming, concatenation, downsampling,

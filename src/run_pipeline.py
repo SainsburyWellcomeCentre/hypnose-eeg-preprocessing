@@ -20,6 +20,16 @@ A step whose outputs already exist is skipped and the run continues with the
 next one, so an interrupted or partially-completed session can be resumed by
 rerunning the same command. Pass `--overwrite` to recompute regardless.
 
+`--view` opens the interactive scoring viewer
+(`scripts/sleep_scoring/view_scored_recording.py`) once the selected stages
+finish, so a run can end in a look at the traces and predictions it produced.
+It runs last -- after artifact detection and the QC summary, so `--show-artifacts`
+has artifacts to show -- and needs a display. It only reads outputs already on
+disk, so it is also available on its own (`--stage qc --view`, or with no
+stage work at all). Viewer-only options such as `--hours` cannot be given here,
+because unrecognized arguments go to every stage; pass those to
+`python -m src.sleep_scoring --steps view` instead.
+
 Sleep scoring, artifact detection, and the QC summary each write a
 `<output stem>_provenance.json` sidecar naming the git commit that produced the
 output -- and, for sleep scoring, which model was used.
@@ -79,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
         "outputs already exist.",
     )
     parser.add_argument(
+        "--view", action="store_true",
+        help="Open the interactive scoring viewer after the selected stages finish "
+        "(opens a plot window; requires a display).",
+    )
+    parser.add_argument(
         "--stage", nargs="+", choices=STAGE_ORDER, default=None,
         help="Restrict the run to these stages, each using its own default step set "
         "(default: all three, in dependency order).",
@@ -125,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if "qc" in stages:
                 qc.run_steps(**common, extra_args=extra)
+        if args.view:
+            sleep_scoring.run_steps(**common, steps=["view"], extra_args=extra)
     except StepFailed as exc:
         print(f"FAILED: {exc}", file=sys.stderr)
         return exc.returncode
