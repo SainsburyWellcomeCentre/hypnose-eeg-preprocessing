@@ -79,16 +79,18 @@ def run_steps(
     extra_args: list[str] | None = None,
     output_layout: str | Path | None = None,
     output_dirs: dict[str, str] | None = None,
+    output_root: str | None = None,
 ) -> None:
     """Run the selected sleep-scoring steps, in order.
 
-    `output_layout`/`output_dirs` relocate named output folders within each
-    session's derivatives directory (see `src._pipeline.output_layout_env`);
-    leave both unset to keep the repository's `configs/output_layout.yaml`.
+    `output_layout`/`output_root`/`output_dirs` relocate named output folders
+    within each session's derivatives directory (see
+    `src._pipeline.output_layout_env`); leave them unset to keep the
+    repository's `configs/output_layout.yaml`.
     """
     selected = steps if steps is not None else DEFAULT_STEPS
     extra_args = list(extra_args or [])
-    env = output_layout_env(output_layout, output_dirs)
+    env = output_layout_env(output_layout, output_dirs, output_root)
     for step in STEP_ORDER:
         if step not in selected:
             continue
@@ -142,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             steps=args.steps,
             extra_args=extra,
             output_layout=args.output_layout,
+            output_root=args.output_root,
             output_dirs=output_dir_overrides(parser, args),
         )
     except StepFailed as exc:

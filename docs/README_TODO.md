@@ -172,13 +172,16 @@ pipeline order by default (`--stage` restricts it to one or more). See the
 data-location roots were already overridable (`--rawdata-root`/
 `--derivatives-root`, `HYPNOSE_EEG_*_ROOT`); the per-session output folders
 now are too. `scripts/io/output_layout.py:output_dir_name()` resolves
-`HYPNOSE_EEG_OUTPUT_DIR_<GROUP>`, then `HYPNOSE_EEG_OUTPUT_LAYOUT` (an
+`HYPNOSE_EEG_OUTPUT_DIR_<GROUP>` and `HYPNOSE_EEG_OUTPUT_ROOT` (the shared
+`eeg/` modality folder the groups sit in), then `HYPNOSE_EEG_OUTPUT_LAYOUT` (an
 alternative `output_layout.yaml`), then the repository's own file, and the
 `src/` entry points expose the same as `--output-dir GROUP=FOLDER` /
-`--output-layout FILE` (forwarded to the wrapped scripts via the environment)
-and as `run_steps(output_layout=..., output_dirs=...)`. Defaults are unchanged,
-so an in-repo run still follows the data location alone. See "Output folders
-within a session" in `readme.md`.
+`--output-root FOLDER` / `--output-layout FILE` (forwarded to the wrapped
+scripts via the environment) and as
+`run_steps(output_layout=..., output_root=..., output_dirs=...)`. Within a
+session every output group now sits below `eeg/`; the rest of the defaults are
+unchanged, so an in-repo run still follows the data location alone. See "Output
+folders within a session" in `readme.md`.
 
 ## 20. Batch running of pipelines
 

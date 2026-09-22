@@ -48,11 +48,16 @@ class RunStepsTests(unittest.TestCase):
     def test_cli_output_flags_are_forwarded(self, mock_run_step):
         preprocessing.main(
             ["--subject", "66", "--session", "1", "--steps", "trim",
-             "--output-layout", "/x/layout.yaml", "--output-dir", "downsample=ds"]
+             "--output-layout", "/x/layout.yaml", "--output-root", "ephys",
+             "--output-dir", "downsample=ds"]
         )
         self.assertEqual(
             mock_run_step.call_args.kwargs["env"],
-            {"HYPNOSE_EEG_OUTPUT_LAYOUT": "/x/layout.yaml", "HYPNOSE_EEG_OUTPUT_DIR_DOWNSAMPLE": "ds"},
+            {
+                "HYPNOSE_EEG_OUTPUT_LAYOUT": "/x/layout.yaml",
+                "HYPNOSE_EEG_OUTPUT_ROOT": "ephys",
+                "HYPNOSE_EEG_OUTPUT_DIR_DOWNSAMPLE": "ds",
+            },
         )
 
     @patch("src.preprocessing.run_step")

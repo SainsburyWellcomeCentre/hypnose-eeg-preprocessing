@@ -39,10 +39,10 @@ class SleepScoringViewTests(unittest.TestCase):
     def test_artifact_file_prefers_dedicated_session_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             session_dir = Path(directory)
-            scoring_dir = session_dir / "sleep_scoring"
-            artifact_dir = session_dir / "artifacts"
-            scoring_dir.mkdir()
-            artifact_dir.mkdir()
+            scoring_dir = session_dir / "eeg" / "sleep_scoring"
+            artifact_dir = session_dir / "eeg" / "artifacts"
+            scoring_dir.mkdir(parents=True)
+            artifact_dir.mkdir(parents=True)
             recording = types.SimpleNamespace(
                 output_dir=scoring_dir,
                 edf_path=Path("recording.edf"),

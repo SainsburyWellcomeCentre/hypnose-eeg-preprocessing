@@ -170,11 +170,11 @@ class SleepStateSpectraTests(unittest.TestCase):
             derivatives = root / "derivatives"
             edf = rawdata / "sub-066" / "ses-1_date-20260717" / "ephys" / "recording.edf"
             session = derivatives / "sub-066" / "ses-1_date-20260717"
-            scoring_dir = session / "sleep_scoring"
-            artifact_dir = session / "artifacts"
+            scoring_dir = session / "eeg" / "sleep_scoring"
+            artifact_dir = session / "eeg" / "artifacts"
             edf.parent.mkdir(parents=True)
             scoring_dir.mkdir(parents=True)
-            artifact_dir.mkdir()
+            artifact_dir.mkdir(parents=True)
             scoring = scoring_dir / "recording_somnotate_predictions.parquet"
             artifact = artifact_dir / "recording_artifact_epochs.parquet"
             scoring.touch()
@@ -188,19 +188,19 @@ class SleepStateSpectraTests(unittest.TestCase):
                 quality_control_output_path(
                     "qc_summary.csv", edf, rawdata, derivatives
                 ),
-                session / "quality_control" / "qc_summary.csv",
+                session / "eeg" / "quality_control" / "qc_summary.csv",
             )
             self.assertEqual(
                 sleep_scoring_output_path(
                     "somnotate_scoring_summary.csv", edf, rawdata, derivatives
                 ),
-                session / "sleep_scoring" / "somnotate_scoring_summary.csv",
+                session / "eeg" / "sleep_scoring" / "somnotate_scoring_summary.csv",
             )
             self.assertEqual(
                 artifact_output_path(
                     "recording_artifact_report", edf, rawdata, derivatives
                 ),
-                session / "artifacts" / "recording_artifact_report",
+                session / "eeg" / "artifacts" / "recording_artifact_report",
             )
 
     def test_generic_artifact_filename_is_supported(self) -> None:

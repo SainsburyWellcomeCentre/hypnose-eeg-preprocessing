@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         rawdata_root=args.rawdata_root,
         derivatives_root=args.derivatives_root,
         output_layout=args.output_layout,
+        output_root=args.output_root,
         output_dirs=output_dir_overrides(parser, args),
     )
     stages = args.stage

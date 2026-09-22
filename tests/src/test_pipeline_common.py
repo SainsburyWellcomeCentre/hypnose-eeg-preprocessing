@@ -109,6 +109,12 @@ class OutputLayoutEnvTests(unittest.TestCase):
             },
         )
 
+    def test_output_root_maps_to_its_own_env_var(self):
+        env = output_layout_env(None, None, "ephys")
+        self.assertEqual(env, {"HYPNOSE_EEG_OUTPUT_ROOT": "ephys"})
+        # `.` is a value, not an absent override: it drops the modality folder.
+        self.assertEqual(output_layout_env(None, None, "."), {"HYPNOSE_EEG_OUTPUT_ROOT": "."})
+
     def test_unknown_group_is_rejected(self):
         with self.assertRaises(ValueError):
             output_layout_env(None, {"figures": "x"})

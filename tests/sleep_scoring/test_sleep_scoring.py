@@ -151,7 +151,7 @@ class SleepScoringTests(unittest.TestCase):
             outputs = run_scoring(settings, score_function=fake_score_recording)
 
             expected_output = (
-                derivatives / "sub-066" / "ses-001_date-20260717" / "sleep_scoring"
+                derivatives / "sub-066" / "ses-001_date-20260717" / "eeg" / "sleep_scoring"
                 / "sub-066_ses-001_recording-001_somnotate_predictions.parquet"
             )
             self.assertEqual(outputs, [expected_output])
@@ -190,7 +190,7 @@ class SleepScoringTests(unittest.TestCase):
                 rawdata, "sub-066", "ses-001_date-20260717", ["sub-066_ses-001_recording-001.edf"]
             )
             existing = (
-                derivatives / "sub-066" / "ses-001_date-20260717" / "sleep_scoring"
+                derivatives / "sub-066" / "ses-001_date-20260717" / "eeg" / "sleep_scoring"
                 / "sub-066_ses-001_recording-001_somnotate_predictions.parquet"
             )
             existing.parent.mkdir(parents=True)
@@ -225,7 +225,7 @@ class SleepScoringTests(unittest.TestCase):
                 rawdata, "sub-066", "ses-001_date-20260717", ["sub-066_ses-001_recording-001.edf"]
             )
             existing = (
-                derivatives / "sub-066" / "ses-001_date-20260717" / "sleep_scoring"
+                derivatives / "sub-066" / "ses-001_date-20260717" / "eeg" / "sleep_scoring"
                 / "sub-066_ses-001_recording-001_somnotate_predictions.parquet"
             )
             existing.parent.mkdir(parents=True)

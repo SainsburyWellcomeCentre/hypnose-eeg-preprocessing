@@ -48,10 +48,23 @@ such as `--source-dir` and `--sink-dir` take precedence over both.
 ### Output folders within a session
 
 Every derivative lands below its recording's derivatives session directory,
-`<derivatives>/sub-XXX/ses-YYY_date-.../`, in one of five named folders --
-`downsample`, `sleep_scoring`, `sleep_scoring_qc`, `artifacts`, and
-`quality_control`. Their names come from `configs/output_layout.yaml`, so by
-default the layout follows the data location and nothing needs to be set.
+`<derivatives>/sub-XXX/ses-YYY_date-.../`, inside a shared `eeg/` modality
+folder, in one of five named folders -- `downsample`, `sleep_scoring`,
+`sleep_scoring_qc`, `artifacts`, and `quality_control`:
+
+```
+derivatives/sub-066/ses-1_date-20250420/
+└── eeg/
+    ├── downsample/
+    ├── sleep_scoring/
+    ├── sleep_scoring_qc/
+    ├── artifacts/
+    └── quality_control/
+```
+
+The `eeg/` root and the five folder names come from
+`configs/output_layout.yaml`, so by default the layout follows the data
+location and nothing needs to be set.
 
 When this repository is driven from elsewhere (another project, a shared
 server job) and those folders should sit somewhere else *within* each session
@@ -60,23 +73,29 @@ directory, override them without editing the checkout:
 ```bash
 # Whole layout: a copy of configs/output_layout.yaml with your own folder names
 export HYPNOSE_EEG_OUTPUT_LAYOUT=/path/to/output_layout.yaml
-# ...or one folder at a time
+# ...or the modality root alone (`.` puts the five folders in the session directory)
+export HYPNOSE_EEG_OUTPUT_ROOT=eeg
+# ...or one folder at a time, relative to that root
 export HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS=analysis/artifacts
 
-# The same two overrides as flags on the src/ entry points
+# The same three overrides as flags on the src/ entry points
 python -m src.run_pipeline --subject 66 --session 1 --model my-model \
-    --output-layout /path/to/output_layout.yaml \
+    --output-layout /path/to/output_layout.yaml --output-root eeg \
     --output-dir artifacts=analysis/artifacts --output-dir quality_control=reports/qc
 ```
 
-Precedence, highest first: `HYPNOSE_EEG_OUTPUT_DIR_<GROUP>` (or `--output-dir`),
-then `HYPNOSE_EEG_OUTPUT_LAYOUT` (or `--output-layout`), then the repository's
+Precedence, highest first: `HYPNOSE_EEG_OUTPUT_DIR_<GROUP>` (or `--output-dir`)
+and `HYPNOSE_EEG_OUTPUT_ROOT` (or `--output-root`), then
+`HYPNOSE_EEG_OUTPUT_LAYOUT` (or `--output-layout`), then the repository's
 `configs/output_layout.yaml`. A group the override file does not mention keeps
-its built-in name. Folders may be nested (`analysis/artifacts`) but must stay
-relative to the session directory -- absolute paths and `..` are rejected --
-because readers (`scripts/qc/*`, the viewer) locate earlier outputs through the
-same names. From Python, `run_steps(..., output_layout=..., output_dirs={...})`
-on `src.preprocessing`/`src.sleep_scoring`/`src.qc` takes the same overrides.
+its built-in name. The root applies to the group folders whichever way they
+were set, so `HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS=analysis/artifacts` lands in
+`eeg/analysis/artifacts`. Folders may be nested (`analysis/artifacts`) but must
+stay relative to the session directory -- absolute paths and `..` are rejected
+-- because readers (`scripts/qc/*`, the viewer) locate earlier outputs through
+the same names. From Python,
+`run_steps(..., output_layout=..., output_root=..., output_dirs={...})` on
+`src.preprocessing`/`src.sleep_scoring`/`src.qc` takes the same overrides.
 
 ## Unified pipeline entry points
 
@@ -232,7 +251,7 @@ The report prints duration and percentage in Wake, NREM, REM, and Undefined,
 prediction-probability quantiles, and the number of signal epochs below the
 review threshold. Nothing is saved by default. Use `--save` for the enhanced
 epoch output or `--summary` for the state summary. Both are written beneath the
-shared derivatives session's `sleep_scoring/` directory.
+shared derivatives session's `eeg/sleep_scoring/` directory.
 
 Run every session-level quality-control section and obtain one analysis-readiness
 decision with a unified list of epochs requiring review:
@@ -242,14 +261,14 @@ python scripts/qc/summary_qc.py \
   --subject 66 --session 1
 ```
 
-Both outputs are written to the session's `quality_control/` directory on every
+Both outputs are written to the session's `eeg/quality_control/` directory on every
 run, whether the command is invoked directly or through `python -m src.qc`, and
 both are named after the analyzed recording in the same
 `sub-XXX_ses-YYY_recording-ZZZ_<output>` form as every other per-recording
 derivative:
 
 ```
-quality_control/
+eeg/quality_control/
   sub-066_ses-001_recording-concat_qc_summary.csv
   sub-066_ses-001_recording-concat_qc_review_epochs.csv
   sub-066_ses-001_recording-concat_qc_review_epochs.parquet
@@ -279,11 +298,11 @@ seconds from recording onset so results from one-second Somnotate epochs and the
 default four-second signal epochs can be combined safely. Run the command with
 `--help` for the complete list. Reports are only saved when their output options
 are supplied.
-Outputs are separated beneath the shared derivatives session:
+Outputs are separated beneath the shared derivatives session's `eeg/` folder:
 
-- Somnotate predictions and scoring reports: `sleep_scoring/`
-- Artifact detection and reports: `artifacts/`
-- Combined QC, integrity, spectra, and correlation reports: `quality_control/`
+- Somnotate predictions and scoring reports: `eeg/sleep_scoring/`
+- Artifact detection and reports: `eeg/artifacts/`
+- Combined QC, integrity, spectra, and correlation reports: `eeg/quality_control/`
 
 A relative output name is placed below its corresponding directory; an absolute
 path is an explicit override.
@@ -315,7 +334,7 @@ python scripts/sleep_scoring/view_scored_recording.py \
 
 For faster rendering, downsample the selected interval to 128 Hz. Artifact
 regions from the matching `*_artifact_epochs.parquet` in the session's
-`artifacts/` directory can also be shaded and labelled:
+`eeg/artifacts/` directory can also be shaded and labelled:
 
 ```bash
 python scripts/sleep_scoring/view_scored_recording.py \
@@ -465,6 +484,6 @@ duration from `time_s`, and supports both `artifact_channels` and legacy
 channel-prefixed `artifact_features`. EMG-supported artifact epochs are reported
 as `EMG (combined)` when the stored reason identifies an EMG-supported EEG
 outlier. Nothing is saved by default; add `--save-dir` to write separate overall,
-hourly, and sleep-state CSV tables to the shared session `artifacts/` directory. Use
+hourly, and sleep-state CSV tables to the shared session `eeg/artifacts/` directory. Use
 `--epoch-seconds` only when the duration cannot be
 reliably inferred from the artifact file.

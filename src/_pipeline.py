@@ -10,8 +10,9 @@ common to nearly every wrapped script, and the `--output-layout`/
 session's derivatives directory.
 
 The output-folder overrides reach the wrapped scripts through the
-`HYPNOSE_EEG_OUTPUT_LAYOUT`/`HYPNOSE_EEG_OUTPUT_DIR_<GROUP>` environment
-variables (`scripts/io/output_layout.py`) rather than per-script flags, since
+`HYPNOSE_EEG_OUTPUT_LAYOUT`/`HYPNOSE_EEG_OUTPUT_ROOT`/
+`HYPNOSE_EEG_OUTPUT_DIR_<GROUP>` environment variables
+(`scripts/io/output_layout.py`) rather than per-script flags, since
 every script already resolves its folders through `output_dir_name()` and the
 data-location roots are overridable the same way.
 """
@@ -27,7 +28,9 @@ from typing import Mapping, Sequence
 
 from scripts.io.output_layout import (
     DEFAULT_OUTPUT_DIR_NAMES,
+    DEFAULT_OUTPUT_ROOT,
     OUTPUT_LAYOUT_ENV,
+    OUTPUT_ROOT_ENV,
     output_dir_env_var,
 )
 
@@ -68,18 +71,23 @@ def run_step(
 def output_layout_env(
     output_layout: str | Path | None = None,
     output_dirs: Mapping[str, str] | None = None,
+    output_root: str | None = None,
 ) -> dict[str, str]:
     """Environment variables carrying output-folder overrides to a wrapped script.
 
     `output_layout` is a path to an alternative `output_layout.yaml`;
-    `output_dirs` maps output-group keys (`artifacts`, `sleep_scoring`, ...) to
-    folders relative to the session directory. Either may be omitted, and an
-    empty mapping is returned when neither is given, so the wrapped script
-    falls back to the repository's own layout.
+    `output_root` is the modality folder every group sits below within the
+    session directory (`eeg` by default, `.` for none); `output_dirs` maps
+    output-group keys (`artifacts`, `sleep_scoring`, ...) to folders relative
+    to that root. Any may be omitted, and an empty mapping is returned when
+    none is given, so the wrapped script falls back to the repository's own
+    layout.
     """
     env: dict[str, str] = {}
     if output_layout:
         env[OUTPUT_LAYOUT_ENV] = str(output_layout)
+    if output_root is not None:
+        env[OUTPUT_ROOT_ENV] = str(output_root)
     for key, folder in (output_dirs or {}).items():
         if key not in DEFAULT_OUTPUT_DIR_NAMES:
             raise ValueError(
@@ -146,8 +154,13 @@ def add_output_layout_arguments(parser: argparse.ArgumentParser) -> None:
         "(default: configs/output_layout.yaml).",
     )
     parser.add_argument(
+        "--output-root", default=None, metavar="FOLDER",
+        help="Modality folder every output group sits below within the session "
+        f"directory (default: {DEFAULT_OUTPUT_ROOT}); pass . for none.",
+    )
+    parser.add_argument(
         "--output-dir", action="append", default=None, metavar="GROUP=FOLDER",
-        help="Relocate one output group within the session directory, for example "
+        help="Relocate one output group below the output root, for example "
         "artifacts=analysis/artifacts; repeatable. Groups: "
         f"{', '.join(sorted(DEFAULT_OUTPUT_DIR_NAMES))}.",
     )

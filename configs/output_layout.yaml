@@ -1,16 +1,24 @@
 # Folder names for named derivative outputs, shared across every preprocessing,
-# sleep-scoring, and QC script. Each one sits below a recording's
-# `derivatives/sub-XXX/ses-YYY_date-.../` session directory, which is itself
-# resolved from the active data-location profile (configs/data_locations.yml).
+# sleep-scoring, and QC script. Each one sits below `output_root` inside a
+# recording's `derivatives/sub-XXX/ses-YYY_date-.../` session directory, which
+# is itself resolved from the active data-location profile
+# (configs/data_locations.yml) -- so artifacts land in
+# `derivatives/sub-XXX/ses-YYY_date-.../eeg/artifacts/`.
 # Rename a value here to rename that output folder everywhere it is written to
 # or read from -- no script changes needed. A value may be a nested relative
 # path (`analysis/artifacts`) but never absolute or `..`.
 #
 # When running from outside this checkout, point HYPNOSE_EEG_OUTPUT_LAYOUT at a
 # copy of this file (or pass --output-layout to the src/ entry points), or set
+# HYPNOSE_EEG_OUTPUT_ROOT / --output-root and
 # HYPNOSE_EEG_OUTPUT_DIR_<GROUP> / --output-dir GROUP=FOLDER for one folder.
 name: output_layout
 
+# The modality folder holding every output group below, BIDS-style, so other
+# modalities can share a session directory. Set to `.` for no such folder.
+output_root: eeg
+
+# Each relative to `output_root` above.
 output_dirs:
   downsample: downsample
   sleep_scoring: sleep_scoring

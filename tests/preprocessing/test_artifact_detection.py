@@ -96,11 +96,11 @@ class ArtifactDetectionTests(unittest.TestCase):
             output_suffix="artifact_epochs",
         )
         self.assertEqual(
-            csv_path, Path("/results/artifacts/sample_artifact_epochs.csv")
+            csv_path, Path("/results/eeg/artifacts/sample_artifact_epochs.csv")
         )
         self.assertEqual(
             parquet_path,
-            Path("/results/artifacts/sample_artifact_epochs.parquet"),
+            Path("/results/eeg/artifacts/sample_artifact_epochs.parquet"),
         )
 
         csv_path, parquet_path = artifact_output_paths(
@@ -108,7 +108,7 @@ class ArtifactDetectionTests(unittest.TestCase):
             output_suffix="artifact_epochs",
         )
         expected = Path(
-            "/derivatives/sub-066/ses-1_date-20260717/artifacts/"
+            "/derivatives/sub-066/ses-1_date-20260717/eeg/artifacts/"
             "sample_artifact_epochs"
         )
         self.assertEqual(csv_path, expected.with_suffix(".csv"))
