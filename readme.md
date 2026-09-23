@@ -146,6 +146,58 @@ place. Pass
 `--overwrite` to recompute them regardless. The QC summary is the exception --
 it is cheap and always refreshed.
 
+### Batch: every session of one or more subjects
+
+`--all-sessions` (or `--batch`) takes subject IDs alone and works through every
+session each of them has, in order. `--subject all` covers every subject in the
+rawdata tree:
+
+```bash
+python -m src.run_pipeline --subject 66 --all-sessions --model my-model
+python -m src.run_pipeline --subject 66 67 68 --all-sessions --model my-model
+python -m src.run_pipeline --subject all --all-sessions --model my-model
+```
+
+A session that fails does not stop the batch. Its derivative outputs are
+erased, the failure is written to a per-run CSV report, and the next session
+starts; the run ends with a summary and exits non-zero if anything failed:
+
+```
+Batch summary: 13/15 sessions completed across 3 subjects
+  sub-066: 5/5 completed
+    [    OK] sub-066/ses-001_date-20260711
+    ...
+  sub-067: 4/5 completed
+    [FAILED] sub-067/ses-004_date-20260714 -- sleep_scoring:score (scripts.sleep_scoring.score_recordings) exited with status 1 (erased 1 path(s))
+  sub-068: No sessions found for sub-068
+```
+
+A subject whose sessions cannot be resolved at all is recorded the same way as
+a failed session (`missing`) rather than stopping the subjects after it; the
+per-subject tallies appear once more than one subject runs.
+
+Erasing matters because every step skips work whose output already exists: a
+parquet or FIF half-written before the crash would otherwise be reused by the
+next run as if it were complete. What is erased is only the output folders this
+pipeline writes below that session's *derivatives* directory (`eeg/` by
+default, following any `--output-root`/`--output-dir` override in force) —
+never the rawdata, and never another modality's folder in the same session.
+Add `--erase-derived-edf` to also remove the `_trimmed` and `_recording-concat`
+EDFs the pipeline wrote beside the raw recordings, or `--keep-failed` to record
+the failure and erase nothing.
+
+The report has one row per session: its subject, status, duration, the step
+that failed, the error, and the paths erased. A single-subject run leaves it at
+`<derivatives>/sub-XXX/batch_report_<timestamp>.csv`; a run spanning several
+subjects writes one combined report at `<derivatives>/batch_report_<timestamp>.csv`,
+since no one subject owns it. `--report FILE` puts it anywhere else. It is
+timestamped per run, so a rerun never overwrites the report that recorded why
+the first run failed.
+
+`--view` is refused in batch mode: the viewer waits for a window to be closed
+and a batch run has nobody to close it. Review a session afterwards with
+`--session N --stage qc --view`.
+
 Run any of the four with `--help` for its complete option list; these wrap the `scripts/*` CLIs below as subprocesses rather than
 reimplementing them, so step-specific flags such as `--config` are best
 passed to the underlying script directly when a per-step entry point doesn't

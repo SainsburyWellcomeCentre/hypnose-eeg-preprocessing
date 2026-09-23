@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from hypnose_helpers.io.layout import SessionLayout, normalize_subjid
+from hypnose_helpers.io.layout import SessionLayout, SessionRef, normalize_subjid
 
 
 # Suffix `trim_duplicate_channels.py` appends to a recording's stem when it
@@ -97,6 +97,33 @@ def source_stem_from_fif(path: Path) -> str:
     return re.sub(r"_resampled-[0-9p.]+hz$", "", stem, flags=re.IGNORECASE)
 
 
+def find_sessions(
+    rawdata_root: Path,
+    *,
+    subject: str | int,
+    date: str | int | None = None,
+    session: str | int | None = None,
+) -> list[SessionRef]:
+    """Resolve rawdata sessions using subject and optional date/session selectors.
+
+    With neither `date` nor `session` given, every session the subject has is
+    returned, in directory order -- which is what a batch run over one subject
+    iterates. Each ref carries the session number, date, and directory, so the
+    caller can re-select one session without re-parsing its directory name.
+    """
+    layout = SessionLayout(rawdata_root, name="rawdata")
+    sessions = layout.find_sessions(subject, ses=session, date=date)
+    if not sessions:
+        if date is not None:
+            selector = f"date {date}"
+        elif session is not None:
+            selector = f"session {session}"
+        else:
+            selector = "sessions"
+        raise FileNotFoundError(f"No {selector} found for {normalize_subjid(subject)}")
+    return sessions
+
+
 def find_session_dirs(
     rawdata_root: Path,
     *,
@@ -105,12 +132,12 @@ def find_session_dirs(
     session: str | int | None = None,
 ) -> list[Path]:
     """Resolve rawdata session directories using subject and date/session selectors."""
-    layout = SessionLayout(rawdata_root, name="rawdata")
-    sessions = layout.find_sessions(subject, ses=session, date=date)
-    if not sessions:
-        selector = f"date {date}" if date is not None else f"session {session}"
-        raise FileNotFoundError(f"No {selector} found for {normalize_subjid(subject)}")
-    return [session_ref.path for session_ref in sessions]
+    return [
+        session_ref.path
+        for session_ref in find_sessions(
+            rawdata_root, subject=subject, date=date, session=session
+        )
+    ]
 
 
 def select_recordings(
