@@ -208,6 +208,32 @@ the first run failed.
 and a batch run has nobody to close it. Review a session afterwards with
 `--session N --stage qc --view`.
 
+### Which sessions need QC review
+
+`src/qc_review.py` reads the `qc_summary.csv` files already on disk and lists
+every session of the given subjects whose QC came out REVIEW (or FAIL), with the
+sections behind it -- metric, value, threshold, detail, and how many review
+ranges each section added to `qc_review_epochs.csv`. Sessions with no summary
+are named per subject. Nothing is recomputed.
+
+```
+python -m src.qc_review --subject 65 66
+python -m src.qc_review --subject all --report qc_review.csv
+```
+
+```
+QC review: 19/55 checked sessions need review across 2 subjects
+  ...
+  sub-066: 3/39 checked sessions need review
+    [REVIEW] sub-066/ses-027_date-20260825
+        sleep_state_proportions: signal_percent_by_state=Wake=48.04%; NREM=10.32%; REM=41.64% (threshold Wake<=75%; NREM<=75%; REM<=20%) -- REM review
+        channel_correlation: review_epoch_percent=41.73 (threshold 2) -- 8547/20480 epochs; ... [8547 review entries, 9h 29m 48s]
+```
+
+`--report FILE` also writes one CSV row per flagged section. Pass the same
+`--output-root`/`--output-dir`/`--output-layout` overrides the QC summary ran
+with, so its summaries are found.
+
 Run any of the four with `--help` for its complete option list; these wrap the `scripts/*` CLIs below as subprocesses rather than
 reimplementing them, so step-specific flags such as `--config` are best
 passed to the underlying script directly when a per-step entry point doesn't
