@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -12,8 +14,10 @@ from src import run_pipeline
 from src._batch import (
     SessionOutcome,
     erase_session_outputs,
+    format_duration,
     format_summary,
     missing_subject_outcome,
+    read_qc_verdict,
     report_path,
     resolve_subjects,
     session_selector,
@@ -48,6 +52,13 @@ def make_session_tree(root: Path, ses: int, date: str, *, files: dict[str, str])
         path.write_text(content)
     session_dir.mkdir(parents=True, exist_ok=True)
     return session_dir
+
+
+def qc_summary_csv(*rows: tuple[str, str]) -> str:
+    """A `qc_summary.csv` body holding the given (section, status) rows."""
+    lines = ["section,status,metric,value,threshold,detail"]
+    lines += [f"{section},{status},m,1,1,d" for section, status in rows]
+    return "\n".join(lines) + "\n"
 
 
 class SessionSelectorTests(unittest.TestCase):
@@ -256,6 +267,67 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(row["erased"], "/derivatives/a;/derivatives/b")
 
 
+class QCVerdictTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def write_summary(self, name: str, *rows: tuple[str, str]) -> Path:
+        session_dir = make_session_tree(
+            self.root, 1, "20260717",
+            files={f"eeg/quality_control/{name}": qc_summary_csv(*rows)},
+        )
+        return session_dir / "eeg/quality_control" / name
+
+    def test_the_worst_status_and_the_failed_sections_are_read(self):
+        self.write_summary(
+            "sub-066_ses-001_recording-concat_qc_summary.csv",
+            ("integrity", "pass"), ("artifacts", "fail"),
+            ("spectra", "review"), ("scoring", "fail"),
+        )
+
+        verdict = read_qc_verdict(self.root, subject=66, session=1)
+
+        self.assertEqual(verdict, ("fail", ["artifacts", "scoring"]))
+
+    def test_a_passing_summary_has_no_failed_sections(self):
+        self.write_summary("x_qc_summary.csv", ("integrity", "pass"), ("spectra", "review"))
+
+        self.assertEqual(read_qc_verdict(self.root, subject=66, session=1), ("review", []))
+
+    def test_a_summary_from_an_earlier_run_is_ignored(self):
+        path = self.write_summary("x_qc_summary.csv", ("integrity", "fail"))
+        old = time.time() - 3600
+        os.utime(path, (old, old))
+
+        self.assertIsNone(
+            read_qc_verdict(self.root, subject=66, session=1, since=time.time())
+        )
+
+    def test_relocated_quality_control_folder_is_followed(self):
+        make_session_tree(
+            self.root, 1, "20260717",
+            files={"analysis/qc/x_qc_summary.csv": qc_summary_csv(("a", "fail"))},
+        )
+
+        verdict = read_qc_verdict(
+            self.root, subject=66, session=1,
+            env={
+                "HYPNOSE_EEG_OUTPUT_ROOT": "analysis",
+                "HYPNOSE_EEG_OUTPUT_DIR_QUALITY_CONTROL": "qc",
+            },
+        )
+
+        self.assertEqual(verdict, ("fail", ["a"]))
+
+    def test_a_session_without_a_summary_has_no_verdict(self):
+        make_session_tree(self.root, 1, "20260717", files={})
+
+        self.assertIsNone(read_qc_verdict(self.root, subject=66, session=1))
+        self.assertIsNone(read_qc_verdict(self.root, subject=66, session=9))
+
+
 class ResolveSubjectsTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -333,6 +405,43 @@ class SummaryTests(unittest.TestCase):
         )
 
         self.assertIn("Batch summary: 1/2 sessions completed", summary)
+
+    def test_qc_failures_are_counted_and_listed(self):
+        summary = format_summary(
+            [
+                SessionOutcome("sub-066", 1, "20260717", Path("/r"), qc_status="pass"),
+                SessionOutcome(
+                    "sub-066", 2, "20260718", Path("/r"), status="failed",
+                    failed_step="qc:summary", returncode=1,
+                    error="qc:summary (scripts.qc.summary_qc) exited with status 1",
+                    qc_status="fail", qc_failed_sections=["artifacts", "spectra"],
+                    erased=[Path("/d/eeg")],
+                ),
+            ]
+        )
+
+        self.assertIn("Batch summary: 1/2 sessions completed, 1 failed QC", summary)
+        self.assertIn(
+            "[FAILED] sub-066/ses-002_date-20260718 -- QC FAIL (artifacts, spectra) "
+            "(erased 1 path(s))",
+            summary,
+        )
+        self.assertIn(
+            "Failed QC:\n  sub-066/ses-002_date-20260718 (artifacts, spectra)", summary
+        )
+
+    def test_the_total_time_is_reported(self):
+        summary = format_summary(
+            [SessionOutcome("sub-066", 1, "20260717", Path("/r"))], elapsed_seconds=3723.4
+        )
+
+        self.assertNotIn("Failed QC", summary)
+        self.assertTrue(summary.endswith("Total time: 1h 02m 03s"))
+
+    def test_durations_use_the_shortest_form(self):
+        self.assertEqual(format_duration(12.4), "12s")
+        self.assertEqual(format_duration(245), "4m 05s")
+        self.assertEqual(format_duration(7200), "2h 00m 00s")
 
 
 @patch("src.run_pipeline.qc")
@@ -484,6 +593,78 @@ class BatchRunTests(unittest.TestCase):
         rows = self.report_rows()
         self.assertEqual([row["status"] for row in rows], ["failed", "ok", "ok"])
         self.assertIn("erase failed", rows[0]["error"])
+
+    def test_a_qc_fail_fails_the_session_and_names_the_sections(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        def qc_summary(**kwargs):
+            # summary_qc writes its section table, then exits 1 for a FAIL verdict.
+            ses = int(kwargs["session"])
+            rows = [("integrity", "pass"), ("artifacts", "fail" if ses == 2 else "pass")]
+            make_session_tree(
+                self.derivatives, ses, SESSION_DATES[ses],
+                files={"eeg/quality_control/x_qc_summary.csv": qc_summary_csv(*rows)},
+            )
+            if ses == 2:
+                raise StepFailed("qc:summary", "scripts.qc.summary_qc", 1)
+
+        mock_qc.run_steps.side_effect = qc_summary
+
+        result = self.run_batch()
+
+        self.assertEqual(result, 1)
+        self.erase.assert_called_once()
+        self.assertEqual(self.erase.call_args.kwargs["session"], 2)
+        rows = self.report_rows()
+        self.assertEqual([row["status"] for row in rows], ["ok", "failed", "ok"])
+        self.assertEqual([row["qc_status"] for row in rows], ["pass", "fail", "pass"])
+        self.assertEqual(rows[1]["qc_failed_sections"], "artifacts")
+        self.assertEqual(rows[1]["failed_step"], "qc:summary")
+
+    def test_a_finished_session_reports_review(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        def qc_summary(**kwargs):
+            ses = int(kwargs["session"])
+            make_session_tree(
+                self.derivatives, ses, SESSION_DATES[ses],
+                files={"eeg/quality_control/x_qc_summary.csv": qc_summary_csv(
+                    ("integrity", "pass"), ("spectra", "review" if ses == 3 else "pass"),
+                )},
+            )
+
+        mock_qc.run_steps.side_effect = qc_summary
+
+        result = self.run_batch()
+
+        self.assertEqual(result, 0)
+        rows = self.report_rows()
+        self.assertEqual([row["qc_status"] for row in rows], ["pass", "pass", "review"])
+        self.assertEqual([row["qc_failed_sections"] for row in rows], ["", "", ""])
+
+    def test_a_qc_crash_without_a_fresh_summary_is_still_a_failure(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        mock_qc.run_steps.side_effect = [
+            StepFailed("qc:summary", "scripts.qc.summary_qc", 1), None, None
+        ]
+
+        result = self.run_batch()
+
+        self.assertEqual(result, 1)
+        self.erase.assert_called_once()
+        rows = self.report_rows()
+        self.assertEqual([row["status"] for row in rows], ["failed", "ok", "ok"])
+        self.assertEqual(rows[0]["qc_status"], "")
+
+    def test_the_batch_duration_is_on_every_row(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        self.run_batch()
+
+        durations = {row["batch_duration_seconds"] for row in self.report_rows()}
+        self.assertEqual(len(durations), 1)
+        self.assertGreaterEqual(float(durations.pop()), 0)
 
     def test_an_interrupt_stops_the_batch_without_erasing(
         self, mock_preprocessing, mock_scoring, mock_qc

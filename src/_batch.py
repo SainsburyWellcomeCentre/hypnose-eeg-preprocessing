@@ -9,6 +9,11 @@ truncated parquet or a downsampled FIF written before the crash would be
 silently reused. So a failed session is erased (its derivative outputs removed)
 and recorded in a CSV report, and the run carries on with the next session.
 
+A QC summary that comes out FAIL fails its session the same way; the report
+additionally records which QC sections failed, so it can be told apart from a
+crash. A session that finishes is reported with its QC status (pass or review),
+and the report carries the batch's total run time.
+
 What "erased" covers is deliberately narrow: only the output folders this
 pipeline itself writes below the failed session's *derivatives* directory,
 resolved through the same `output_layout.py` precedence (including any
@@ -20,6 +25,7 @@ only files this pipeline produced -- `<stem>_trimmed.edf` and
 
 from __future__ import annotations
 
+import csv
 import os
 import shutil
 from contextlib import contextmanager
@@ -31,8 +37,9 @@ from typing import Iterator, Mapping, Sequence
 from hypnose_helpers.io.layout import SessionLayout, SessionRef, normalize_subjid
 from hypnose_helpers.io.selectors import parse_subjects
 
-from scripts.io.output_layout import output_dir_names, output_root_dir
+from scripts.io.output_layout import output_dir_name, output_dir_names, output_root_dir
 from scripts.io.output_paths import save_csv_rows
+from scripts.qc.thresholds import load_performance_check
 from scripts.utils.recording_selection import (
     is_concatenated_recording,
     is_trimmed_recording,
@@ -42,6 +49,11 @@ from scripts.utils.recording_selection import (
 # typed out by hand. Spelled as a subject value so one flag covers both.
 ALL_SUBJECTS = "all"
 
+# The file suffix `scripts/qc/summary_qc.py` writes its section results under,
+# prefixed with the recording stem.
+QC_SUMMARY_SUFFIX = "qc_summary.csv"
+QC_FAIL = "fail"
+
 REPORT_FIELDS = [
     "started_at",
     "subject",
@@ -49,11 +61,14 @@ REPORT_FIELDS = [
     "date",
     "session_dir",
     "status",
+    "qc_status",
+    "qc_failed_sections",
     "duration_seconds",
     "failed_step",
     "returncode",
     "error",
     "erased",
+    "batch_duration_seconds",
 ]
 
 
@@ -72,6 +87,8 @@ class SessionOutcome:
     returncode: int | None = None
     error: str = ""
     erased: list[Path] = field(default_factory=list)
+    qc_status: str = ""
+    qc_failed_sections: list[str] = field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -79,6 +96,10 @@ class SessionOutcome:
             return self.subject
         session = f"ses-{self.session:03d}" if self.session is not None else "ses-?"
         return f"{self.subject}/{session}_date-{self.date}"
+
+    @property
+    def qc_failed(self) -> bool:
+        return self.qc_status == QC_FAIL
 
     def as_row(self) -> dict[str, object]:
         return {
@@ -88,6 +109,8 @@ class SessionOutcome:
             "date": self.date,
             "session_dir": str(self.session_dir),
             "status": self.status,
+            "qc_status": self.qc_status,
+            "qc_failed_sections": ";".join(self.qc_failed_sections),
             "duration_seconds": round(self.duration_seconds, 1),
             "failed_step": self.failed_step,
             "returncode": "" if self.returncode is None else self.returncode,
@@ -225,17 +248,85 @@ def report_path(
     return (subject_dir or root / normalize_subjid(subjects[0])) / filename
 
 
-def write_report(outcomes: Sequence[SessionOutcome], path: str | Path) -> Path:
-    """Write one row per session to CSV, through the shared CSV writer."""
-    return save_csv_rows([outcome.as_row() for outcome in outcomes], REPORT_FIELDS, path)
+def read_qc_verdict(
+    derivatives_root: str | Path,
+    *,
+    subject: str | int,
+    session: int | None = None,
+    date: str | None = None,
+    env: Mapping[str, str] | None = None,
+    since: float | None = None,
+) -> tuple[str, list[str]] | None:
+    """A session's overall QC status and failed sections, from its `qc_summary.csv`.
+
+    Only summaries modified at or after `since` (a `time.time()` value) count,
+    so a summary left by an earlier run is not reported as this run's verdict.
+    A session holding several recordings reports the worst of them. Returns
+    None when no such summary exists -- the QC summary was not among the
+    stages run, or it never got as far as writing one.
+    """
+    session_dir = _derivatives_session_dir(
+        derivatives_root, subject=subject, session=session, date=date
+    )
+    if session_dir is None:
+        return None
+    with _applied_env(env or {}):
+        qc_dir = session_dir / output_dir_name("quality_control")
+    # Coarse filesystem timestamps can round a fresh write to just before `since`.
+    cutoff = None if since is None else since - 2
+    summaries = [
+        path for path in sorted(qc_dir.glob(f"*{QC_SUMMARY_SUFFIX}"))
+        if cutoff is None or path.stat().st_mtime >= cutoff
+    ]
+    if not summaries:
+        return None
+
+    severity = load_performance_check()
+    statuses: list[str] = []
+    failed: list[str] = []
+    for path in summaries:
+        with path.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                status = str(row.get("status", "")).strip().lower()
+                statuses.append(status)
+                if severity.get(status, severity[QC_FAIL]) >= severity[QC_FAIL]:
+                    failed.append(str(row.get("section", "")).strip())
+    if not statuses:
+        # summary_qc treats a summary with no sections as a failure too.
+        return QC_FAIL, []
+    worst = max(statuses, key=lambda status: severity.get(status, severity[QC_FAIL]))
+    if worst not in severity:
+        worst = QC_FAIL
+    return worst, list(dict.fromkeys(failed))
 
 
-def format_summary(outcomes: Sequence[SessionOutcome]) -> str:
+def write_report(
+    outcomes: Sequence[SessionOutcome],
+    path: str | Path,
+    *,
+    batch_duration_seconds: float | None = None,
+) -> Path:
+    """Write one row per session to CSV, through the shared CSV writer.
+
+    The batch's total run time is repeated on every row rather than given a row
+    of its own, so the report stays one row per session for anyone filtering it.
+    """
+    rows = [outcome.as_row() for outcome in outcomes]
+    total = "" if batch_duration_seconds is None else round(batch_duration_seconds, 1)
+    for row in rows:
+        row["batch_duration_seconds"] = total
+    return save_csv_rows(rows, REPORT_FIELDS, path)
+
+
+def format_summary(
+    outcomes: Sequence[SessionOutcome], *, elapsed_seconds: float | None = None
+) -> str:
     """A short per-session summary for the end of a batch run.
 
     Grouped under a per-subject tally once more than one subject ran, so a
     whole-dataset run says which subject the failures belong to without the
-    reader counting lines.
+    reader counting lines. Sessions that failed QC are listed again at the end
+    with the sections that failed.
     """
     subjects = list(dict.fromkeys(outcome.subject for outcome in outcomes))
     sessions = [outcome for outcome in outcomes if outcome.status != "missing"]
@@ -243,6 +334,9 @@ def format_summary(outcomes: Sequence[SessionOutcome]) -> str:
     header = f"Batch summary: {len(completed)}/{len(sessions)} sessions completed"
     if len(subjects) > 1:
         header += f" across {len(subjects)} subjects"
+    qc_failed = [outcome for outcome in sessions if outcome.qc_failed]
+    if qc_failed:
+        header += f", {len(qc_failed)} failed QC"
 
     lines = [header]
     indent = "    " if len(subjects) > 1 else "  "
@@ -257,11 +351,34 @@ def format_summary(outcomes: Sequence[SessionOutcome]) -> str:
             lines.append(f"  {subject}: {done}/{len(subject_sessions)} completed")
         for outcome in rows:
             lines.append(f"{indent}[{outcome.status.upper():>6}] {outcome.label}{_detail(outcome)}")
+    if qc_failed:
+        lines.append("Failed QC:")
+        for outcome in qc_failed:
+            lines.append(f"  {outcome.label}{_qc_detail(outcome)}")
+    if elapsed_seconds is not None:
+        lines.append(f"Total time: {format_duration(elapsed_seconds)}")
     return "\n".join(lines)
+
+
+def format_duration(seconds: float) -> str:
+    """`1h 02m 03s`, `4m 05s`, or `12s` -- whichever is the shortest that fits."""
+    total = int(round(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
 
 
 def _detail(outcome: SessionOutcome) -> str:
     """The trailing explanation on a summary line, for anything that did not pass."""
+    if outcome.qc_failed:
+        detail = f" -- QC FAIL{_qc_detail(outcome)}"
+        if outcome.erased:
+            detail += f" (erased {len(outcome.erased)} path(s))"
+        return detail
     if outcome.status == "ok" or not outcome.error:
         return ""
     # A StepFailed message already names the step, so only an error from
@@ -272,6 +389,13 @@ def _detail(outcome: SessionOutcome) -> str:
     if outcome.erased:
         detail += f" (erased {len(outcome.erased)} path(s))"
     return detail
+
+
+def _qc_detail(outcome: SessionOutcome) -> str:
+    """The failed QC sections, if the summary named any."""
+    if not outcome.qc_failed_sections:
+        return ""
+    return f" ({', '.join(outcome.qc_failed_sections)})"
 
 
 def _derivatives_session_dir(

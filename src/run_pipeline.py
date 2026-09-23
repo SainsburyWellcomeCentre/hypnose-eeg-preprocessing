@@ -28,7 +28,10 @@ completed work by a later rerun -- the failure is recorded in a CSV report, and
 the next session starts. A subject with no resolvable sessions is recorded the
 same way rather than stopping the subjects after it. `--keep-failed` notes a
 failure without erasing anything. See `src/_batch.py` for exactly what erasing
-covers.
+covers. A QC FAIL counts as a failed session like any other, and the report
+names the QC sections that failed; a session that finishes is reported with its
+QC status (pass or review). The report also records how long the whole batch
+took.
 
 `--view` opens the interactive scoring viewer
 (`scripts/sleep_scoring/view_scored_recording.py`) once the selected stages
@@ -52,6 +55,7 @@ know about) is best passed by invoking that stage's script directly.
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 import time
 from datetime import datetime
@@ -66,6 +70,7 @@ from src._batch import (
     erase_session_outputs,
     format_summary,
     missing_subject_outcome,
+    read_qc_verdict,
     report_path,
     resolve_subjects,
     session_selector,
@@ -249,6 +254,7 @@ def run_batch(args: argparse.Namespace, extra: list[str], options: dict) -> int:
 
     env = output_layout_env(args.output_layout, options["output_dirs"], args.output_root)
     started = datetime.now()
+    batch_clock = time.monotonic()
     outcomes: list[SessionOutcome] = []
     print(f"Batch: {total} session(s) across {len(subjects)} subject(s)")
 
@@ -273,14 +279,15 @@ def run_batch(args: argparse.Namespace, extra: list[str], options: dict) -> int:
         if interrupted:
             break
 
+    elapsed = time.monotonic() - batch_clock
     print()
-    print(format_summary(outcomes))
+    print(format_summary(outcomes, elapsed_seconds=elapsed))
     destination = (
         Path(args.report) if args.report
         else report_path(derivatives_root, subjects, started)
     )
     try:
-        write_report(outcomes, destination)
+        write_report(outcomes, destination, batch_duration_seconds=elapsed)
     except OSError as exc:
         # The report is a record of the run, not the run itself -- losing it is
         # worth a loud warning, not throwing away the sessions that succeeded.
@@ -327,6 +334,11 @@ def _run_one_session(
         started_at=datetime.now().isoformat(timespec="seconds"),
     )
     clock = time.monotonic()
+    wall_start = time.time()
+    qc_lookup = dict(
+        subject=subject, session=session_ref.ses, date=session_ref.date,
+        env=env, since=wall_start,
+    )
     try:
         run_stages(
             dict(
@@ -343,6 +355,14 @@ def _run_one_session(
         print("\nInterrupted; stopping the batch.", file=sys.stderr)
         outcome.status = "interrupted"
     except Exception as exc:  # noqa: BLE001 - one session must not stop the batch
+        # Read before erasing: the summary is one of the outputs erased, and
+        # it is what tells a QC FAIL apart from a crash in the same step.
+        verdict = (
+            _read_qc_verdict(derivatives_root, outcome, qc_lookup)
+            if _is_qc_verdict(exc) else None
+        )
+        if verdict is not None and verdict[0] == "fail":
+            outcome.qc_status, outcome.qc_failed_sections = verdict
         outcome.status = "failed"
         outcome.error = str(exc)
         if isinstance(exc, StepFailed):
@@ -354,8 +374,28 @@ def _run_one_session(
         _erase_failed_session(
             args, outcome, derivatives_root, rawdata_root, env, subject=subject
         )
+    else:
+        verdict = _read_qc_verdict(derivatives_root, outcome, qc_lookup)
+        if verdict is not None:
+            outcome.qc_status, outcome.qc_failed_sections = verdict
     outcome.duration_seconds = time.monotonic() - clock
     return outcome
+
+
+def _is_qc_verdict(exc: Exception) -> bool:
+    """Whether a failure could be `summary_qc` reporting FAIL (it exits 1 for that)."""
+    return isinstance(exc, StepFailed) and exc.label == "qc:summary" and exc.returncode == 1
+
+
+def _read_qc_verdict(
+    derivatives_root: Path, outcome: SessionOutcome, lookup: dict
+) -> tuple[str, list[str]] | None:
+    """This run's QC verdict for a session, or None if it has none to read."""
+    try:
+        return read_qc_verdict(derivatives_root, **lookup)
+    except (OSError, ValueError, csv.Error) as exc:
+        print(f"WARNING: could not read the QC summary of {outcome.label}: {exc}", file=sys.stderr)
+        return None
 
 
 def _erase_failed_session(

@@ -188,3 +188,5 @@ folders within a session" in `readme.md`.
 ## 21. Automate running of the preprocessing for hypnose dataset with reports of errors
 
 ## 22. Improve external running of API
+
+## 23. Reduce amount of text at top of scripts

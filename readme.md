@@ -163,14 +163,22 @@ erased, the failure is written to a per-run CSV report, and the next session
 starts; the run ends with a summary and exits non-zero if anything failed:
 
 ```
-Batch summary: 13/15 sessions completed across 3 subjects
+Batch summary: 12/15 sessions completed across 3 subjects, 1 failed QC
   sub-066: 5/5 completed
     [    OK] sub-066/ses-001_date-20260711
     ...
-  sub-067: 4/5 completed
+  sub-067: 3/5 completed
     [FAILED] sub-067/ses-004_date-20260714 -- sleep_scoring:score (scripts.sleep_scoring.score_recordings) exited with status 1 (erased 1 path(s))
+    [FAILED] sub-067/ses-005_date-20260715 -- QC FAIL (artifacts) (erased 1 path(s))
   sub-068: No sessions found for sub-068
+Failed QC:
+  sub-067/ses-005_date-20260715 (artifacts)
+Total time: 5h 12m 40s
 ```
+
+A QC summary that comes out FAIL fails its session like any other step (and
+the batch exits non-zero), but it is marked `QC FAIL` and listed under
+`Failed QC` with the sections that failed, so it is not mistaken for a crash.
 
 A subject whose sessions cannot be resolved at all is recorded the same way as
 a failed session (`missing`) rather than stopping the subjects after it; the
@@ -186,8 +194,10 @@ Add `--erase-derived-edf` to also remove the `_trimmed` and `_recording-concat`
 EDFs the pipeline wrote beside the raw recordings, or `--keep-failed` to record
 the failure and erase nothing.
 
-The report has one row per session: its subject, status, duration, the step
-that failed, the error, and the paths erased. A single-subject run leaves it at
+The report has one row per session: its subject, status, QC status (`pass` or
+`review` for a session that finished, `fail` for one that failed QC, blank when
+the QC summary did not run) and failed QC sections, duration, the step that failed, the error, the paths erased, and the
+whole batch's run time (`batch_duration_seconds`, the same on every row). A single-subject run leaves it at
 `<derivatives>/sub-XXX/batch_report_<timestamp>.csv`; a run spanning several
 subjects writes one combined report at `<derivatives>/batch_report_<timestamp>.csv`,
 since no one subject owns it. `--report FILE` puts it anywhere else. It is
