@@ -163,9 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
         help=(
-            "Shade 'gap'/'too_short' spans from the predictions parquet's own "
-            "kind column (concatenation gaps, dropouts, segments too short to "
-            "score). Default: true."
+            "Shade 'gap'/'artifact'/'too_short' spans from the predictions "
+            "parquet's own kind column (concatenation gaps, dropouts, prescan "
+            "artifact periods left unscored, segments too short to score). "
+            "Default: true."
         ),
     )
     ranges = parser.add_mutually_exclusive_group()
@@ -685,6 +686,7 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
         kind_table = pd.read_parquet(pred_path, columns=["time_s", "kind"])
         for kind_value, color, label in (
             ("gap", "dimgray", "Gap"),
+            ("artifact", "firebrick", "Excluded artifact"),
             ("too_short", "darkorange", "Too short"),
         ):
             flagged = kind_table.assign(artifact=kind_table["kind"] == kind_value)

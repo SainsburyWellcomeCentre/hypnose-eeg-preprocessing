@@ -1,4 +1,4 @@
-"""Run the Hypnose preprocessing pipeline: trim, concatenate, downsample, detect_artifacts.
+"""Run the Hypnose preprocessing pipeline: trim, concatenate, downsample, prescan_artifacts, detect_artifacts.
 
 Each step wraps its matching `scripts/preprocessing/*.py` CLI (run as a
 subprocess) rather than duplicating that logic here. Run this module directly
@@ -11,6 +11,11 @@ of any source EDF whose header repeats a channel label and leaves clean
 recordings untouched, so it is a no-op for most sessions. Its manual
 `--keep-first N` mode is not part of the pipeline; run the script directly for
 that.
+
+`prescan_artifacts` scans the downsampled FIF for long periods of dead or
+extreme signal *before* sleep scoring, which then leaves them unscored.
+`detect_artifacts` needs the sleep-scoring output, so a full run
+(`src/run_pipeline.py`) runs it after scoring.
 
 Unrecognized arguments are forwarded verbatim to every selected step (for
 example `--target-sfreq 256` for `downsample`); step-specific flags that only
@@ -34,14 +39,18 @@ from src._pipeline import (
     run_step,
 )
 
-STEP_ORDER = ["trim", "concatenate", "downsample", "detect_artifacts"]
+STEP_ORDER = ["trim", "concatenate", "downsample", "prescan_artifacts", "detect_artifacts"]
 STEP_MODULES = {
     "trim": "scripts.preprocessing.trim_duplicate_channels",
     "concatenate": "scripts.preprocessing.concatenate_recordings",
     "downsample": "scripts.preprocessing.downsample_recordings",
+    "prescan_artifacts": "scripts.preprocessing.prescan_artifacts",
     "detect_artifacts": "scripts.preprocessing.detect_artifacts",
 }
 DEFAULT_STEPS = list(STEP_ORDER)
+# Steps that write artifact outputs rather than recordings: they take the
+# derivatives root and have no --dry-run.
+ARTIFACT_STEPS = ("prescan_artifacts", "detect_artifacts")
 
 
 def _step_args(
@@ -71,9 +80,9 @@ def _step_args(
     else:
         if rawdata_root:
             args += ["--rawdata-root", rawdata_root]
-        if derivatives_root and step == "detect_artifacts":
+        if derivatives_root and step in ARTIFACT_STEPS:
             args += ["--derivatives-root", derivatives_root]
-    if dry_run and step != "detect_artifacts":
+    if dry_run and step not in ARTIFACT_STEPS:
         args.append("--dry-run")
 
     if overwrite:

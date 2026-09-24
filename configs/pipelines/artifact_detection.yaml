@@ -46,3 +46,48 @@ artifact_detection:
   output:
     suffix: "artifact_epochs"
     overwrite: false
+
+# Pre-scoring scan for long periods of unusable signal (scripts/preprocessing/
+# prescan_artifacts.py). Runs before sleep scoring, without sleep states; the
+# periods it finds are left unscored by somnotate (score_recordings.py, see
+# sleep_scoring.use_artifact_prescan). Epoch length, chunking and Welch
+# settings are shared with artifact_detection above.
+artifact_prescan:
+  dead_signal:
+    # An EEG channel-epoch whose RMS over the analysed band
+    # (welch.minimum_frequency_hz..maximum_frequency_hz) is below this carries
+    # no EEG -- e.g. a disconnected headstage drifting slowly. Absolute, so it
+    # still works when most of a recording is dead. Calibrated on 15 sessions
+    # (Sept 2026): dead signal sits at ~3.5 uV, while the 1st percentile of
+    # clean recordings is 27-33 uV.
+    minimum_broadband_rms_uv: 10.0
+
+  hard_failure:
+    maximum_edge_fraction: 0.02
+
+  extreme:
+    # Robust z-scores per channel against the recording's live (not dead, not
+    # hard-failure) epochs, without sleep states -- so this must stay far above
+    # the post-scoring threshold, or ordinary active wake gets excluded. On the
+    # calibration sessions 10 excluded nothing from normal recordings, while 8
+    # and 6 began excluding stretches that sleep scoring had called Wake.
+    robust_z: 10.0
+    features_required: 2
+    features:
+      - "peak_to_peak_uv"
+      - "rms_uv"
+      - "max_derivative_uv_per_sample"
+      - "high_frequency_power_uv2"
+
+  periods:
+    # Flagged runs separated by at most this much clean signal are one run.
+    merge_within_s: 30.0
+    # Runs shorter than this are left to the post-scoring detector.
+    minimum_run_s: 60.0
+    # Periods separated by less than this much clean signal are bridged into
+    # one continuous period.
+    bridge_gap_s: 300.0
+
+  output:
+    suffix: "prescan_artifacts"
+    overwrite: false

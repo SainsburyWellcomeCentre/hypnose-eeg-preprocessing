@@ -30,6 +30,7 @@ class QCThresholds:
     max_nrem_percent: float
     max_rem_percent: float
     max_artifact_percent: float
+    max_prescan_excluded_percent: float
     eeg_eeg_threshold: float
     eeg_emg_threshold: float
     max_correlation_review_percent: float
@@ -57,14 +58,16 @@ def load_qc_thresholds(path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH) -
     scoring = nested_get(config, ("quality_control", "somnotate_scoring"))
     proportions = nested_get(config, ("quality_control", "sleep_state_proportions"))
     artifacts = nested_get(config, ("quality_control", "artifacts"))
+    prescan = nested_get(config, ("quality_control", "artifact_prescan"))
     correlation = nested_get(config, ("quality_control", "channel_correlation"))
     if not all(
         isinstance(section, Mapping)
-        for section in (integrity, scoring, proportions, artifacts, correlation)
+        for section in (integrity, scoring, proportions, artifacts, prescan, correlation)
     ):
         raise ValueError(
             "Quality-control config requires recording_integrity, somnotate_scoring, "
-            "sleep_state_proportions, artifacts, and channel_correlation mappings"
+            "sleep_state_proportions, artifacts, artifact_prescan, and "
+            "channel_correlation mappings"
         )
     return QCThresholds(
         duration_tolerance_s=float(integrity["duration_tolerance_s"]),
@@ -79,6 +82,7 @@ def load_qc_thresholds(path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH) -
         max_nrem_percent=float(proportions["max_nrem_percent"]),
         max_rem_percent=float(proportions["max_rem_percent"]),
         max_artifact_percent=float(artifacts["max_artifact_percent"]),
+        max_prescan_excluded_percent=float(prescan["max_excluded_percent"]),
         eeg_eeg_threshold=float(correlation["eeg_eeg_threshold"]),
         eeg_emg_threshold=float(correlation["eeg_emg_threshold"]),
         max_correlation_review_percent=float(

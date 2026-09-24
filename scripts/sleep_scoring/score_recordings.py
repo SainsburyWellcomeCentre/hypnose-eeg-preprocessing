@@ -12,6 +12,12 @@ folder holds several parts (only the concatenated recording, once
 ``hypnose_somnotate.scoring.score_recording`` only ever receives one already-
 resolved EDF path and model path at a time; it has no layout knowledge of its
 own.
+
+When ``use_artifact_prescan`` is on (the default), the long artifact periods
+``scripts/preprocessing/prescan_artifacts.py`` wrote for a recording are passed
+to somnotate to be left unscored, so they neither get labelled nor shift the
+normalization of the rest of the recording. A recording without prescan output
+is scored in full, with a warning.
 """
 
 from __future__ import annotations
@@ -57,6 +63,7 @@ class SleepScoringSettings:
     sampling_rate_hz: int
     global_normalization: bool
     overwrite: bool = False
+    use_artifact_prescan: bool = True
 
 
 def _as_list(value: Any, *, option_name: str) -> list[str] | None:
@@ -194,6 +201,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--artifact-prescan",
+        dest="use_artifact_prescan",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Leave the long artifact periods found by "
+            "scripts/preprocessing/prescan_artifacts.py unscored. Default: true "
+            "(see configs/pipelines/sleep_scoring.yaml)."
+        ),
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         default=None,
@@ -255,6 +273,11 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     overwrite_value = coalesce(args.overwrite, scoring.get("overwrite"), False)
     overwrite = _as_bool(overwrite_value, option_name="overwrite")
 
+    prescan_value = coalesce(
+        args.use_artifact_prescan, scoring.get("use_artifact_prescan"), True
+    )
+    use_artifact_prescan = _as_bool(prescan_value, option_name="use_artifact_prescan")
+
     return SleepScoringSettings(
         subjids=subjids,
         model_path=model_path,
@@ -269,6 +292,7 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
         sampling_rate_hz=sampling_rate_hz,
         global_normalization=global_normalization,
         overwrite=overwrite,
+        use_artifact_prescan=use_artifact_prescan,
     )
 
 
@@ -380,6 +404,35 @@ def _warn_missing_selection(
         warnings.warn(f"No session directory found for {sub_label}.", UserWarning, stacklevel=3)
 
 
+def _prescan_periods(
+    session_output_dir: Path, edf_path: Path
+) -> tuple[Path | None, list[tuple[float, float]] | None]:
+    """Load the recording's prescan artifact periods as ``(start_s, end_s)`` pairs.
+
+    Exact recording name only -- another recording's periods (e.g. the
+    concatenated one's) would exclude the wrong stretches. Returns
+    ``(None, None)``, with a warning, when the prescan has not been run.
+    """
+    path = (
+        session_output_dir
+        / output_dir_name("artifacts")
+        / f"{edf_path.stem}_prescan_artifacts.parquet"
+    )
+    if not path.is_file():
+        warnings.warn(
+            f"No artifact prescan output for {edf_path.name} ({path}); scoring the "
+            "whole recording. Run scripts/preprocessing/prescan_artifacts.py first, "
+            "or pass --no-artifact-prescan to silence this.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return None, None
+    import pandas as pd
+
+    periods = pd.read_parquet(path, columns=["start_s", "end_s"])
+    return path, [(float(a), float(b)) for a, b in periods.itertuples(index=False)]
+
+
 def run_scoring(
     settings: SleepScoringSettings,
     score_function: Callable[..., tuple[Any, Any]] | None = None,
@@ -467,12 +520,10 @@ def run_scoring(
                 continue
 
             for edf_path in preferred_edf_paths:
-                output_dir = (
-                    settings.derivatives_root
-                    / session.subject_dir.name
-                    / session.path.name
-                    / output_subdir
+                session_output_dir = (
+                    settings.derivatives_root / session.subject_dir.name / session.path.name
                 )
+                output_dir = session_output_dir / output_subdir
                 recording = RecordingRef(
                     subject=sub_label,
                     session=session_label,
@@ -486,12 +537,19 @@ def run_scoring(
                     print(f"skipped, predictions exist: {output_path}")
                     continue
 
+                prescan_path, exclude_intervals_s = None, None
+                if settings.use_artifact_prescan:
+                    prescan_path, exclude_intervals_s = _prescan_periods(
+                        session_output_dir, edf_path
+                    )
+
                 df, prepared = scorer(
                     edf_path,
                     settings.model_path,
                     channel_labels=channel_labels,
                     sampling_rate_hz=settings.sampling_rate_hz,
                     global_normalization=settings.global_normalization,
+                    exclude_intervals_s=exclude_intervals_s,
                 )
                 deps.print_recording_plan(recording, prepared)
 
@@ -519,6 +577,11 @@ def run_scoring(
                         "sampling_rate_hz": settings.sampling_rate_hz,
                         "global_normalization": settings.global_normalization,
                         "export_visbrain": settings.export_visbrain,
+                        "use_artifact_prescan": settings.use_artifact_prescan,
+                        "artifact_prescan": (
+                            file_fingerprint(prescan_path) if prescan_path else None
+                        ),
+                        "excluded_artifact_periods": len(exclude_intervals_s or []),
                     },
                 )
 

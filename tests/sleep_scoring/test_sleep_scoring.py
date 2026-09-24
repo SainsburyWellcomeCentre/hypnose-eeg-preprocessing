@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 import warnings
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -84,6 +85,7 @@ def _settings(
         export_visbrain=False,
         sampling_rate_hz=512,
         global_normalization=False,
+        use_artifact_prescan=False,
     )
     fields.update(overrides)
     return SleepScoringSettings(**fields)
@@ -342,6 +344,80 @@ class SleepScoringTests(unittest.TestCase):
             self.assertTrue(
                 any("none is a concatenated recording" in str(w.message) for w in caught)
             )
+
+    def _prescan_session(self, root: Path, periods: pd.DataFrame | None):
+        """One scorable session, with prescan periods written if given.
+
+        Returns (settings, calls, scorer): prescan enabled, and a fake scorer
+        recording the keyword arguments it is called with.
+        """
+        rawdata = root / "rawdata"
+        derivatives = root / "derivatives"
+        rawdata.mkdir()
+        derivatives.mkdir()
+        model = derivatives / "model.pickle"
+        model.touch()
+        _make_session(
+            rawdata, "sub-066", "ses-001_date-20260717", ["sub-066_ses-001_recording-001.edf"]
+        )
+        if periods is not None:
+            prescan = (
+                derivatives / "sub-066" / "ses-001_date-20260717" / "eeg" / "artifacts"
+                / "sub-066_ses-001_recording-001_prescan_artifacts.parquet"
+            )
+            prescan.parent.mkdir(parents=True)
+            periods.to_parquet(prescan)
+        calls: list[dict] = []
+
+        def fake_score_recording(edf_path, model_path, **kwargs):
+            calls.append(kwargs)
+            return _fake_predictions_df(), _fake_prepared()
+
+        settings = _settings(
+            root=root, rawdata=rawdata, derivatives=derivatives, model=model,
+            dates=["20260717"], use_artifact_prescan=True,
+        )
+        return settings, calls, fake_score_recording
+
+    def test_prescan_periods_are_passed_to_somnotate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            periods = pd.DataFrame(
+                {"start_s": [0.0, 3600.0], "end_s": [120.0, 7200.0], "duration_s": [120.0, 3600.0]}
+            )
+            settings, calls, scorer = self._prescan_session(Path(directory), periods)
+
+            outputs = run_scoring(settings, score_function=scorer)
+
+            self.assertEqual(calls[0]["exclude_intervals_s"], [(0.0, 120.0), (3600.0, 7200.0)])
+            provenance = json.loads(
+                outputs[0].with_name(outputs[0].stem + "_provenance.json").read_text()
+            )
+            self.assertEqual(provenance["parameters"]["excluded_artifact_periods"], 2)
+            self.assertIsNotNone(provenance["parameters"]["artifact_prescan"])
+
+    def test_missing_prescan_scores_the_whole_recording_with_a_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings, calls, scorer = self._prescan_session(Path(directory), None)
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                run_scoring(settings, score_function=scorer)
+
+            self.assertIsNone(calls[0]["exclude_intervals_s"])
+            self.assertTrue(any("No artifact prescan output" in str(w.message) for w in caught))
+
+    def test_prescan_can_be_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            periods = pd.DataFrame({"start_s": [0.0], "end_s": [120.0], "duration_s": [120.0]})
+            settings, calls, scorer = self._prescan_session(Path(directory), periods)
+            settings = replace(settings, use_artifact_prescan=False)
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                run_scoring(settings, score_function=scorer)
+
+            self.assertIsNone(calls[0]["exclude_intervals_s"])
+            self.assertFalse(any("prescan" in str(w.message) for w in caught))
 
 
 if __name__ == "__main__":

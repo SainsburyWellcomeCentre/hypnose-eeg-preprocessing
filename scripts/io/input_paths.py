@@ -110,3 +110,24 @@ def artifact_path(
             f"Multiple artifact files found for {recording.name}: {matches}"
         )
     return matches[0] if matches else None
+
+
+def prescan_artifact_path(
+    recording_path: str | Path,
+    rawdata_root: str | Path,
+    derivatives_root: str | Path,
+) -> Path | None:
+    """Resolve the recording's pre-scoring artifact periods, or None if the prescan has not run.
+
+    Exact recording name only: unlike `artifact_path` there is no fallback to
+    another file in the session, since another recording's periods (e.g. the
+    concatenated one's) describe different stretches of signal.
+    """
+    recording = Path(recording_path)
+    session_dir = session_derivatives_dir(recording, rawdata_root, derivatives_root)
+    expected = (
+        session_dir
+        / output_dir_name("artifacts")
+        / f"{recording.stem}_prescan_artifacts.parquet"
+    )
+    return expected if expected.is_file() else None

@@ -4,17 +4,18 @@ Each stage is one of `src/preprocessing.py`, `src/sleep_scoring.py`, or
 `src/qc.py`; see those modules for their own step lists and defaults. With no
 `--stage` given, all three run in the order the pipeline actually requires --
 artifact detection depends on sleep scoring, so it is deferred until after
-scoring even though it is a preprocessing step:
+scoring even though it is a preprocessing step. The artifact *prescan* runs
+before scoring, which leaves the long artifact periods it finds unscored:
 
-  1. preprocessing: trim, concatenate, downsample
+  1. preprocessing: trim, concatenate, downsample, prescan_artifacts
   2. sleep_scoring: score
   3. preprocessing: detect_artifacts
   4. qc: summary
 
 Restricting to one or more `--stage` values runs each named stage's own
 default step set instead (for example `--stage preprocessing` runs
-trim, concatenate, downsample, and detect_artifacts together, which assumes sleep
-scoring has already been done for that session).
+trim, concatenate, downsample, prescan_artifacts, and detect_artifacts together,
+which assumes sleep scoring has already been done for that session).
 
 A step whose outputs already exist is skipped and the run continues with the
 next one, so an interrupted or partially-completed session can be resumed by
@@ -171,7 +172,8 @@ def run_stages(
     if stages is None:
         preprocessing.run_steps(
             **common, overwrite=overwrite,
-            steps=["trim", "concatenate", "downsample"], extra_args=extra,
+            steps=["trim", "concatenate", "downsample", "prescan_artifacts"],
+            extra_args=extra,
         )
         sleep_scoring.run_steps(
             **common, model=model, overwrite=overwrite,

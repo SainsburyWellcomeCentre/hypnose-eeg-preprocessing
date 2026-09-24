@@ -100,9 +100,9 @@ the same names. From Python,
 ## Unified pipeline entry points
 
 `src/run_pipeline.py` runs the full pipeline for one subject/session in the
-order the stages actually require — trim, concatenate and downsample, then
-sleep scoring, then artifact detection (which depends on the sleep-scoring
-output), then the QC summary:
+order the stages actually require — trim, concatenate, downsample and the
+artifact prescan, then sleep scoring, then artifact detection (which depends on
+the sleep-scoring output), then the QC summary:
 
 ```bash
 python -m src.run_pipeline --subject 66 --session 1 --model my-model
@@ -276,8 +276,9 @@ Run processing stages in this order:
 1. **Trim duplicate channels** — `scripts/preprocessing/trim_duplicate_channels.py`
 2. **Concatenate recordings** — `scripts/preprocessing/concatenate_recordings.py`
 3. **Downsample recordings** — `scripts/preprocessing/downsample_recordings.py`
-4. **Sleep scoring** — `scripts/sleep_scoring/score_recordings.py`
-5. **Detect artifacts** — `scripts/preprocessing/detect_artifacts.py`
+4. **Prescan artifacts** — `scripts/preprocessing/prescan_artifacts.py`
+5. **Sleep scoring** — `scripts/sleep_scoring/score_recordings.py`
+6. **Detect artifacts** — `scripts/preprocessing/detect_artifacts.py`
 
 Trimming is automatic and usually a no-op. Some recordings list the same
 channel label twice in their EDF header, which breaks concatenation (channel
@@ -323,6 +324,33 @@ python scripts/preprocessing/concatenate_recordings.py \
 python scripts/preprocessing/downsample_recordings.py \
   --config configs/pipelines/preprocessing.yaml --subject 66 --session 1
 ```
+
+Before scoring, the artifact prescan looks through the downsampled FIF for long
+stretches of unusable signal, which scoring then leaves out. It needs no sleep
+states. An EEG epoch is flagged when it is dead (almost no power in the
+analysed band, e.g. a disconnected headstage that is drifting rather than
+perfectly flat), fails hard (non-finite values or clipping), or is extreme
+against the recording's live epochs. Flagged epochs become *periods*. Runs
+separated by at most 30 s are joined, runs shorter than 60 s are dropped, and
+periods separated by less than 5 min of clean signal are bridged into one.
+All of these limits are set under `artifact_prescan` in
+`configs/pipelines/artifact_detection.yaml`:
+
+```bash
+python scripts/preprocessing/prescan_artifacts.py --subject 66 --session 1
+python scripts/preprocessing/prescan_artifacts.py --subject 66 --session 1 \
+  --bridge-gap-s 600 --overwrite
+```
+
+The periods are written to `eeg/artifacts/<recording>_prescan_artifacts.{csv,parquet}`.
+Sleep scoring passes them to Somnotate, which treats them like missing data:
+they are trimmed, masked or split around, kept out of normalization, and
+labelled Undefined with `kind == "artifact"` in the predictions parquet. The
+scoring viewer shades them as "Excluded artifact". A recording with no prescan
+output is scored in full, with a warning. Set
+`sleep_scoring.use_artifact_prescan: false` or pass `--no-artifact-prescan` to
+score everything. Scoring skips recordings that already have predictions, so
+pass `--overwrite` to rescore after changing the prescan.
 
 Configure the Somnotate model and channel settings in
 `configs/pipelines/sleep_scoring.yaml`; subject and date/session selectors are
@@ -388,13 +416,17 @@ skip writing it. `recording_integrity.py` and `scripts/qc/sleep_scoring.py`
 name their outputs the same way.
 
 The command checks EDF/FIF integrity and gaps, Somnotate confidence and undefined
-epochs, artifact burden, EEG/EMG channel correlation, sleep-state power spectra,
-and EMG RMS. Results are `PASS`, `REVIEW`, or `FAIL`. The power-spectra and EMG
+epochs, artifact burden, prescan exclusions, EEG/EMG channel correlation,
+sleep-state power spectra, and EMG RMS. Results are `PASS`, `REVIEW`, or `FAIL`.
+The artifact burden only covers scored signal, so a separate `artifact_prescan`
+section sends a recording to review when the pre-scoring scan left more than
+5% of it unscored, or when the scan has not been run. Each excluded period is
+listed as a review range. The power-spectra and EMG
 sections use the frequency bands, state expectations, RMS ordering, and determining
 EEG channel defined in `configs/pipelines/spectra.yaml`; select another definition
 file with `--spectra-config`. Every review/pass threshold (duration tolerance, gap
-percentage and longest-gap limits, confidence and correlation cutoffs, artifact and
-undefined-epoch percentages) is defined in `configs/pipelines/quality_control.yaml`
+percentage and longest-gap limits, confidence and correlation cutoffs, artifact,
+prescan-exclusion and undefined-epoch percentages) is defined in `configs/pipelines/quality_control.yaml`
 and shared across `summary_qc.py`, `recording_integrity.py`,
 `channel_correlations.py`, and `sleep_scoring.py`; select another definition file
 with `--qc-config`, or override any single value from the command line. A duration

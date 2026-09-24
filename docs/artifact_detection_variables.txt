@@ -95,6 +95,11 @@ high_frequency_power_uv2
 line_noise_power_uv2
   Welch PSD integral over line_noise_band_hz, in microvolts squared.
 
+broadband_power_uv2
+  Welch PSD integral over the whole analysed band (minimum_frequency_hz to
+  maximum_frequency_hz), in microvolts squared. Not scored by the detector;
+  the pre-scoring scan uses its square root as the dead-signal check.
+
 nonfinite
   True when the epoch contains NaN or infinite EEG samples. This is an immediate
   state-independent hard failure.
@@ -154,3 +159,95 @@ true:
 An epoch is marked as an artifact when any EEG channel is marked as an artifact.
 The artifact_features output column records the responsible channel-qualified
 features and hard-failure reasons.
+
+
+PRE-SCORING ARTIFACT SCAN
+=========================
+
+Script: scripts/preprocessing/prescan_artifacts.py
+Config section: artifact_prescan (same YAML file)
+
+This scan runs before sleep scoring, so it has no sleep states. It looks for
+long periods of unusable signal, and sleep scoring leaves those periods out.
+Epoch length, chunking and Welch settings are taken from artifact_detection
+above, and robust_mad_scale is shared too.
+
+artifact_prescan.dead_signal.minimum_broadband_rms_uv
+  Type: nonnegative float
+  Default: 10.0
+  Units: microvolts
+  CLI: --minimum-broadband-rms-uv
+  Purpose: An EEG channel-epoch whose broadband RMS
+  (sqrt(broadband_power_uv2)) is below this value carries no EEG. The
+  threshold is absolute, so it still works when most of a recording is dead.
+  It catches disconnected headstages that drift slowly instead of sitting
+  perfectly flat, which somnotate's own gap detection misses. On the
+  calibration sessions, dead signal measured about 3.5 uV and the 1st
+  percentile of clean recordings was 27-33 uV.
+
+artifact_prescan.hard_failure.maximum_edge_fraction
+  Type: fraction from 0 to 1
+  Default: 0.02
+  Purpose: As thresholds.maximum_edge_fraction; clipping or repeated edge
+  values. Non-finite samples are also a hard failure.
+
+artifact_prescan.extreme.robust_z
+  Type: positive float
+  Default: 10.0
+  CLI: --extreme-z-threshold
+  Purpose: Robust upper-Z threshold, computed per channel against the
+  recording's live epochs only (not dead, not hard failure), so that real EEG
+  is not judged against a dead majority. There are no sleep states at this
+  point, so the threshold has to stay far above the post-scoring one.
+  Otherwise ordinary active wake gets excluded.
+
+artifact_prescan.extreme.features_required
+  Type: positive integer
+  Default: 2
+  Purpose: Number of extreme.features that must exceed extreme.robust_z for
+  an EEG channel-epoch to count as extreme.
+
+artifact_prescan.extreme.features
+  Type: list of EEG feature names
+  Default: peak_to_peak_uv, rms_uv, max_derivative_uv_per_sample,
+  high_frequency_power_uv2
+
+artifact_prescan.periods.merge_within_s
+  Type: nonnegative float
+  Default: 30.0
+  Units: seconds
+  CLI: --merge-within-s
+  Purpose: Flagged runs separated by at most this much clean signal are
+  joined into one run. This stops a noisy block with the odd clean-looking
+  epoch from being split into many short runs.
+
+artifact_prescan.periods.minimum_run_s
+  Type: nonnegative float
+  Default: 60.0
+  Units: seconds
+  CLI: --minimum-run-s
+  Purpose: Runs shorter than this are dropped. Brief artifacts are left for
+  the post-scoring detector.
+
+artifact_prescan.periods.bridge_gap_s
+  Type: nonnegative float
+  Default: 300.0
+  Units: seconds
+  CLI: --bridge-gap-s
+  Purpose: Periods separated by less than this much clean signal are bridged
+  into one continuous artifact period. Bridging happens after minimum_run_s,
+  so a lone short artifact cannot chain two distant periods together.
+
+artifact_prescan.output.suffix / artifact_prescan.output.overwrite
+  Default: "prescan_artifacts" / false
+  Purpose: Outputs are written as <recording>_prescan_artifacts.csv and
+  .parquet in the session's artifacts folder, with one row per period:
+  start_s, end_s, duration_s, flagged_fraction, dead_epochs,
+  hard_failure_epochs, extreme_epochs.
+
+An epoch is flagged when any EEG channel is dead, fails hard, or is extreme.
+When configs/pipelines/sleep_scoring.yaml sets
+sleep_scoring.use_artifact_prescan (true by default), sleep scoring passes
+the periods to somnotate. Somnotate treats them like missing data: they are
+trimmed, masked or split around, kept out of normalization, and labelled
+Undefined with kind "artifact" in the predictions parquet.

@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.analysis.correlation import compute_state_channel_correlations
 from scripts.analysis.emg import compute_state_emg_rms
 from scripts.analysis.power_spectra import compute_state_spectra
-from scripts.io.input_paths import artifact_path, scoring_path
+from scripts.io.input_paths import artifact_path, prescan_artifact_path, scoring_path
 from scripts.io.output_paths import (
     quality_control_output_path,
     recording_output_name,
@@ -178,6 +178,80 @@ def sleep_state_proportion_section(proportion_report: pd.DataFrame) -> dict[str,
     }
 
 
+def artifact_prescan_section(
+    periods: pd.DataFrame | None,
+    scored: pd.DataFrame,
+    *,
+    scoring_epoch_s: float,
+    max_excluded_percent: float,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """QC section and review ranges for the pre-scoring artifact scan's exclusions.
+
+    `periods` is the recording's `*_prescan_artifacts.parquet` (None when the
+    prescan has not run, which is itself a reason for review: dead or extreme
+    signal could not have been kept out of scoring). The percentage is of the
+    whole recording, taken from the prescan periods themselves; the detail also
+    reports how much the predictions actually carry as `kind == "artifact"`, so
+    predictions scored before the prescan (or without it) stand out.
+    """
+    if periods is None:
+        section = {
+            "section": "artifact_prescan",
+            "status": "review",
+            "metric": "excluded_percent",
+            "value": "n/a",
+            "threshold": max_excluded_percent,
+            "detail": "no prescan output; run preprocessing:prescan_artifacts, then rescore",
+        }
+        return section, []
+
+    duration_s = (
+        float(scored["time_s"].max()) + scoring_epoch_s if len(scored) else 0.0
+    )
+    starts = periods["start_s"].astype(float).clip(lower=0, upper=duration_s)
+    ends = periods["end_s"].astype(float).clip(lower=0, upper=duration_s)
+    excluded_s = float((ends - starts).clip(lower=0).sum())
+    excluded_percent = 100.0 * excluded_s / duration_s if duration_s else 0.0
+
+    detail = (
+        f"{len(periods)} period(s), {excluded_s / 3600:.2f} h of "
+        f"{duration_s / 3600:.2f} h"
+    )
+    if "kind" in scored:
+        applied_s = float(scored["kind"].astype(str).eq("artifact").sum()) * scoring_epoch_s
+        detail += f"; {applied_s / 3600:.2f} h labelled artifact in the predictions"
+        if excluded_s > 0 and applied_s == 0:
+            detail += " (scored without the prescan; rescore with --overwrite)"
+
+    section = {
+        "section": "artifact_prescan",
+        "status": "review" if excluded_percent > max_excluded_percent else "pass",
+        "metric": "excluded_percent",
+        "value": excluded_percent,
+        "threshold": max_excluded_percent,
+        "detail": detail,
+    }
+    reviews: list[dict[str, object]] = []
+    for row in periods.itertuples(index=False):
+        _review(
+            reviews,
+            section="artifact_prescan",
+            start_s=float(row.start_s),
+            end_s=float(row.end_s),
+            metric="flagged_fraction",
+            value=float(getattr(row, "flagged_fraction", 1.0)),
+            # Periods have no per-range threshold; the limit applies to their total.
+            threshold=float("nan"),
+            reason=(
+                "excluded from sleep scoring by the artifact prescan "
+                f"(dead {int(getattr(row, 'dead_epochs', 0))}, hard failure "
+                f"{int(getattr(row, 'hard_failure_epochs', 0))}, extreme "
+                f"{int(getattr(row, 'extreme_epochs', 0))} epochs)"
+            ),
+        )
+    return section, reviews
+
+
 def _section(
     rows: list[dict[str, object]],
     section: str,
@@ -291,6 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-nrem-percent", type=float, default=None)
     parser.add_argument("--max-rem-percent", type=float, default=None)
     parser.add_argument("--max-artifact-percent", type=float, default=None)
+    parser.add_argument("--max-prescan-excluded-percent", type=float, default=None)
     parser.add_argument("--eeg-eeg-threshold", type=float, default=None)
     parser.add_argument("--eeg-emg-threshold", type=float, default=None)
     parser.add_argument("--max-correlation-review-percent", type=float, default=None)
@@ -339,8 +414,13 @@ def run_qc(
     artifact_file: Path,
     args: argparse.Namespace,
     spectra_config: SpectraConfig,
+    prescan_file: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run all QC sections for one recording and return summary/review tables."""
+    """Run all QC sections for one recording and return summary/review tables.
+
+    `prescan_file` is the recording's prescan artifact periods, or None when
+    the prescan has not run (which sends the artifact_prescan section to review).
+    """
     sections: list[dict[str, object]] = []
     reviews: list[dict[str, object]] = []
 
@@ -461,6 +541,15 @@ def run_qc(
             threshold=1.0,
             reason=str(row.get("artifact_features", "artifact detector flag")),
         )
+
+    prescan_section, prescan_reviews = artifact_prescan_section(
+        pd.read_parquet(prescan_file) if prescan_file is not None else None,
+        scored,
+        scoring_epoch_s=scoring_epoch_s,
+        max_excluded_percent=args.max_prescan_excluded_percent,
+    )
+    sections.append(prescan_section)
+    reviews.extend(prescan_reviews)
 
     correlations, correlation_channels = compute_state_channel_correlations(
         fif_path,
@@ -627,6 +716,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.max_artifact_percent = coalesce(
         args.max_artifact_percent, qc_thresholds.max_artifact_percent
     )
+    args.max_prescan_excluded_percent = coalesce(
+        args.max_prescan_excluded_percent, qc_thresholds.max_prescan_excluded_percent
+    )
     args.eeg_eeg_threshold = coalesce(
         args.eeg_eeg_threshold, qc_thresholds.eeg_eeg_threshold
     )
@@ -645,6 +737,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "max_nrem_percent",
         "max_rem_percent",
         "max_artifact_percent",
+        "max_prescan_excluded_percent",
         "max_correlation_review_percent",
         "max_gap_percent",
     ):
@@ -694,10 +787,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         artifact_file = artifact_path(edf_path, rawdata_root, derivatives_root)
         if artifact_file is None:
             raise FileNotFoundError(f"No artifact parquet found for {edf_path.name}")
+        prescan_file = prescan_artifact_path(edf_path, rawdata_root, derivatives_root)
         print(f"EDF: {edf_path}")
         print(f"FIF: {fif_path}")
         print(f"Scoring: {scoring_file}")
         print(f"Artifacts: {artifact_file}")
+        print(f"Prescan artifacts: {prescan_file or 'not found'}")
         sections, reviews = run_qc(
             edf_path,
             fif_path,
@@ -705,6 +800,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             artifact_file,
             args,
             spectra_config,
+            prescan_file=prescan_file,
         )
     except (ImportError, OSError, ValueError) as exc:
         parser.error(str(exc))
@@ -740,6 +836,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "fif_path": str(fif_path),
                 "scoring_file": str(scoring_file),
                 "artifact_file": str(artifact_file),
+                "prescan_file": str(prescan_file) if prescan_file else None,
             },
             parameters={
                 "overall_status": overall_status(sections),

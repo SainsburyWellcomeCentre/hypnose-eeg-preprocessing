@@ -26,7 +26,10 @@ class FullRunOrderingTests(unittest.TestCase):
         self.assertEqual(call_names, ["preprocessing", "sleep_scoring", "preprocessing", "qc"])
 
         first_preprocessing_call = mock_preprocessing.run_steps.call_args_list[0]
-        self.assertEqual(first_preprocessing_call.kwargs["steps"], ["trim", "concatenate", "downsample"])
+        self.assertEqual(
+            first_preprocessing_call.kwargs["steps"],
+            ["trim", "concatenate", "downsample", "prescan_artifacts"],
+        )
 
         second_preprocessing_call = mock_preprocessing.run_steps.call_args_list[1]
         self.assertEqual(second_preprocessing_call.kwargs["steps"], ["detect_artifacts"])

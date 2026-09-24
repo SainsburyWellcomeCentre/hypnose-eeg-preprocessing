@@ -16,12 +16,80 @@ from scripts.qc.summary_qc import (
     DEFAULT_REVIEW_FILENAME,
     DEFAULT_SUMMARY_FILENAME,
     REVIEW_COLUMNS,
+    artifact_prescan_section,
     build_parser,
     overall_status,
     review_output_paths,
     sleep_state_proportion_section,
     spectral_quality_sections,
 )
+
+
+def _scored(n_seconds: int, artifact_seconds: range = range(0)) -> pd.DataFrame:
+    """One-second predictions for a recording, `kind == "artifact"` over `artifact_seconds`."""
+    kind = ["signal"] * n_seconds
+    for second in artifact_seconds:
+        kind[second] = "artifact"
+    return pd.DataFrame({"time_s": range(n_seconds), "kind": kind})
+
+
+def _periods(*spans: tuple[float, float]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "start_s": [a for a, _ in spans],
+            "end_s": [b for _, b in spans],
+            "duration_s": [b - a for a, b in spans],
+            "flagged_fraction": [1.0] * len(spans),
+            "dead_epochs": [10] * len(spans),
+            "hard_failure_epochs": [0] * len(spans),
+            "extreme_epochs": [0] * len(spans),
+        }
+    )
+
+
+class ArtifactPrescanSectionTests(unittest.TestCase):
+    def _section(self, periods, scored):
+        return artifact_prescan_section(
+            periods, scored, scoring_epoch_s=1.0, max_excluded_percent=5.0
+        )
+
+    def test_more_than_five_percent_excluded_goes_to_review(self) -> None:
+        section, reviews = self._section(_periods((0, 60)), _scored(1000, range(60)))
+        self.assertEqual(section["status"], "review")
+        self.assertAlmostEqual(section["value"], 6.0)
+        self.assertEqual([(r["start_s"], r["end_s"]) for r in reviews], [(0.0, 60.0)])
+        self.assertIn("0.02 h labelled artifact", section["detail"])
+
+    def test_exactly_five_percent_passes(self) -> None:
+        section, _ = self._section(_periods((100, 125), (500, 525)), _scored(1000))
+        self.assertEqual(section["status"], "pass")
+        self.assertAlmostEqual(section["value"], 5.0)
+
+    def test_no_periods_passes(self) -> None:
+        section, reviews = self._section(_periods(), _scored(1000))
+        self.assertEqual((section["status"], section["value"], reviews), ("pass", 0.0, []))
+
+    def test_missing_prescan_goes_to_review(self) -> None:
+        section, reviews = self._section(None, _scored(1000))
+        self.assertEqual(section["status"], "review")
+        self.assertIn("no prescan output", section["detail"])
+        self.assertEqual(reviews, [])
+
+    def test_predictions_scored_without_the_prescan_are_called_out(self) -> None:
+        section, _ = self._section(_periods((0, 10)), _scored(1000))
+        self.assertEqual(section["status"], "pass")
+        self.assertIn("rescore with --overwrite", section["detail"])
+
+    def test_review_ranges_keep_a_numeric_threshold_column(self) -> None:
+        _, reviews = self._section(_periods((0, 60)), _scored(1000))
+        table = pd.DataFrame(reviews, columns=REVIEW_COLUMNS)
+        self.assertTrue(pd.api.types.is_float_dtype(table["threshold"]))
+
+    def test_cli_threshold_defaults_to_config(self) -> None:
+        args = build_parser().parse_args(
+            ["--subject", "66", "--session", "1", "--max-prescan-excluded-percent", "10"]
+        )
+        self.assertEqual(args.max_prescan_excluded_percent, 10.0)
 
 
 class SummaryQualityControlTests(unittest.TestCase):

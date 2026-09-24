@@ -19,6 +19,7 @@ class RunStepsTests(unittest.TestCase):
                 "preprocessing:trim",
                 "preprocessing:concatenate",
                 "preprocessing:downsample",
+                "preprocessing:prescan_artifacts",
                 "preprocessing:detect_artifacts",
             ],
         )
@@ -77,18 +78,24 @@ class RunStepsTests(unittest.TestCase):
             self.assertNotIn("--rawdata-root", args)
 
     @patch("src.preprocessing.run_step")
-    def test_detect_artifacts_uses_rawdata_derivatives_flags(self, mock_run_step):
+    def test_artifact_steps_use_rawdata_derivatives_flags(self, mock_run_step):
         preprocessing.run_steps(
             subject="66", date="20260717",
             rawdata_root="/raw", derivatives_root="/deriv",
-            steps=["detect_artifacts"],
+            steps=["prescan_artifacts", "detect_artifacts"],
         )
 
-        module, args = mock_run_step.call_args.args
-        self.assertEqual(module, "scripts.preprocessing.detect_artifacts")
-        self.assertIn("--rawdata-root", args)
-        self.assertIn("--derivatives-root", args)
-        self.assertNotIn("--source-dir", args)
+        modules = []
+        for c in mock_run_step.call_args_list:
+            module, args = c.args
+            modules.append(module)
+            self.assertIn("--rawdata-root", args)
+            self.assertIn("--derivatives-root", args)
+            self.assertNotIn("--source-dir", args)
+        self.assertEqual(
+            modules,
+            ["scripts.preprocessing.prescan_artifacts", "scripts.preprocessing.detect_artifacts"],
+        )
 
     @patch("src.preprocessing.run_step")
     def test_trim_has_no_derivatives_root_flag(self, mock_run_step):
@@ -104,15 +111,12 @@ class RunStepsTests(unittest.TestCase):
         self.assertNotIn("--sink-dir", args)
 
     @patch("src.preprocessing.run_step")
-    def test_dry_run_forwarded_to_every_step_but_detect_artifacts(self, mock_run_step):
-        preprocessing.run_steps(
-            subject="66", date="20260717", dry_run=True,
-            steps=["trim", "concatenate", "downsample", "detect_artifacts"],
-        )
+    def test_dry_run_forwarded_to_every_step_but_the_artifact_steps(self, mock_run_step):
+        preprocessing.run_steps(subject="66", date="20260717", dry_run=True)
 
         for c in mock_run_step.call_args_list:
             module, args = c.args
-            if "detect_artifacts" in module:
+            if module.endswith("_artifacts"):
                 self.assertNotIn("--dry-run", args)
             else:
                 self.assertIn("--dry-run", args)

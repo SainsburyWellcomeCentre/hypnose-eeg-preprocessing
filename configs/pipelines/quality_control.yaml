@@ -31,6 +31,14 @@ quality_control:
   artifacts:
     max_artifact_percent: 5.0
 
+  # Flags a recording for review when the pre-scoring artifact scan
+  # (scripts/preprocessing/prescan_artifacts.py) excluded more than this
+  # percentage of the recording from sleep scoring. The artifacts section above
+  # only covers scored signal, so without this a mostly-excluded recording
+  # would pass. A recording with no prescan output is also sent to review.
+  artifact_prescan:
+    max_excluded_percent: 5.0
+
   channel_correlation:
     eeg_eeg_threshold: 0.90
     eeg_emg_threshold: 0.50

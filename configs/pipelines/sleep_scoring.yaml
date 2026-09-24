@@ -28,6 +28,14 @@ sleep_scoring:
   # several independent chunks by long gaps.
   global_normalization: true
 
+  # If true, the long artifact periods written by the pre-scoring scan
+  # (scripts/preprocessing/prescan_artifacts.py, configured under
+  # artifact_prescan in configs/pipelines/artifact_detection.yaml) are left
+  # unscored: labelled Undefined with kind "artifact" in the predictions
+  # parquet, and kept out of normalization. A recording without prescan output
+  # is scored in full, with a warning.
+  use_artifact_prescan: true
+
   # Predicted-state display labels, shared by every QC report. "Undefined" covers
   # unscored epochs and has no display color.
   sleep_state_names:
@@ -59,4 +67,4 @@ sleep_scoring_view:
   # higher than any available FIF's rate to force reading the EDF.
   display_rate_hz: 128
   show_artifacts: false # Shade regions flagged by artifact_epochs.parquet
-  show_gaps: true # Shade 'gap'/'too_short' spans from the predictions parquet's kind column
+  show_gaps: true # Shade 'gap'/'artifact'/'too_short' spans from the predictions parquet's kind column

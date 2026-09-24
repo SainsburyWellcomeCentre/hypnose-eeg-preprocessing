@@ -273,6 +273,12 @@ def extract_features(
             psd, frequencies, line_noise_band_hz[0],
             min(line_noise_band_hz[1], psd_fmax)
         )
+        # Whole analysed band: near zero when the channel carries no EEG at all
+        # (e.g. a disconnected headstage drifting slowly), which `std_uv` misses
+        # because slow drift alone keeps the standard deviation up.
+        broadband_power = bandpower(
+            psd, frequencies, psd_minimum_frequency_hz, psd_fmax
+        )
 
         if emg is not None:
             emg_samples = emg.get_data(start=start, stop=stop)
@@ -307,6 +313,7 @@ def extract_features(
                     "edge_fraction": edge_fraction.ravel(),
                     "high_frequency_power_uv2": high_frequency_power.ravel(),
                     "line_noise_power_uv2": line_noise_power.ravel(),
+                    "broadband_power_uv2": broadband_power.ravel(),
                     "nonfinite": nonfinite.ravel(),
                 }
             )
