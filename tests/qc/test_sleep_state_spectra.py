@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +12,12 @@ import pandas as pd
 from hypnose_eeg.qc.spectra import (
     build_parser,
     build_spectral_quality_report,
+    compute_session_spectra,
+    default_spectra_config,
     load_spectra_config,
+    plot_spectra,
     plot_state_emg_rms,
+    save_spectra,
 )
 from hypnose_eeg.analysis.emg import compute_state_emg_rms
 from hypnose_eeg.analysis.power_spectra import compute_state_spectra
@@ -117,6 +122,87 @@ class SleepStateSpectraTests(unittest.TestCase):
         self.assertTrue((channel_1["quality_status"] == "PASS").all())
         self.assertTrue((channel_2["spectral_quality_status"] == "FAIL").all())
         self.assertTrue((report["recording_quality_status"] == "PASS").all())
+
+    def test_config_overrides_are_validated(self) -> None:
+        config = default_spectra_config()
+        self.assertEqual(replace(config, fmax_hz=40.0).fmax_hz, 40.0)
+        with self.assertRaisesRegex(ValueError, "greater than minimum"):
+            replace(config, fmax_hz=config.fmin_hz)
+        with self.assertRaisesRegex(ValueError, "chunk epochs"):
+            replace(config, chunk_epochs=0)
+
+    def test_session_api_computes_plots_and_saves_without_the_cli(self) -> None:
+        import matplotlib
+        import mne
+
+        matplotlib.use("Agg")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            session = "sub-066/ses-1_date-20260717"
+            edf = rawdata / session / "ephys" / "rec.edf"
+            edf.parent.mkdir(parents=True)
+            edf.touch()
+
+            # One minute each of Wake, NREM, and REM: beta and high EMG, then
+            # delta, then theta with a quiet EMG.
+            sfreq = 128.0
+            seconds = np.arange(int(60 * sfreq)) / sfreq
+            rng = np.random.default_rng(0)
+            eeg = np.concatenate(
+                [
+                    np.sin(2 * np.pi * 20 * seconds),
+                    4 * np.sin(2 * np.pi * 2 * seconds),
+                    3 * np.sin(2 * np.pi * 7 * seconds),
+                ]
+            )
+            emg = np.concatenate(
+                [scale * rng.standard_normal(len(seconds)) for scale in (3.0, 1.5, 0.5)]
+            )
+            noise = 0.1 * rng.standard_normal((2, len(eeg)))
+            data = 50e-6 * np.vstack([eeg + noise[0], eeg + noise[1], emg])
+            info = mne.create_info(
+                ["EEG1", "EEG2", "EMG"], sfreq, ["eeg", "eeg", "emg"]
+            )
+            fif = derivatives / session / "eeg" / "downsample" / "rec_resampled-128hz_raw.fif"
+            fif.parent.mkdir(parents=True)
+            mne.io.RawArray(data, info, verbose="ERROR").save(fif, verbose="ERROR")
+            scoring = sleep_scoring_output_path(
+                "rec_somnotate_predictions.parquet", edf, rawdata, derivatives
+            )
+            scoring.parent.mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "time_s": np.arange(180.0),
+                    "label_output": np.repeat([0, 1, 2], 60),
+                    "kind": "signal",
+                }
+            ).to_parquet(scoring)
+
+            results = compute_session_spectra(
+                "66", session="1", rawdata_root=rawdata, derivatives_root=derivatives
+            )
+
+            self.assertEqual(len(results), 1)
+            result = results[0]
+            self.assertEqual((result.edf_path, result.fif_path), (edf, fif))
+            self.assertEqual(result.eeg_channels, ["EEG1", "EEG2"])
+            self.assertEqual(result.emg_channels, ["EMG"])
+            self.assertEqual(result.eeg_counts, {0: 15, 1: 15, 2: 15})
+            self.assertEqual(result.quality_status, "PASS")
+
+            figures = plot_spectra(result, label="sub-066")
+            try:
+                self.assertEqual(set(figures), {"spectra", "emg_rms"})
+                paths = save_spectra(result, root / "qc", figures)
+            finally:
+                import matplotlib.pyplot as plt
+
+                for figure in figures.values():
+                    plt.close(figure)
+            self.assertEqual(len(paths), 3)
+            self.assertTrue(all(path.is_file() for path in paths))
 
     def test_spectrum_computation_is_available_from_analysis(self) -> None:
         self.assertTrue(callable(compute_state_spectra))

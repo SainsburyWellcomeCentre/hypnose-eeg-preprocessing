@@ -3,6 +3,10 @@
 This is a visual quality-control tool: it displays the raw EEG/EMG traces and
 Somnotate state predictions that already exist on disk. It does not rescore the
 recording or calculate a numerical performance metric.
+
+From Python, `view_settings()` builds the settings, `load_scored_window()` reads
+the selected slice without needing a display, `plot_scored_window()` draws it,
+and `show_scored_recording()` does all three and opens the window.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 from hypnose_helpers.io.selectors import parse_sessions
 
 from hypnose_eeg.io.input_paths import artifact_path, scoring_path, session_derivatives_dir
-from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
+from hypnose_eeg.io.repository_paths import get_repo_root, resolve_data_roots
 from hypnose_eeg.utils.config import (
     DEFAULT_SLEEP_SCORING_CONFIG_PATH,
     coalesce,
@@ -195,67 +199,81 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
-    config = load_config(args.config)
-    view = nested_get(config, ("sleep_scoring_view",), {})
+def view_settings(
+    subject: str | int | None,
+    *,
+    date: str | None = None,
+    session: str | int | None = None,
+    hours: Sequence[float] | None = None,
+    time_range: Sequence[str] | None = None,
+    recording_index: int | None = None,
+    eeg_channel: int | None = None,
+    view_length_s: float | None = None,
+    display_rate_hz: float | None = None,
+    show_artifacts: bool | None = None,
+    show_gaps: bool | None = None,
+    config: str | Path | None = DEFAULT_SLEEP_SCORING_CONFIG_PATH,
+    repo_root: str | Path | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+) -> ScoringViewSettings:
+    """Validate a viewer selection, filling unset options from the pipeline YAML.
+
+    `time_range` is START and END as 'YYYYMMDD HH:MM:SS' strings; `hours` is
+    START and END in hours from the recording start. Pass at most one.
+    """
+    view = nested_get(load_config(config), ("sleep_scoring_view",), {})
     if not isinstance(view, dict):
         raise ValueError("sleep_scoring_view config must be a YAML mapping")
 
-    subject = _single_value(args.subject, option_name="subject")
+    subject = _single_value(subject, option_name="subject")
     if subject is None:
         raise ValueError("a subject is required via --subject")
 
-    if args.hours is not None:
-        configured_hours = args.hours
+    if hours is not None:
+        configured_hours = hours
         configured_time_range = None
-    elif args.time_range is not None:
+    elif time_range is not None:
         configured_hours = None
-        configured_time_range = args.time_range
+        configured_time_range = time_range
     else:
         configured_hours = view.get("hours")
         configured_time_range = view.get("time_range")
     if configured_hours is not None and configured_time_range is not None:
         raise ValueError("use either hours or time_range, not both")
 
-    hours = (
+    parsed_hours = (
         None
         if configured_hours is None
         else tuple(float(value) for value in _values(configured_hours))
     )
-    time_range = _parse_time_range(configured_time_range)
+    parsed_time_range = _parse_time_range(configured_time_range)
 
-    date = _single_value(args.date, option_name="date")
-    session_text = _single_value(args.session, option_name="session")
-    session = (
+    date = _single_value(date, option_name="date")
+    session_text = _single_value(session, option_name="session")
+    session_number = (
         None if session_text is None else parse_sessions([session_text])[0]
     )
-    if date is None and session is None and time_range is None:
+    if date is None and session_number is None and parsed_time_range is None:
         raise ValueError(
             "a date or session is required via --date/--session "
             "(or use --time-range)"
         )
 
-    rawdata_root = Path(
-        coalesce(args.rawdata_root, get_rawdata_root())
-    ).expanduser().resolve(strict=False)
-    derivatives_root = Path(
-        coalesce(args.derivatives_root, get_derivatives_root())
-    ).expanduser().resolve(strict=False)
+    rawdata_root, derivatives_root = resolve_data_roots(rawdata_root, derivatives_root)
     repo_root = Path(
-        coalesce(args.repo_root, get_repo_root())
+        coalesce(repo_root, get_repo_root())
     ).expanduser().resolve(strict=False)
 
-    recording_index = int(coalesce(args.recording_index, view.get("recording_index"), 0))
-    eeg_channel = int(coalesce(args.eeg_channel, view.get("eeg_channel"), 0))
-    view_length_s = float(coalesce(args.view_length, view.get("view_length_s"), 120.0))
-    configured_display_rate = coalesce(
-        args.display_rate, view.get("display_rate_hz")
-    )
+    recording_index = int(coalesce(recording_index, view.get("recording_index"), 0))
+    eeg_channel = int(coalesce(eeg_channel, view.get("eeg_channel"), 0))
+    view_length_s = float(coalesce(view_length_s, view.get("view_length_s"), 120.0))
+    configured_display_rate = coalesce(display_rate_hz, view.get("display_rate_hz"))
     display_rate_hz = (
         None if configured_display_rate is None else float(configured_display_rate)
     )
-    show_artifacts = bool(coalesce(args.show_artifacts, view.get("show_artifacts"), False))
-    show_gaps = bool(coalesce(args.show_gaps, view.get("show_gaps"), True))
+    show_artifacts = bool(coalesce(show_artifacts, view.get("show_artifacts"), False))
+    show_gaps = bool(coalesce(show_gaps, view.get("show_gaps"), True))
     if recording_index < 0:
         raise ValueError("recording_index must not be negative")
     if eeg_channel not in (0, 1):
@@ -266,11 +284,11 @@ def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
         not math.isfinite(display_rate_hz) or display_rate_hz <= 0
     ):
         raise ValueError("display_rate_hz must be a positive finite number")
-    if hours is not None:
-        if len(hours) != 2:
+    if parsed_hours is not None:
+        if len(parsed_hours) != 2:
             raise ValueError("hours must contain exactly START and END")
-        start_hour, end_hour = hours
-        if not all(math.isfinite(value) for value in hours):
+        start_hour, end_hour = parsed_hours
+        if not all(math.isfinite(value) for value in parsed_hours):
             raise ValueError("hours START and END must be finite")
         if start_hour < 0:
             raise ValueError("hours START must not be negative")
@@ -286,16 +304,36 @@ def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
         recording_index=recording_index,
         eeg_channel=eeg_channel,
         view_length_s=view_length_s,
-        hours=hours,
-        time_range=time_range,
+        hours=parsed_hours,
+        time_range=parsed_time_range,
         display_rate_hz=display_rate_hz,
         show_artifacts=show_artifacts,
         show_gaps=show_gaps,
-        session=session,
+        session=session_number,
     )
 
 
-def _downsample_signals(raw_signals: Any, source_hz: float, target_hz: float):
+def settings_from_args(args: argparse.Namespace) -> ScoringViewSettings:
+    return view_settings(
+        args.subject,
+        date=args.date,
+        session=args.session,
+        hours=args.hours,
+        time_range=args.time_range,
+        recording_index=args.recording_index,
+        eeg_channel=args.eeg_channel,
+        view_length_s=args.view_length,
+        display_rate_hz=args.display_rate,
+        show_artifacts=args.show_artifacts,
+        show_gaps=args.show_gaps,
+        config=args.config,
+        repo_root=args.repo_root,
+        rawdata_root=args.rawdata_root,
+        derivatives_root=args.derivatives_root,
+    )
+
+
+def downsample_signals(raw_signals: Any, source_hz: float, target_hz: float):
     """Polyphase-resample signals for display, preserving channels and duration."""
     if target_hz > source_hz:
         raise ValueError(
@@ -321,7 +359,7 @@ def _fif_rate_hz(fif_path: Path) -> float | None:
     return float(match.group(1).replace("p", "."))
 
 
-def _find_downsampled_fif(
+def find_downsampled_fif(
     edf_path: Path,
     rawdata_root: Path,
     derivatives_root: Path,
@@ -455,7 +493,7 @@ def _open_fif_signal_source(
         raw.close()
 
 
-def _open_signal_source(
+def open_signal_source(
     path: Path, channel_labels: Sequence[str]
 ) -> Any:
     """Dispatch to the EDF or FIF signal-source reader based on file suffix."""
@@ -477,7 +515,7 @@ def _artifact_file(edf_path: Path, rawdata_root: Path, derivatives_root: Path) -
     return path
 
 
-def _artifact_regions(
+def artifact_regions(
     artifact_table: Any,
     selected_start_s: float,
     selected_end_s: float,
@@ -512,7 +550,7 @@ def _artifact_regions(
     return merged
 
 
-def _shade_regions(
+def shade_regions(
     fig: Any,
     regions: list[tuple[float, float]],
     *,
@@ -541,21 +579,67 @@ def _shade_regions(
         )
 
 
-def _label_artifacts(fig: Any, regions: list[tuple[float, float]]) -> None:
+def label_artifacts(fig: Any, regions: list[tuple[float, float]]) -> None:
     """Shade artifact spans on every viewer axis and label the signal axis."""
-    _shade_regions(fig, regions, color="red", label="Artifact", text_color="darkred")
+    shade_regions(fig, regions, color="red", label="Artifact", text_color="darkred")
 
 
-def _run_custom_view(settings: ScoringViewSettings) -> int:
-    """Display a selected/full recording with range, rate, and artifact controls."""
+@dataclass(frozen=True)
+class ShadedRegions:
+    """Spans, in seconds from the window start, to shade on every viewer axis."""
+
+    label: str
+    color: str
+    spans: list[tuple[float, float]]
+    text_color: str | None = None
+
+
+@dataclass(frozen=True, eq=False)
+class ScoredWindow:
+    """A loaded slice of one scored recording, ready for `plot_scored_window()`."""
+
+    title: str
+    signal_path: Path
+    predictions_path: Path
+    signals: Any  # samples x channels (EEG1, EEG2, EMG), in µV
+    sampling_rate_hz: float
+    predictions: Any  # one Somnotate state per epoch in the window
+    start_s: float  # window start, in seconds from the recording start
+    end_s: float
+    regions: list[ShadedRegions]
+
+
+@contextmanager
+def _data_root_environment(
+    rawdata_root: Path, derivatives_root: Path
+) -> Iterator[None]:
+    """Point hypnose-somnotate's environment-based root lookup at these roots."""
+    roots = {
+        "HYPNOSE_EEG_RAWDATA_ROOT": str(rawdata_root),
+        "HYPNOSE_EEG_DERIVATIVES_ROOT": str(derivatives_root),
+    }
+    previous = {name: os.environ.get(name) for name in roots}
+    os.environ.update(roots)
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def load_scored_window(settings: ScoringViewSettings) -> ScoredWindow:
+    """Read the selected recording slice, its predictions, and shaded regions."""
     from hypnose_somnotate.config import DEFAULT_CHANNEL_LABELS
     from hypnose_somnotate.io.loading import load_somnotate_vector
     from hypnose_somnotate.io.paths import find_recordings
-    from hypnose_somnotate.visualization import plot_detailed_comparison
     from pyedflib import EdfReader
 
     dates = [settings.date] if settings.date is not None else None
-    recordings = find_recordings(settings.repo_root, [settings.subject], dates=dates)
+    with _data_root_environment(settings.rawdata_root, settings.derivatives_root):
+        recordings = find_recordings(settings.repo_root, [settings.subject], dates=dates)
     if settings.session is not None:
         recordings = [
             recording
@@ -610,7 +694,7 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
     # rate; an explicit --display-rate only accepts a FIF that can satisfy it
     # without upsampling.
     signal_path = recording.edf_path
-    fif_path = _find_downsampled_fif(
+    fif_path = find_downsampled_fif(
         recording.edf_path,
         settings.rawdata_root,
         settings.derivatives_root,
@@ -620,7 +704,7 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
         signal_path = fif_path
         print(f"Using pre-downsampled {fif_path.name} instead of the full-rate EDF")
 
-    with _open_signal_source(signal_path, DEFAULT_CHANNEL_LABELS) as source:
+    with open_signal_source(signal_path, DEFAULT_CHANNEL_LABELS) as source:
         sampling_rate_hz = source.sampling_rate_hz
         total_samples = source.total_samples
         # Subject and session always identify the plot; hours/time_range only add
@@ -650,7 +734,7 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
 
     plotted_rate_hz = sampling_rate_hz
     if settings.display_rate_hz is not None:
-        raw_signals = _downsample_signals(
+        raw_signals = downsample_signals(
             raw_signals, sampling_rate_hz, settings.display_rate_hz
         )
         plotted_rate_hz = settings.display_rate_hz
@@ -667,17 +751,7 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
     if len(somnotate_vec) == 0:
         raise ValueError(f"No scoring predictions overlap {range_description}")
 
-    print(
-        f"Loading {range_description} from {signal_path.name} "
-        f"({len(raw_signals):,} samples at {plotted_rate_hz:g} Hz)\u2026"
-    )
-    fig, _viewer = plot_detailed_comparison(
-        raw_signals,
-        sampling_rate_hz=plotted_rate_hz,
-        somnotate_vec=somnotate_vec,
-        eeg_channel=settings.eeg_channel,
-        view_length_s=settings.view_length_s,
-    )
+    regions: list[ShadedRegions] = []
     if settings.show_gaps:
         import pandas as pd
 
@@ -688,10 +762,10 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
             ("too_short", "darkorange", "Too short"),
         ):
             flagged = kind_table.assign(artifact=kind_table["kind"] == kind_value)
-            regions = _artifact_regions(flagged[["time_s", "artifact"]], start_s, loaded_end_s)
-            _shade_regions(fig, regions, color=color, label=label)
-            if regions:
-                print(f"Shaded {len(regions)} '{kind_value}' region(s) from the predictions parquet")
+            spans = artifact_regions(flagged[["time_s", "artifact"]], start_s, loaded_end_s)
+            if spans:
+                regions.append(ShadedRegions(label, color, spans))
+                print(f"Shaded {len(spans)} '{kind_value}' region(s) from the predictions parquet")
     if settings.show_artifacts:
         import pandas as pd
 
@@ -701,10 +775,65 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
         artifact_table = pd.read_parquet(
             artifact_file, columns=["time_s", "artifact"]
         )
-        regions = _artifact_regions(artifact_table, start_s, loaded_end_s)
-        _label_artifacts(fig, regions)
-        print(f"Labelled {len(regions)} artifact region(s) from {artifact_file.name}")
-    fig.suptitle(title)
+        spans = artifact_regions(artifact_table, start_s, loaded_end_s)
+        regions.append(ShadedRegions("Artifact", "red", spans, text_color="darkred"))
+        print(f"Labelled {len(spans)} artifact region(s) from {artifact_file.name}")
+
+    print(
+        f"Loaded {range_description} from {signal_path.name} "
+        f"({len(raw_signals):,} samples at {plotted_rate_hz:g} Hz)"
+    )
+    return ScoredWindow(
+        title=title,
+        signal_path=signal_path,
+        predictions_path=pred_path,
+        signals=raw_signals,
+        sampling_rate_hz=plotted_rate_hz,
+        predictions=somnotate_vec,
+        start_s=start_s,
+        end_s=loaded_end_s,
+        regions=regions,
+    )
+
+
+def plot_scored_window(
+    window: ScoredWindow,
+    *,
+    eeg_channel: int = 0,
+    view_length_s: float = 120.0,
+) -> tuple[Any, Any]:
+    """Draw a loaded window; return the figure and its keyboard-scrolling viewer.
+
+    Keep the viewer referenced while the figure is shown, or scrolling stops.
+    """
+    from hypnose_somnotate.visualization import plot_detailed_comparison
+
+    fig, viewer = plot_detailed_comparison(
+        window.signals,
+        sampling_rate_hz=window.sampling_rate_hz,
+        somnotate_vec=window.predictions,
+        eeg_channel=eeg_channel,
+        view_length_s=view_length_s,
+    )
+    for region in window.regions:
+        shade_regions(
+            fig,
+            region.spans,
+            color=region.color,
+            label=region.label,
+            text_color=region.text_color,
+        )
+    fig.suptitle(window.title)
+    return fig, viewer
+
+
+def show_scored_recording(settings: ScoringViewSettings) -> int:
+    """Open the interactive viewer for a selected/full recording."""
+    require_graphical_display(os.environ)
+    window = load_scored_window(settings)
+    _fig, _viewer = plot_scored_window(
+        window, eeg_channel=settings.eeg_channel, view_length_s=settings.view_length_s
+    )
 
     import matplotlib.pyplot as plt
 
@@ -730,17 +859,7 @@ def _edf_contains_time(
     return recording_start <= timestamp < recording_end
 
 
-def _import_view_main() -> Callable[[list[str]], int]:
-    try:
-        from hypnose_somnotate.cli.view import main as view_main
-    except ImportError as exc:
-        raise ImportError(
-            "The scoring viewer requires hypnose-somnotate and its visualization dependencies."
-        ) from exc
-    return view_main
-
-
-def _require_graphical_display(environment: Mapping[str, str]) -> None:
+def require_graphical_display(environment: Mapping[str, str]) -> None:
     """Fail clearly before Qt aborts when an SSH session has no display tunnel."""
     if sys.platform.startswith("linux") and not (
         environment.get("DISPLAY") or environment.get("WAYLAND_DISPLAY")
@@ -761,14 +880,10 @@ def run_view(
     if not settings.derivatives_root.is_dir():
         raise FileNotFoundError(f"Derivatives root not found: {settings.derivatives_root}")
 
-    _require_graphical_display(os.environ)
-
-    os.environ["HYPNOSE_EEG_RAWDATA_ROOT"] = str(settings.rawdata_root)
-    os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"] = str(settings.derivatives_root)
-
     if view_function is None:
-        return _run_custom_view(settings)
+        return show_scored_recording(settings)
 
+    require_graphical_display(os.environ)
     arguments = [
         "--sub",
         settings.subject,
@@ -783,7 +898,8 @@ def run_view(
         "--repo-root",
         str(settings.repo_root),
     ]
-    return (view_function or _import_view_main())(arguments)
+    with _data_root_environment(settings.rawdata_root, settings.derivatives_root):
+        return view_function(arguments)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

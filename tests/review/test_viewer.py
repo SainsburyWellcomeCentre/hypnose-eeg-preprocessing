@@ -12,19 +12,23 @@ from unittest.mock import patch
 import pandas as pd
 
 from hypnose_eeg.review.viewer import (
+    ScoredWindow,
     ScoringViewSettings,
+    ShadedRegions,
     _artifact_file,
-    _artifact_regions,
-    _downsample_signals,
     _edf_contains_time,
     _elapsed_range,
-    _find_downsampled_fif,
     _fif_rate_hz,
-    _require_graphical_display,
     _single_value,
+    artifact_regions,
     build_parser,
+    downsample_signals,
+    find_downsampled_fif,
+    plot_scored_window,
+    require_graphical_display,
     run_view,
     settings_from_args,
+    view_settings,
 )
 
 
@@ -114,7 +118,7 @@ class SleepScoringViewTests(unittest.TestCase):
         with patch.dict(
             sys.modules, {"scipy": scipy_module, "scipy.signal": signal_module}
         ):
-            downsampled = _downsample_signals(signals, 512.0, 128.0)
+            downsampled = downsample_signals(signals, 512.0, 128.0)
         self.assertEqual(downsampled.shape, (128, 3))
 
     def test_fif_rate_hz_parses_integer_and_fractional_labels(self) -> None:
@@ -152,7 +156,7 @@ class SleepScoringViewTests(unittest.TestCase):
             for path in (low_rate, target_rate, high_rate):
                 path.touch()
 
-            found = _find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=100.0)
+            found = find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=100.0)
             self.assertEqual(found, target_rate)
 
     def test_find_downsampled_fif_with_zero_min_rate_picks_lowest_available(self) -> None:
@@ -181,7 +185,7 @@ class SleepScoringViewTests(unittest.TestCase):
             for path in (low_rate, high_rate):
                 path.touch()
 
-            found = _find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=0.0)
+            found = find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=0.0)
             self.assertEqual(found, low_rate)
 
     def test_find_downsampled_fif_returns_none_when_no_rate_is_sufficient(self) -> None:
@@ -203,7 +207,7 @@ class SleepScoringViewTests(unittest.TestCase):
             low_rate = downsample_dir / "sub-066_ses-001_recording-concat_resampled-64hz_raw.fif"
             low_rate.touch()
 
-            found = _find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=128.0)
+            found = find_downsampled_fif(edf_path, rawdata, derivatives, min_rate_hz=128.0)
             self.assertIsNone(found)
 
     def test_find_downsampled_fif_returns_none_outside_rawdata_root(self) -> None:
@@ -217,7 +221,7 @@ class SleepScoringViewTests(unittest.TestCase):
             scratch_edf.parent.mkdir(parents=True)
             scratch_edf.touch()
 
-            found = _find_downsampled_fif(scratch_edf, rawdata, derivatives, min_rate_hz=128.0)
+            found = find_downsampled_fif(scratch_edf, rawdata, derivatives, min_rate_hz=128.0)
             self.assertIsNone(found)
 
     def test_artifact_regions_are_clipped_and_merged_for_selected_range(self) -> None:
@@ -228,7 +232,7 @@ class SleepScoringViewTests(unittest.TestCase):
             }
         )
         self.assertEqual(
-            _artifact_regions(table, selected_start_s=10.0, selected_end_s=26.0),
+            artifact_regions(table, selected_start_s=10.0, selected_end_s=26.0),
             [(0.0, 10.0), (14.0, 16.0)],
         )
 
@@ -307,7 +311,7 @@ class SleepScoringViewTests(unittest.TestCase):
 
     def test_missing_display_is_reported_before_qt_starts(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "No graphical display"):
-            _require_graphical_display({})
+            require_graphical_display({})
 
     def test_run_view_forwards_somnotate_view_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -317,9 +321,16 @@ class SleepScoringViewTests(unittest.TestCase):
             rawdata.mkdir()
             derivatives.mkdir()
             calls: list[list[str]] = []
+            roots_seen: list[tuple[str, str]] = []
 
             def fake_view(arguments: list[str]) -> int:
                 calls.append(arguments)
+                roots_seen.append(
+                    (
+                        os.environ["HYPNOSE_EEG_RAWDATA_ROOT"],
+                        os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"],
+                    )
+                )
                 return 0
 
             settings = ScoringViewSettings(
@@ -333,12 +344,16 @@ class SleepScoringViewTests(unittest.TestCase):
                 view_length_s=60.0,
             )
 
-            with patch.dict(os.environ, {"DISPLAY": "localhost:10.0"}):
+            with patch.dict(
+                os.environ,
+                {"DISPLAY": "localhost:10.0", "HYPNOSE_EEG_RAWDATA_ROOT": "/previous"},
+            ):
                 result = run_view(settings, view_function=fake_view)
-                self.assertEqual(os.environ["HYPNOSE_EEG_RAWDATA_ROOT"], str(rawdata))
-                self.assertEqual(
-                    os.environ["HYPNOSE_EEG_DERIVATIVES_ROOT"], str(derivatives)
-                )
+                # The roots reach the somnotate viewer but do not leak into
+                # the caller's environment afterwards.
+                self.assertEqual(roots_seen, [(str(rawdata), str(derivatives))])
+                self.assertEqual(os.environ["HYPNOSE_EEG_RAWDATA_ROOT"], "/previous")
+                self.assertNotIn("HYPNOSE_EEG_DERIVATIVES_ROOT", os.environ)
 
                 self.assertEqual(result, 0)
                 self.assertEqual(
@@ -375,12 +390,54 @@ class SleepScoringViewTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"DISPLAY": "localhost:10.0"}),
                 patch(
-                    "hypnose_eeg.review.viewer._run_custom_view",
+                    "hypnose_eeg.review.viewer.show_scored_recording",
                     return_value=0,
                 ) as range_view,
             ):
                 self.assertEqual(run_view(settings), 0)
                 range_view.assert_called_once_with(settings)
+
+    def test_view_settings_is_the_keyword_form_of_the_cli(self) -> None:
+        from_cli = settings_from_args(
+            build_parser().parse_args(
+                ["--subject", "66", "--session", "2", "--hours", "3", "6", "--no-show-gaps"]
+            )
+        )
+        from_api = view_settings(66, session=2, hours=(3, 6), show_gaps=False)
+
+        self.assertEqual(from_api, from_cli)
+        self.assertEqual(from_api.hours, (3.0, 6.0))
+        with self.assertRaisesRegex(ValueError, "a date or session is required"):
+            view_settings(66)
+
+    def test_scored_window_plots_with_shaded_regions_without_a_display(self) -> None:
+        import matplotlib
+        import numpy as np
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        rate_hz = 256.0
+        window = ScoredWindow(
+            title="sub-066 ses-001 (date 20260717) — hours 0-0.05",
+            signal_path=Path("rec.edf"),
+            predictions_path=Path("rec_somnotate_predictions.parquet"),
+            signals=np.random.default_rng(0).standard_normal((int(180 * rate_hz), 3)),
+            sampling_rate_hz=rate_hz,
+            predictions=np.repeat([1, 2, 3], 60),
+            start_s=0.0,
+            end_s=180.0,
+            regions=[ShadedRegions("Gap", "dimgray", [(10.0, 20.0), (50.0, 60.0)])],
+        )
+
+        fig, viewer = plot_scored_window(window, view_length_s=60.0)
+        try:
+            self.assertIsNotNone(viewer)
+            self.assertEqual(fig._suptitle.get_text(), window.title)
+            gap_labels = [text for text in fig.axes[0].texts if text.get_text() == "Gap"]
+            self.assertEqual(len(gap_labels), 2)
+        finally:
+            plt.close(fig)
 
 
 if __name__ == "__main__":

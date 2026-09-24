@@ -1,12 +1,19 @@
-"""Plot mean EEG power spectra separated by predicted sleep state."""
+"""Plot mean EEG power spectra separated by predicted sleep state.
+
+Usable from Python as well as the command line:
+`compute_session_spectra()`/`compute_recording_spectra()` return `SpectraResult`s,
+`plot_spectra()` turns one into figures, and `save_spectra()` writes them with
+the quality CSV. `main()` only parses arguments and prints.
+"""
 
 from __future__ import annotations
 
 import argparse
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import cache
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -16,11 +23,11 @@ from hypnose_helpers.viz.styles import ensure_style
 
 from hypnose_eeg.io.input_paths import artifact_path, scoring_path
 from hypnose_eeg.io.output_paths import quality_control_output_path, save_csv
-from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
+from hypnose_eeg.io.repository_paths import resolve_data_roots
 from hypnose_eeg.utils.recording_selection import select_recordings
 from hypnose_eeg.analysis.emg import compute_state_emg_rms
 from hypnose_eeg.analysis.power_spectra import compute_state_spectra, integrated_power
-from hypnose_eeg.qc.thresholds import load_performance_check
+from hypnose_eeg.qc.thresholds import default_performance_check
 from hypnose_eeg.utils.config import (
     DEFAULT_SPECTRA_CONFIG_PATH,
     load_config,
@@ -28,11 +35,8 @@ from hypnose_eeg.utils.config import (
     two_float_tuple,
 )
 
-
-# Spectral/EMG quality statuses are upper-cased ("PASS"/"REVIEW"/"FAIL").
-PERFORMANCE_CHECK = {
-    status.upper(): rank for status, rank in load_performance_check().items()
-}
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,20 @@ class SpectraConfig:
     nrem_delta_min_rem_ratio: float
     rem_theta_delta_min_nrem_ratio: float
     emg_state_order: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("epoch seconds", self.epoch_seconds),
+            ("Welch seconds", self.welch_seconds),
+            ("minimum frequency", self.fmin_hz),
+            ("maximum frequency", self.fmax_hz),
+        ):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be a positive finite number")
+        if self.fmax_hz <= self.fmin_hz:
+            raise ValueError("maximum frequency must be greater than minimum frequency")
+        if self.chunk_epochs <= 0:
+            raise ValueError("chunk epochs must be positive")
 
 
 def load_spectra_config(path: str | Path = DEFAULT_SPECTRA_CONFIG_PATH) -> SpectraConfig:
@@ -133,7 +151,15 @@ def load_spectra_config(path: str | Path = DEFAULT_SPECTRA_CONFIG_PATH) -> Spect
     )
 
 
-DEFAULT_SPECTRA_CONFIG = load_spectra_config()
+@cache
+def default_spectra_config() -> SpectraConfig:
+    """Return the repository's spectra configuration, loaded on first use."""
+    return load_spectra_config()
+
+
+def _status_rank(status: str) -> int:
+    """Severity of an upper-cased spectral/EMG status ("PASS"/"REVIEW"/"FAIL")."""
+    return default_performance_check()[status.lower()]
 
 
 def build_spectral_quality_report(
@@ -144,9 +170,10 @@ def build_spectral_quality_report(
     emg_rms: dict[int, np.ndarray],
     emg_channels: list[str],
     *,
-    config: SpectraConfig = DEFAULT_SPECTRA_CONFIG,
+    config: SpectraConfig | None = None,
 ) -> pd.DataFrame:
     """Assess band-power quality per channel using configured state expectations."""
+    config = config or default_spectra_config()
     if not eeg_channels:
         raise ValueError("At least one EEG channel is required for spectral quality")
     if config.determining_eeg_channel_number > len(eeg_channels):
@@ -291,7 +318,7 @@ def build_spectral_quality_report(
                 emg_reason = "Expected Wake >= NREM >= REM EMG ordering was present"
 
             quality_status = max(
-                (spectral_status, emg_status), key=lambda value: PERFORMANCE_CHECK[value]
+                (spectral_status, emg_status), key=_status_rank
             )
             rows.append(
                 {
@@ -334,7 +361,7 @@ def build_spectral_quality_report(
     report = pd.DataFrame(rows)
     determining = report.loc[report["determines_recording_quality"]]
     recording_status = max(
-        determining["quality_status"], key=lambda status: PERFORMANCE_CHECK[str(status)]
+        determining["quality_status"], key=lambda status: _status_rank(str(status))
     )
     report.insert(0, "recording_quality_status", recording_status)
     return report
@@ -347,8 +374,9 @@ def plot_state_spectra(
     channel_names: list[str],
     *,
     title: str,
-    config: SpectraConfig = DEFAULT_SPECTRA_CONFIG,
+    config: SpectraConfig | None = None,
 ):
+    config = config or default_spectra_config()
     ensure_style()
     import matplotlib.pyplot as plt
 
@@ -387,9 +415,10 @@ def plot_state_emg_rms(
     channel_names: list[str],
     *,
     title: str,
-    config: SpectraConfig = DEFAULT_SPECTRA_CONFIG,
+    config: SpectraConfig | None = None,
 ):
     """Plot one EMG RMS histogram per sleep state and EMG channel."""
+    config = config or default_spectra_config()
     ensure_style()
     import matplotlib.pyplot as plt
 
@@ -431,6 +460,187 @@ def plot_state_emg_rms(
     return fig
 
 
+@dataclass(frozen=True, eq=False)
+class SpectraResult:
+    """One recording's sleep-state spectra, EMG RMS, and spectral quality report."""
+
+    edf_path: Path
+    fif_path: Path
+    scoring_path: Path
+    artifact_path: Path | None  # None when artifact epochs were included
+    frequencies: np.ndarray
+    spectra: dict[int, np.ndarray]
+    eeg_counts: dict[int, int]
+    eeg_channels: list[str]
+    emg_rms: dict[int, np.ndarray]
+    emg_channels: list[str]
+    quality_report: pd.DataFrame
+
+    @property
+    def recording(self) -> str:
+        return self.edf_path.stem
+
+    @property
+    def quality_status(self) -> str:
+        """The determining channel's overall PASS/REVIEW/FAIL status."""
+        return str(self.quality_report["recording_quality_status"].iloc[0])
+
+
+def compute_recording_spectra(
+    edf_path: Path,
+    fif_path: Path,
+    *,
+    rawdata_root: Path,
+    derivatives_root: Path,
+    config: SpectraConfig | None = None,
+) -> SpectraResult:
+    """Compute one EDF/FIF pair's spectra, EMG RMS, and quality report."""
+    config = config or default_spectra_config()
+    scores = scoring_path(edf_path, rawdata_root, derivatives_root)
+    artifacts = (
+        None
+        if config.include_artifacts
+        else artifact_path(edf_path, rawdata_root, derivatives_root)
+    )
+    frequencies, spectra, counts, eeg_channels = compute_state_spectra(
+        fif_path,
+        scores,
+        artifact_path=artifacts,
+        epoch_seconds=config.epoch_seconds,
+        welch_seconds=config.welch_seconds,
+        fmin_hz=config.fmin_hz,
+        fmax_hz=config.fmax_hz,
+        chunk_epochs=config.chunk_epochs,
+    )
+    emg_rms, emg_channels = compute_state_emg_rms(
+        fif_path,
+        scores,
+        artifact_path=artifacts,
+        epoch_seconds=config.epoch_seconds,
+        chunk_epochs=config.chunk_epochs,
+    )
+    quality_report = build_spectral_quality_report(
+        frequencies,
+        spectra,
+        counts,
+        eeg_channels,
+        emg_rms,
+        emg_channels,
+        config=config,
+    )
+    return SpectraResult(
+        edf_path=edf_path,
+        fif_path=fif_path,
+        scoring_path=scores,
+        artifact_path=artifacts,
+        frequencies=frequencies,
+        spectra=spectra,
+        eeg_counts=counts,
+        eeg_channels=eeg_channels,
+        emg_rms=emg_rms,
+        emg_channels=emg_channels,
+        quality_report=quality_report,
+    )
+
+
+def compute_session_spectra(
+    subject: str | int,
+    *,
+    date: str | int | None = None,
+    session: str | int | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+    config: SpectraConfig | None = None,
+) -> list[SpectraResult]:
+    """Compute spectra for every recording in one subject's session.
+
+    The roots default to the active data-location profile. Override analysis
+    settings with `dataclasses.replace(default_spectra_config(), fmax_hz=40.0)`.
+    """
+    rawdata_root, derivatives_root = resolve_data_roots(rawdata_root, derivatives_root)
+    return [
+        compute_recording_spectra(
+            edf_path,
+            fif_path,
+            rawdata_root=rawdata_root,
+            derivatives_root=derivatives_root,
+            config=config,
+        )
+        for edf_path, fif_path in select_recordings(
+            rawdata_root, derivatives_root, subject=subject, date=date, session=session
+        )
+    ]
+
+
+def plot_spectra(
+    result: SpectraResult,
+    *,
+    label: str | None = None,
+    config: SpectraConfig | None = None,
+) -> dict[str, "Figure"]:
+    """Plot a result's spectra ("spectra") and, when EMG was analysed, "emg_rms"."""
+    label = label or result.recording
+    figures = {
+        "spectra": plot_state_spectra(
+            result.frequencies,
+            result.spectra,
+            result.eeg_counts,
+            result.eeg_channels,
+            title=f"{label} — sleep-state spectra",
+            config=config,
+        )
+    }
+    if result.emg_channels and result.emg_rms:
+        figures["emg_rms"] = plot_state_emg_rms(
+            result.emg_rms,
+            result.emg_channels,
+            title=f"{label} — EMG RMS by sleep state",
+            config=config,
+        )
+    return figures
+
+
+_FIGURE_NAMES = {
+    "spectra": "sleep_state_power_spectra",
+    "emg_rms": "sleep_state_emg_rms",
+}
+
+
+def save_spectra(
+    result: SpectraResult,
+    save_dir: str | Path,
+    figures: Mapping[str, "Figure"] | None = None,
+    *,
+    subject: str | int | None = None,
+    date: str | None = None,
+) -> list[Path]:
+    """Write the quality CSV and any `plot_spectra()` figures into `save_dir`.
+
+    `subject`/`date` only add the shared filename tags to the figure PDFs.
+    """
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    paths = [
+        save_csv(
+            result.quality_report,
+            save_dir / f"{result.recording}_sleep_state_spectral_quality.csv",
+        )
+    ]
+    for key, fig in (figures or {}).items():
+        path = Path(
+            save_figure(
+                fig,
+                f"{result.recording}_{_FIGURE_NAMES[key]}",
+                fig_dir=save_dir,
+                subjids=None if subject is None else parse_subject(subject),
+                dates=date,
+            )
+        )
+        print(f"Saved: {path}")
+        paths.append(path)
+    return paths
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -469,45 +679,27 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    try:
-        config = load_spectra_config(args.spectra_config)
-    except (KeyError, TypeError, ValueError) as exc:
-        parser.error(str(exc))
-    args.epoch_seconds = (
-        config.epoch_seconds if args.epoch_seconds is None else args.epoch_seconds
-    )
-    args.welch_seconds = (
-        config.welch_seconds if args.welch_seconds is None else args.welch_seconds
-    )
-    args.fmin = config.fmin_hz if args.fmin is None else args.fmin
-    args.fmax = config.fmax_hz if args.fmax is None else args.fmax
-    args.chunk_epochs = (
-        config.chunk_epochs if args.chunk_epochs is None else args.chunk_epochs
-    )
-    args.include_artifacts = (
-        config.include_artifacts
-        if args.include_artifacts is None
-        else args.include_artifacts
-    )
-    for name, value in (
-        ("epoch seconds", args.epoch_seconds),
-        ("Welch seconds", args.welch_seconds),
-        ("minimum frequency", args.fmin),
-        ("maximum frequency", args.fmax),
-    ):
-        if not math.isfinite(value) or value <= 0:
-            parser.error(f"{name} must be a positive finite number")
-    if args.fmax <= args.fmin:
-        parser.error("--fmax must be greater than --fmin")
-    if args.chunk_epochs <= 0:
-        parser.error("--chunk-epochs must be positive")
     if args.no_show and args.save_dir is None:
         parser.error("--no-show requires --save-dir")
+    try:
+        config = load_spectra_config(args.spectra_config)
+        overrides = {
+            "epoch_seconds": args.epoch_seconds,
+            "welch_seconds": args.welch_seconds,
+            "fmin_hz": args.fmin,
+            "fmax_hz": args.fmax,
+            "chunk_epochs": args.chunk_epochs,
+            "include_artifacts": args.include_artifacts,
+        }
+        config = replace(
+            config, **{name: value for name, value in overrides.items() if value is not None}
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
 
-    rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
-    derivatives_root = Path(
-        args.derivatives_root or get_derivatives_root()
-    ).resolve(strict=False)
+    rawdata_root, derivatives_root = resolve_data_roots(
+        args.rawdata_root, args.derivatives_root
+    )
     pairs = select_recordings(
         rawdata_root,
         derivatives_root,
@@ -515,74 +707,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         date=args.date,
         session=args.session,
     )
-
-    figures = []
     for edf_path, fif_path in pairs:
-        scores = scoring_path(edf_path, rawdata_root, derivatives_root)
-        artifacts = (
-            None
-            if args.include_artifacts
-            else artifact_path(edf_path, rawdata_root, derivatives_root)
-        )
         print(f"FIF: {fif_path}")
-        print(f"Scoring: {scores}")
-        print(f"Artifacts: {artifacts or 'included/not available'}")
-        frequencies, spectra, counts, channels = compute_state_spectra(
+        result = compute_recording_spectra(
+            edf_path,
             fif_path,
-            scores,
-            artifact_path=artifacts,
-            epoch_seconds=args.epoch_seconds,
-            welch_seconds=args.welch_seconds,
-            fmin_hz=args.fmin,
-            fmax_hz=args.fmax,
-            chunk_epochs=args.chunk_epochs,
+            rawdata_root=rawdata_root,
+            derivatives_root=derivatives_root,
+            config=config,
         )
+        print(f"Scoring: {result.scoring_path}")
+        print(f"Artifacts: {result.artifact_path or 'included/not available'}")
         for state, name in config.sleep_state_names.items():
-            print(f"  {name}: {counts[state]:,} epochs")
-        fig = plot_state_spectra(
-            frequencies,
-            spectra,
-            counts,
-            channels,
-            title=f"{args.subject} — {args.date or args.session} — sleep-state spectra",
-            config=config,
+            print(f"  {name}: {result.eeg_counts[state]:,} epochs")
+        figures = plot_spectra(
+            result, label=f"{args.subject} — {args.date or args.session}", config=config
         )
-        figures.append(fig)
-        emg_rms, emg_channels = compute_state_emg_rms(
-            fif_path,
-            scores,
-            artifact_path=artifacts,
-            epoch_seconds=args.epoch_seconds,
-            chunk_epochs=args.chunk_epochs,
-        )
-        emg_fig = None
-        if emg_channels and emg_rms:
-            emg_fig = plot_state_emg_rms(
-                emg_rms,
-                emg_channels,
-                title=(
-                    f"{args.subject} — {args.date or args.session} — "
-                    "EMG RMS by sleep state"
-                ),
-                config=config,
-            )
-            figures.append(emg_fig)
-        else:
+        if "emg_rms" not in figures:
             print("EMG RMS: skipped (no EMG channels or scored finite epochs)")
-        quality_report = build_spectral_quality_report(
-            frequencies,
-            spectra,
-            counts,
-            channels,
-            emg_rms,
-            emg_channels,
-            config=config,
-        )
-        print(
-            "Spectral quality: "
-            f"{quality_report['recording_quality_status'].iloc[0]}"
-        )
-        for row in quality_report.itertuples(index=False):
+        print(f"Spectral quality: {result.quality_status}")
+        for row in result.quality_report.itertuples(index=False):
             print(
                 f"  {row.eeg_channel} — {row.sleep_state}: "
                 f"{row.quality_status} — "
@@ -592,28 +736,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             save_dir = quality_control_output_path(
                 args.save_dir, edf_path, rawdata_root, derivatives_root
             )
-            save_dir.mkdir(parents=True, exist_ok=True)
-            quality_output_path = (
-                save_dir / f"{edf_path.stem}_sleep_state_spectral_quality.csv"
-            )
-            save_csv(quality_report, quality_output_path)
-            output_path = save_figure(
-                fig,
-                f"{edf_path.stem}_sleep_state_power_spectra",
-                fig_dir=save_dir,
-                subjids=parse_subject(args.subject),
-                dates=args.date,
-            )
-            print(f"Saved: {output_path}")
-            if emg_fig is not None:
-                emg_output_path = save_figure(
-                    emg_fig,
-                    f"{edf_path.stem}_sleep_state_emg_rms",
-                    fig_dir=save_dir,
-                    subjids=parse_subject(args.subject),
-                    dates=args.date,
-                )
-                print(f"Saved: {emg_output_path}")
+            save_spectra(result, save_dir, figures, subject=args.subject, date=args.date)
 
     if not args.no_show:
         import matplotlib.pyplot as plt

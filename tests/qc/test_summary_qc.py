@@ -11,7 +11,7 @@ from hypnose_eeg.qc.sleep_scoring import (
     sleep_state_proportion_report,
     sleep_state_proportions,
 )
-from hypnose_eeg.qc.spectra import DEFAULT_SPECTRA_CONFIG
+from hypnose_eeg.qc.spectra import default_spectra_config
 from hypnose_eeg.io.output_paths import recording_output_name
 from hypnose_eeg.qc.summary_qc import (
     DEFAULT_REVIEW_FILENAME,
@@ -224,7 +224,7 @@ class SummaryQualityControlTests(unittest.TestCase):
             }
         )
 
-        sections = spectral_quality_sections(report, DEFAULT_SPECTRA_CONFIG)
+        sections = spectral_quality_sections(report, default_spectra_config())
 
         self.assertEqual(sections[0]["section"], "power_spectra")
         self.assertEqual(sections[0]["status"], "review")

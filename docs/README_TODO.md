@@ -199,4 +199,18 @@ parquet copies of the summary and review epochs, falling back to the CSVs.
 
 ## 23. Improve external running of API
 
+In progress. Done: `scripts/` is now the installable `hypnose_eeg` package (no
+`sys.path` inserts; configuration loads on first use rather than at import);
+the viewer moved to `hypnose_eeg/review/viewer.py`; `qc/spectra.py` and the
+viewer are split into compute/plot/CLI layers (`compute_session_spectra`,
+`plot_spectra`, `save_spectra`; `view_settings`, `load_scored_window`,
+`plot_scored_window`, `show_scored_recording`). Remaining:
+- A small `hypnose_eeg/api.py` facade with a `DataLocations` argument and
+  console scripts, and `src/qc.run_steps` calling functions in-process
+  rather than as subprocesses (folding `src/` into the package).
+- The same compute/plot/CLI split for the other `qc/` modules
+  (`summary_qc.run_qc` still takes an `argparse.Namespace`).
+- A headless `render_scoring()` that saves a PNG of each section `qc_review`
+  flags, built on `load_scored_window`/`plot_scored_window`.
+
 ## 24. Reduce amount of text at top of scripts

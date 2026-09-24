@@ -27,6 +27,17 @@ get_derivatives_root = _locations.get_derivatives_root
 reload = _locations.reload
 
 
+def resolve_data_roots(
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """Return absolute raw-data and derivatives roots, defaulting to the profile's."""
+    return (
+        Path(rawdata_root or get_rawdata_root()).expanduser().resolve(strict=False),
+        Path(derivatives_root or get_derivatives_root()).expanduser().resolve(strict=False),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run data-location profile selection for this repository."""
     forwarded = list(sys.argv[1:] if argv is None else argv)

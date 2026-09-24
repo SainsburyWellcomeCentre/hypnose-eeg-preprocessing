@@ -12,22 +12,31 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
 ## Top-level folders
 - `configs/`: environment/data referencing and pipeline runtime settings.
 - `notebooks/`: exploratory jupyter notebooks for development.
-- `src/`: scripts containing major processing modules of repo.
-- `scripts/`: developed scripts for easy run and execution points.
+- `hypnose_eeg/`: the installable package (`pip install -e .`); every module
+  imports from any directory.
+- `src/`: pipeline entry points that chain the package's command-line steps,
+  run from the repository root (`python -m src.run_pipeline`).
 - `tests/`: fixtures and integration tests for quality control.
 - `docs/`: contracts and operations runbooks.
 - `cache/`: optional ephemeral local staging.
 
-### `scripts/` folders
-- `analysis/`: reusable scientific calculations imported by executable scripts;
-  these modules are not command-line entry points.
+### `hypnose_eeg/` subpackages
+- `analysis/`: reusable scientific calculations; these modules are not
+  command-line entry points.
 - `io/`: recording discovery, data-location configuration, and MNE file-loading
   helpers.
-- `preprocessing/`: executable preprocessing workflows.
-- `qc/`: executable reporting and visualisation workflows.
-- `sleep_scoring/`: executable automated and interactive sleep-scoring workflows.
+- `preprocessing/`: preprocessing workflows.
+- `qc/`: quality-control reports and plots.
+- `review/`: visual review of scored recordings (the interactive viewer).
+- `sleep_scoring/`: automated Somnotate sleep scoring.
 - `utils/`: small cross-cutting helpers such as configuration, artifact, and
   sleep-state handling.
+
+Workflow modules are both command-line entry points (`python -m
+hypnose_eeg.qc.spectra --help`) and Python APIs. `qc/spectra.py` and
+`review/viewer.py` separate computing results, plotting them, and the CLI, so
+their results can be used without the CLI. Configuration is read from
+`configs/` on first use, not at import time.
 
 ## Sections for inclusion
 - `io/`: source and sink connectors, contracts, checkpoint helpers.

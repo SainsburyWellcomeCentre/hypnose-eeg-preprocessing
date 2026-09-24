@@ -491,6 +491,21 @@ python -m hypnose_eeg.review.viewer \
   --display-rate 128 --show-artifacts
 ```
 
+From Python, `view_settings()` takes the same options as keywords.
+`load_scored_window()` reads the selected signals, predictions, and shaded
+regions without needing a display, `plot_scored_window()` draws them, and
+`show_scored_recording()` opens the interactive window:
+
+```python
+from hypnose_eeg.review.viewer import (
+    load_scored_window, plot_scored_window, view_settings,
+)
+
+settings = view_settings(66, session=1, hours=(3, 6), display_rate_hz=128)
+window = load_scored_window(settings)
+fig, viewer = plot_scored_window(window, view_length_s=settings.view_length_s)
+```
+
 Viewer defaults live in the `sleep_scoring_view` section of the same pipeline
 config. This is an interactive visual quality check, not a numerical accuracy
 measurement; numerical performance requires matching manual ground-truth labels.
@@ -587,6 +602,26 @@ python -m hypnose_eeg.qc.spectra \
 
 Use `--fmin`, `--fmax`, `--epoch-seconds`, `--welch-seconds`, and
 `--chunk-epochs` to adjust the spectrum calculation and memory/runtime tradeoff.
+
+The same steps are available from Python, returning the results instead of
+printing them:
+
+```python
+from dataclasses import replace
+
+from hypnose_eeg.qc.spectra import (
+    compute_session_spectra, default_spectra_config, plot_spectra, save_spectra,
+)
+
+config = replace(default_spectra_config(), fmax_hz=40.0)  # optional overrides
+for result in compute_session_spectra(66, session=1, config=config):
+    print(result.recording, result.quality_status)
+    result.quality_report       # the quality CSV's table, as a DataFrame
+    figures = plot_spectra(result, config=config)  # {"spectra": ..., "emg_rms": ...}
+    save_spectra(result, "spectra_out", figures)
+```
+
+`rawdata_root=`/`derivatives_root=` override the active data-location profile.
 
 ## Sleep-state channel correlation
 
