@@ -7,6 +7,8 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
+import pandas as pd
+
 from src import qc_review
 from src.qc_review import format_review, resolve_subjects, review_subject
 
@@ -64,6 +66,55 @@ class QcReviewTests(unittest.TestCase):
         self.assertEqual(sections["artifacts"].review_entries, 2)
         self.assertEqual(sections["artifacts"].review_seconds, 8.0)
         self.assertEqual(sections["emg_rms"].review_entries, 0)
+
+    def test_parquet_copies_are_read_in_preference_to_the_csv(self):
+        session_dir = self.session(
+            1, "20260717",
+            **{
+                "rec_qc_summary.csv": qc_summary_csv(("integrity", "pass")),
+                "rec_qc_review_epochs.csv": review_epochs_csv(("artifacts", 1)),
+            },
+        )
+        qc_dir = session_dir / QC_FOLDER
+        pd.DataFrame(
+            {
+                "section": ["integrity", "artifacts"],
+                "status": ["pass", "review"],
+                "metric": ["m", "m"],
+                "value": ["1.5", "n/a"],
+                "threshold": ["1", "2"],
+                "detail": ["d", "d"],
+            }
+        ).to_parquet(qc_dir / "rec_qc_summary.parquet", index=False)
+        pd.DataFrame(
+            {"section": ["artifacts"] * 3, "duration_s": [4.0, 4.0, 2.0]}
+        ).to_parquet(qc_dir / "rec_qc_review_epochs.parquet", index=False)
+
+        session = review_subject(self.root, 66, qc_folder=QC_FOLDER).sessions[0]
+
+        self.assertEqual(session.status, "review")
+        [section] = session.sections
+        self.assertEqual((section.section, section.value), ("artifacts", "n/a"))
+        self.assertEqual((section.review_entries, section.review_seconds), (3, 10.0))
+        self.assertEqual(section.summary_path.name, "rec_qc_summary.parquet")
+
+    def test_a_csv_summary_without_a_parquet_copy_is_still_read(self):
+        session_dir = self.session(
+            1, "20260717", **{"a_qc_summary.csv": qc_summary_csv(("spectra", "review"))}
+        )
+        pd.DataFrame(
+            {
+                "section": ["artifacts"], "status": ["review"], "metric": ["m"],
+                "value": ["1"], "threshold": ["1"], "detail": ["d"],
+            }
+        ).to_parquet(session_dir / QC_FOLDER / "b_qc_summary.parquet", index=False)
+
+        session = review_subject(self.root, 66, qc_folder=QC_FOLDER).sessions[0]
+
+        self.assertEqual(
+            [(section.recording, section.section) for section in session.sections],
+            [("a", "spectra"), ("b", "artifacts")],
+        )
 
     def test_a_fail_section_makes_the_session_fail(self):
         self.session(

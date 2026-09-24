@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -16,12 +17,14 @@ from scripts.qc.summary_qc import (
     DEFAULT_REVIEW_FILENAME,
     DEFAULT_SUMMARY_FILENAME,
     REVIEW_COLUMNS,
+    SECTION_COLUMNS,
     artifact_prescan_section,
     build_parser,
     overall_status,
-    review_output_paths,
+    paired_output_paths,
     sleep_state_proportion_section,
     spectral_quality_sections,
+    summary_parquet_table,
 )
 
 
@@ -109,16 +112,35 @@ class SummaryQualityControlTests(unittest.TestCase):
 
     def test_review_outputs_include_csv_and_parquet(self) -> None:
         self.assertEqual(
-            review_output_paths("qc_review_epochs.csv"),
+            paired_output_paths("qc_review_epochs.csv"),
             (
                 Path("qc_review_epochs.csv"),
                 Path("qc_review_epochs.parquet"),
             ),
         )
         self.assertEqual(
-            review_output_paths("custom.parquet"),
+            paired_output_paths("custom.parquet"),
             (Path("custom.csv"), Path("custom.parquet")),
         )
+
+    def test_summary_parquet_holds_mixed_values_as_their_csv_text(self) -> None:
+        sections = pd.DataFrame(
+            [
+                ["integrity", "pass", "m", 0.5, 1.0, "d"],
+                ["spectral", "review", "m", "3/4", "Wake>=NREM", "d"],
+                ["prescan", "pass", "m", "n/a", float("nan"), "d"],
+            ],
+            columns=SECTION_COLUMNS,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "qc_summary.parquet"
+            summary_parquet_table(sections).to_parquet(path, index=False)
+            table = pd.read_parquet(path)
+
+        self.assertEqual(list(table.columns), SECTION_COLUMNS)
+        self.assertEqual(list(table["value"]), ["0.5", "3/4", "n/a"])
+        self.assertEqual(list(table["threshold"]), ["1.0", "Wake>=NREM", ""])
 
     def test_outputs_are_named_after_the_analyzed_recording(self) -> None:
         edf = Path("/raw/sub-066/ses-001/ephys/sub-066_ses-001_recording-concat.edf")
@@ -127,7 +149,7 @@ class SummaryQualityControlTests(unittest.TestCase):
             Path("sub-066_ses-001_recording-concat_qc_summary.csv"),
         )
         self.assertEqual(
-            review_output_paths(recording_output_name(DEFAULT_REVIEW_FILENAME, edf)),
+            paired_output_paths(recording_output_name(DEFAULT_REVIEW_FILENAME, edf)),
             (
                 Path("sub-066_ses-001_recording-concat_qc_review_epochs.csv"),
                 Path("sub-066_ses-001_recording-concat_qc_review_epochs.parquet"),

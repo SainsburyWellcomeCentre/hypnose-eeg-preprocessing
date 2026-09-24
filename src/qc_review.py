@@ -1,11 +1,13 @@
 """List every session whose QC summary asks for review, and which sections did.
 
-Reads the `qc_summary.csv` that `scripts/qc/summary_qc.py` writes into each
+Reads the QC summary that `scripts/qc/summary_qc.py` writes into each
 session's quality-control directory, for every session the given subjects have
 under the derivatives root (`--subject all` covers every subject there). A
 session is listed when any section of its summary is not `pass`; each listed
 section is shown with its metric, value, threshold, and detail, plus how many
-entries it contributed to the session's `qc_review_epochs.csv`. Sessions with a
+entries it contributed to the session's review ranges. Both are read from their
+`.parquet` copies (`qc_summary.parquet`, `qc_review_epochs.parquet`), falling
+back to the CSV for sessions summarized before those copies existed. Sessions with a
 FAIL section are listed too, marked as such -- a batch run erases those, but a
 single run leaves them in place.
 
@@ -34,15 +36,17 @@ from typing import Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pyarrow.parquet as pq
 from hypnose_helpers.io.layout import SessionLayout, SessionRef, normalize_subjid
 from hypnose_helpers.io.selectors import parse_subjects
 
 from src._batch import (
     ALL_SUBJECTS,
     QC_FAIL,
-    QC_SUMMARY_SUFFIX,
     _applied_env,
     format_duration,
+    qc_summary_files,
+    read_qc_summary,
 )
 from src._pipeline import (
     add_output_layout_arguments,
@@ -55,7 +59,9 @@ from scripts.io.repository_paths import get_derivatives_root
 from scripts.qc.thresholds import load_performance_check
 
 QC_PASS = "pass"
-# The review ranges summary_qc writes beside each summary, under the same stem.
+# The review ranges summary_qc writes beside each summary, under the same
+# prefix: a parquet copy, read in preference, and the CSV.
+QC_REVIEW_PARQUET_SUFFIX = "qc_review_epochs.parquet"
 QC_REVIEW_SUFFIX = "qc_review_epochs.csv"
 
 REPORT_FIELDS = [
@@ -178,22 +184,15 @@ def review_session(session_ref: SessionRef, *, qc_folder: str) -> SessionReview:
         date=session_ref.date,
         session_dir=session_ref.path,
     )
-    # Hidden files are skipped: macOS leaves `._<name>` AppleDouble sidecars on
-    # network shares that match the pattern but are not CSV.
-    summaries = [
-        path
-        for path in sorted((session_ref.path / qc_folder).glob(f"*{QC_SUMMARY_SUFFIX}"))
-        if not path.name.startswith(".")
-    ]
+    summaries = qc_summary_files(session_ref.path / qc_folder)
     if not summaries:
         return review
 
     severity = load_performance_check()
     statuses: list[str] = []
-    for path in summaries:
-        recording = path.name[: -len(QC_SUMMARY_SUFFIX)].rstrip("_")
-        with path.open(newline="") as handle:
-            rows = list(csv.DictReader(handle))
+    for prefix, path in summaries.items():
+        recording = prefix.rstrip("_")
+        rows = read_qc_summary(path)
         if not rows:
             # summary_qc treats a summary with no sections as a failure too.
             statuses.append(QC_FAIL)
@@ -216,7 +215,7 @@ def review_session(session_ref: SessionRef, *, qc_folder: str) -> SessionReview:
                     )
                 )
         if flagged:
-            _count_review_entries(path, flagged)
+            _count_review_entries(path.with_name(prefix), flagged)
             review.sections.extend(flagged)
 
     worst = max(statuses, key=lambda status: severity.get(status, severity[QC_FAIL]))
@@ -224,23 +223,34 @@ def review_session(session_ref: SessionRef, *, qc_folder: str) -> SessionReview:
     return review
 
 
-def _count_review_entries(summary_path: Path, sections: list[FlaggedSection]) -> None:
-    """Fill in how many review ranges (and seconds) each flagged section left."""
-    stem = summary_path.name[: -len(QC_SUMMARY_SUFFIX)]
-    review_path = summary_path.with_name(stem + QC_REVIEW_SUFFIX)
-    if not review_path.is_file():
-        return
+def _count_review_entries(prefix: Path, sections: list[FlaggedSection]) -> None:
+    """Fill in how many review ranges (and seconds) each flagged section left.
+
+    `prefix` is the summary's path without its `qc_summary.*` suffix. Only the
+    `section` and `duration_s` columns of the parquet copy are read, which keeps
+    sessions with tens of thousands of review ranges quick; the CSV is parsed
+    only when there is no parquet.
+    """
     by_section = {section.section: section for section in sections}
-    with review_path.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            section = by_section.get(str(row.get("section", "")).strip())
-            if section is None:
-                continue
-            section.review_entries += 1
-            try:
-                section.review_seconds += float(row.get("duration_s") or 0)
-            except ValueError:
-                pass
+    parquet_path = prefix.with_name(prefix.name + QC_REVIEW_PARQUET_SUFFIX)
+    csv_path = prefix.with_name(prefix.name + QC_REVIEW_SUFFIX)
+    if parquet_path.is_file():
+        columns = pq.read_table(parquet_path, columns=["section", "duration_s"]).to_pydict()
+        rows = zip(columns["section"], columns["duration_s"])
+    elif csv_path.is_file():
+        with csv_path.open(newline="") as handle:
+            rows = [(row.get("section"), row.get("duration_s")) for row in csv.DictReader(handle)]
+    else:
+        return
+    for name, duration in rows:
+        section = by_section.get(str(name or "").strip())
+        if section is None:
+            continue
+        section.review_entries += 1
+        try:
+            section.review_seconds += float(duration or 0)
+        except ValueError:
+            pass
 
 
 def format_review(subjects: Sequence[SubjectReview]) -> str:

@@ -189,7 +189,13 @@ folders within a session" in `readme.md`.
 
 ## 22. Automate running of the preprocessing for hypnose dataset with reports of errors
 
-## Pipeline output also parquet for qc review for efficiency
+## ~~Pipeline output also parquet for qc review for efficiency~~
+
+~~QC review read only CSVs~~ — done: `summary_qc.py` writes `qc_summary.parquet`
+beside `qc_summary.csv`, and `src/qc_review.py` and the batch QC verdict read the
+parquet copies of the summary and review epochs, falling back to the CSVs.
+
+## Short recordings are currently not being scored well because they don't have long periods of baseline - consider using a previous long session to set baseline (<6 hour recordings>)
 
 ## 23. Improve external running of API
 

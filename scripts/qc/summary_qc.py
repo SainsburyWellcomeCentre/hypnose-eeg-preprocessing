@@ -1,7 +1,7 @@
 """Run all session quality-control checks and decide analysis readiness.
 
 The section results (`qc_summary.csv`) and the unified review ranges
-(`qc_review_epochs.csv` plus its typed `.parquet` copy) are both written to
+(`qc_review_epochs.csv`), each with a `.parquet` copy, are both written to
 the shared session quality-control directory on every run, each prefixed with
 the analyzed recording's stem -- for example
 `sub-066_ses-001_recording-concat_qc_summary.csv`. Pass a filename to
@@ -322,8 +322,8 @@ def _validate_fraction(parser: argparse.ArgumentParser, name: str, value: float)
         parser.error(f"{name} must be between 0 and 100")
 
 
-def review_output_paths(requested: str | Path) -> tuple[Path, Path]:
-    """Return paired CSV and parquet paths for a requested review output."""
+def paired_output_paths(requested: str | Path) -> tuple[Path, Path]:
+    """Return paired CSV and parquet paths for a requested summary or review output."""
     path = Path(requested)
     suffix = path.suffix.lower()
     if suffix == ".csv":
@@ -331,6 +331,19 @@ def review_output_paths(requested: str | Path) -> tuple[Path, Path]:
     if suffix in {".parquet", ".pq"}:
         return path.with_suffix(".csv"), path.with_suffix(".parquet")
     return path.with_suffix(".csv"), path.with_suffix(".parquet")
+
+
+def summary_parquet_table(sections: pd.DataFrame) -> pd.DataFrame:
+    """The section table with `value`/`threshold` as their CSV text.
+
+    Those columns hold numbers for some sections and text such as `3/4` or
+    `n/a` for others, which a parquet column cannot mix; the text form matches
+    what the CSV holds, so readers see the same values from either file.
+    """
+    table = sections.copy()
+    for column in ("value", "threshold"):
+        table[column] = ["" if pd.isna(value) else str(value) for value in table[column]]
+    return table.astype({column: str for column in SECTION_COLUMNS})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -377,8 +390,9 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const=DEFAULT_SUMMARY_FILENAME,
         default=DEFAULT_SUMMARY_FILENAME,
-        help="Filename for the section results saved in the shared session QC "
-        f"directory, prefixed with the recording stem (default: "
+        help="Filename for the section results, saved as paired CSV and parquet "
+        "files in the shared session QC directory, prefixed with the recording "
+        "stem (default: "
         f"<recording>_{DEFAULT_SUMMARY_FILENAME}).",
     )
     parser.add_argument(
@@ -808,18 +822,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     _print_results(sections, reviews)
     written: list[Path] = []
     if args.summary is not None:
-        summary_path = quality_control_output_path(
-            recording_output_name(args.summary, edf_path),
-            edf_path, rawdata_root, derivatives_root,
+        summary_csv_path, summary_parquet_path = paired_output_paths(
+            quality_control_output_path(
+                recording_output_name(args.summary, edf_path),
+                edf_path, rawdata_root, derivatives_root,
+            )
         )
-        save_csv(sections, summary_path)
-        written.append(summary_path)
+        save_csv(sections, summary_csv_path)
+        summary_parquet_table(sections).to_parquet(summary_parquet_path, index=False)
+        print(f"Saved: {summary_parquet_path}")
+        written.extend([summary_csv_path, summary_parquet_path])
     if args.review_epochs is not None:
         requested_review_path = quality_control_output_path(
             recording_output_name(args.review_epochs, edf_path),
             edf_path, rawdata_root, derivatives_root,
         )
-        review_csv_path, review_parquet_path = review_output_paths(
+        review_csv_path, review_parquet_path = paired_output_paths(
             requested_review_path
         )
         save_csv(reviews, review_csv_path)

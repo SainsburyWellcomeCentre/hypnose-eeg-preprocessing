@@ -210,10 +210,12 @@ and a batch run has nobody to close it. Review a session afterwards with
 
 ### Which sessions need QC review
 
-`src/qc_review.py` reads the `qc_summary.csv` files already on disk and lists
-every session of the given subjects whose QC came out REVIEW (or FAIL), with the
+`src/qc_review.py` reads the QC summaries already on disk and lists every
+session of the given subjects whose QC came out REVIEW (or FAIL), with the
 sections behind it -- metric, value, threshold, detail, and how many review
-ranges each section added to `qc_review_epochs.csv`. Sessions with no summary
+ranges each section added to the review epochs. It reads the `.parquet` copies
+(`qc_summary.parquet`, `qc_review_epochs.parquet`), falling back to the CSVs for
+sessions summarized before those copies were written. Sessions with no summary
 are named per subject. Nothing is recomputed.
 
 ```
@@ -403,13 +405,16 @@ derivative:
 ```
 eeg/quality_control/
   sub-066_ses-001_recording-concat_qc_summary.csv
+  sub-066_ses-001_recording-concat_qc_summary.parquet
   sub-066_ses-001_recording-concat_qc_review_epochs.csv
   sub-066_ses-001_recording-concat_qc_review_epochs.parquet
   sub-066_ses-001_recording-concat_qc_summary_provenance.json
 ```
 
-The summary holds the per-section results; the review-epoch parquet provides
-typed, machine-readable review intervals for downstream processing. Pass a
+The summary holds the per-section results; the review epochs hold the review
+intervals. Each is written as a CSV for reading by eye and a parquet copy that
+`src/qc_review.py` and the batch run read (in the summary parquet, `value` and
+`threshold` are text, as in the CSV, since some sections report `3/4` or `n/a`). Pass a
 filename to `--summary`/`--review-epochs` to rename either output (the
 recording prefix is still applied), or `--no-summary`/`--no-review-epochs` to
 skip writing it. `recording_integrity.py` and `scripts/qc/sleep_scoring.py`

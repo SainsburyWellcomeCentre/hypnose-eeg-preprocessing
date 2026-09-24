@@ -5,8 +5,8 @@ session-level QC section (EDF/FIF integrity, Somnotate confidence, artifact
 burden, EEG/EMG channel correlation, sleep-state power spectra, EMG RMS) and
 prints one PASS/REVIEW/FAIL decision -- it is the default step. It also writes
 both of its outputs into the session's quality-control directory on every run:
-`qc_summary.csv` with the section results, and `qc_review_epochs.csv` plus its
-typed `.parquet` copy with the unified review ranges. The remaining steps wrap
+`qc_summary.csv` with the section results and `qc_review_epochs.csv` with the
+unified review ranges, each with a `.parquet` copy. The remaining steps wrap
 the individual `scripts/qc/*.py` reports for when a single section's plots or
 table are wanted on their own.
 

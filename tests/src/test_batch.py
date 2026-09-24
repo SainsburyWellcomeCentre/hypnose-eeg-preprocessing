@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
+
 from hypnose_helpers.io.layout import SessionRef
 
 from src import run_pipeline
@@ -290,6 +292,16 @@ class QCVerdictTests(unittest.TestCase):
         verdict = read_qc_verdict(self.root, subject=66, session=1)
 
         self.assertEqual(verdict, ("fail", ["artifacts", "scoring"]))
+
+    def test_the_parquet_copy_is_read_in_preference_to_the_csv(self):
+        path = self.write_summary("x_qc_summary.csv", ("integrity", "pass"))
+        pd.DataFrame(
+            {"section": ["integrity", "artifacts"], "status": ["pass", "fail"]}
+        ).to_parquet(path.with_suffix(".parquet"), index=False)
+
+        verdict = read_qc_verdict(self.root, subject=66, session=1)
+
+        self.assertEqual(verdict, ("fail", ["artifacts"]))
 
     def test_a_passing_summary_has_no_failed_sections(self):
         self.write_summary("x_qc_summary.csv", ("integrity", "pass"), ("spectra", "review"))

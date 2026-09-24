@@ -34,6 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Mapping, Sequence
 
+import pyarrow.parquet as pq
 from hypnose_helpers.io.layout import SessionLayout, SessionRef, normalize_subjid
 from hypnose_helpers.io.selectors import parse_subjects
 
@@ -49,9 +50,10 @@ from scripts.utils.recording_selection import (
 # typed out by hand. Spelled as a subject value so one flag covers both.
 ALL_SUBJECTS = "all"
 
-# The file suffix `scripts/qc/summary_qc.py` writes its section results under,
-# prefixed with the recording stem.
+# The file suffixes `scripts/qc/summary_qc.py` writes its section results
+# under, prefixed with the recording stem: a CSV and a parquet copy of it.
 QC_SUMMARY_SUFFIX = "qc_summary.csv"
+QC_SUMMARY_PARQUET_SUFFIX = "qc_summary.parquet"
 QC_FAIL = "fail"
 
 REPORT_FIELDS = [
@@ -248,6 +250,34 @@ def report_path(
     return (subject_dir or root / normalize_subjid(subjects[0])) / filename
 
 
+def qc_summary_files(qc_dir: Path) -> dict[str, Path]:
+    """Each recording's QC summary in `qc_dir`, keyed by its filename prefix.
+
+    The parquet copy is preferred; the CSV is used only where no parquet sits
+    beside it (summaries written before the parquet copy existed). Hidden files
+    are skipped: macOS leaves `._<name>` AppleDouble sidecars on network shares
+    that match the pattern but hold no table.
+    """
+    found: dict[str, Path] = {}
+    # Parquet last, so it replaces the CSV of the same recording.
+    for suffix in (QC_SUMMARY_SUFFIX, QC_SUMMARY_PARQUET_SUFFIX):
+        for path in qc_dir.glob(f"*{suffix}"):
+            if not path.name.startswith("."):
+                found[path.name[: -len(suffix)]] = path
+    return dict(sorted(found.items()))
+
+
+def read_qc_summary(path: Path) -> list[dict[str, str]]:
+    """A QC summary's section rows as text, from its parquet or CSV form."""
+    if path.suffix == ".parquet":
+        return [
+            {key: "" if value is None else str(value) for key, value in row.items()}
+            for row in pq.read_table(path).to_pylist()
+        ]
+    with path.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
 def read_qc_verdict(
     derivatives_root: str | Path,
     *,
@@ -257,7 +287,7 @@ def read_qc_verdict(
     env: Mapping[str, str] | None = None,
     since: float | None = None,
 ) -> tuple[str, list[str]] | None:
-    """A session's overall QC status and failed sections, from its `qc_summary.csv`.
+    """A session's overall QC status and failed sections, from its QC summary.
 
     Only summaries modified at or after `since` (a `time.time()` value) count,
     so a summary left by an earlier run is not reported as this run's verdict.
@@ -275,7 +305,7 @@ def read_qc_verdict(
     # Coarse filesystem timestamps can round a fresh write to just before `since`.
     cutoff = None if since is None else since - 2
     summaries = [
-        path for path in sorted(qc_dir.glob(f"*{QC_SUMMARY_SUFFIX}"))
+        path for path in qc_summary_files(qc_dir).values()
         if cutoff is None or path.stat().st_mtime >= cutoff
     ]
     if not summaries:
@@ -285,12 +315,11 @@ def read_qc_verdict(
     statuses: list[str] = []
     failed: list[str] = []
     for path in summaries:
-        with path.open(newline="") as handle:
-            for row in csv.DictReader(handle):
-                status = str(row.get("status", "")).strip().lower()
-                statuses.append(status)
-                if severity.get(status, severity[QC_FAIL]) >= severity[QC_FAIL]:
-                    failed.append(str(row.get("section", "")).strip())
+        for row in read_qc_summary(path):
+            status = str(row.get("status", "")).strip().lower()
+            statuses.append(status)
+            if severity.get(status, severity[QC_FAIL]) >= severity[QC_FAIL]:
+                failed.append(str(row.get("section", "")).strip())
     if not statuses:
         # summary_qc treats a summary with no sections as a failure too.
         return QC_FAIL, []
