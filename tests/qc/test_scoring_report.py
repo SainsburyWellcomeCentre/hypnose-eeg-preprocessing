@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from scripts.qc.sleep_scoring import (
+from hypnose_eeg.qc.sleep_scoring import (
     build_parser,
     prepare_scoring_output,
     sleep_state_proportion_report,

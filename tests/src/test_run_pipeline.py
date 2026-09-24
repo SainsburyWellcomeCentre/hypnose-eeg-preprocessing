@@ -187,7 +187,7 @@ class ViewerTests(unittest.TestCase):
     def test_failing_stage_stops_before_the_viewer(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
-        mock_qc.run_steps.side_effect = StepFailed("qc:summary", "scripts.qc.summary_qc", 3)
+        mock_qc.run_steps.side_effect = StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 3)
 
         result = run_pipeline.main(["--subject", "66", "--date", "20260717", "--view"])
 
@@ -205,7 +205,7 @@ class FailureTests(unittest.TestCase):
     ):
         mock_preprocessing.run_steps.side_effect = [
             None,
-            StepFailed("preprocessing:detect_artifacts", "scripts.preprocessing.detect_artifacts", 7),
+            StepFailed("preprocessing:detect_artifacts", "hypnose_eeg.preprocessing.detect_artifacts", 7),
         ]
 
         result = run_pipeline.main(["--subject", "66", "--date", "20260717"])

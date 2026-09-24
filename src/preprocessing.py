@@ -1,6 +1,6 @@
 """Run the Hypnose preprocessing pipeline: trim, concatenate, downsample, prescan_artifacts, detect_artifacts.
 
-Each step wraps its matching `scripts/preprocessing/*.py` CLI (run as a
+Each step wraps its matching `hypnose_eeg/preprocessing/*.py` CLI (run as a
 subprocess) rather than duplicating that logic here. Run this module directly
 for just the preprocessing stage, or use `src/run_pipeline.py` for the full
 preprocessing -> sleep_scoring -> qc pipeline.
@@ -29,8 +29,6 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from src._pipeline import (
     StepFailed,
     add_selector_arguments,
@@ -41,11 +39,11 @@ from src._pipeline import (
 
 STEP_ORDER = ["trim", "concatenate", "downsample", "prescan_artifacts", "detect_artifacts"]
 STEP_MODULES = {
-    "trim": "scripts.preprocessing.trim_duplicate_channels",
-    "concatenate": "scripts.preprocessing.concatenate_recordings",
-    "downsample": "scripts.preprocessing.downsample_recordings",
-    "prescan_artifacts": "scripts.preprocessing.prescan_artifacts",
-    "detect_artifacts": "scripts.preprocessing.detect_artifacts",
+    "trim": "hypnose_eeg.preprocessing.trim_duplicate_channels",
+    "concatenate": "hypnose_eeg.preprocessing.concatenate_recordings",
+    "downsample": "hypnose_eeg.preprocessing.downsample_recordings",
+    "prescan_artifacts": "hypnose_eeg.preprocessing.prescan_artifacts",
+    "detect_artifacts": "hypnose_eeg.preprocessing.detect_artifacts",
 }
 DEFAULT_STEPS = list(STEP_ORDER)
 # Steps that write artifact outputs rather than recordings: they take the

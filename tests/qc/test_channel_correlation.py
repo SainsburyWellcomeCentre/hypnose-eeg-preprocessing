@@ -7,11 +7,11 @@ from contextlib import redirect_stdout
 import numpy as np
 import pandas as pd
 
-from scripts.qc.channel_correlations import (
+from hypnose_eeg.qc.channel_correlations import (
     _print_review_counts,
     build_parser,
 )
-from scripts.analysis.correlation import epoch_pearson_matrices
+from hypnose_eeg.analysis.correlation import epoch_pearson_matrices
 
 
 class ChannelCorrelationTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 """Shared subprocess-orchestration helpers for the src/ pipeline entry points.
 
 `preprocessing.py`, `sleep_scoring.py`, and `qc.py` each run the existing
-`scripts/` CLIs as subprocesses (`python -m scripts....`) instead of
+`hypnose_eeg` CLIs as subprocesses (`python -m hypnose_eeg....`) instead of
 reimplementing their logic, so this module holds the bits they all share:
 running one step and reporting a clear failure, the `--subject`/
 `--date`/`--session`/`--rawdata-root`/`--derivatives-root` selector flags
@@ -12,7 +12,7 @@ session's derivatives directory.
 The output-folder overrides reach the wrapped scripts through the
 `HYPNOSE_EEG_OUTPUT_LAYOUT`/`HYPNOSE_EEG_OUTPUT_ROOT`/
 `HYPNOSE_EEG_OUTPUT_DIR_<GROUP>` environment variables
-(`scripts/io/output_layout.py`) rather than per-script flags, since
+(`hypnose_eeg/io/output_layout.py`) rather than per-script flags, since
 every script already resolves its folders through `output_dir_name()` and the
 data-location roots are overridable the same way.
 """
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from scripts.io.output_layout import (
+from hypnose_eeg.io.output_layout import (
     DEFAULT_OUTPUT_DIR_NAMES,
     DEFAULT_OUTPUT_ROOT,
     OUTPUT_LAYOUT_ENV,
@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class StepFailed(RuntimeError):
-    """A wrapped `scripts/` CLI exited with a non-zero status."""
+    """A wrapped `hypnose_eeg` CLI exited with a non-zero status."""
 
     def __init__(self, label: str, module: str, returncode: int) -> None:
         super().__init__(f"{label} ({module}) exited with status {returncode}")

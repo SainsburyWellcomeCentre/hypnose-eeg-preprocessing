@@ -29,7 +29,7 @@ sleep_scoring:
   global_normalization: true
 
   # If true, the long artifact periods written by the pre-scoring scan
-  # (scripts/preprocessing/prescan_artifacts.py, configured under
+  # (hypnose_eeg/preprocessing/prescan_artifacts.py, configured under
   # artifact_prescan in configs/pipelines/artifact_detection.yaml) are left
   # unscored: labelled Undefined with kind "artifact" in the predictions
   # parquet, and kept out of normalization. A recording without prescan output
@@ -60,7 +60,7 @@ sleep_scoring_view:
   # Alternative real-time range, e.g. ["20260717 03:00:00", "20260717 06:00:00"]
   time_range: null
   # Optional display downsampling, e.g. 128. A pre-downsampled FIF under
-  # derivatives (scripts/preprocessing/downsample_recordings.py) is used
+  # derivatives (hypnose_eeg/preprocessing/downsample_recordings.py) is used
   # instead of the EDF whenever one is available and its rate satisfies this
   # -- even left null, in which case any available FIF is still used, at its
   # own rate, since it's faster to read than the full-rate EDF. Set this

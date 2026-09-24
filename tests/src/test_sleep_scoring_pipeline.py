@@ -69,12 +69,12 @@ class RunStepsTests(unittest.TestCase):
     def test_view_not_run_unless_explicitly_selected(self, mock_run_step):
         sleep_scoring.run_steps(subject="66", date="20260717", steps=["score"])
         modules = [c.args[0] for c in mock_run_step.call_args_list]
-        self.assertNotIn("scripts.sleep_scoring.view_scored_recording", modules)
+        self.assertNotIn("hypnose_eeg.review.viewer", modules)
 
     @patch("src.sleep_scoring.run_step")
     def test_step_failure_propagates(self, mock_run_step):
         mock_run_step.side_effect = StepFailed(
-            "sleep_scoring:score", "scripts.sleep_scoring.score_recordings", 1
+            "sleep_scoring:score", "hypnose_eeg.sleep_scoring.score_recordings", 1
         )
         with self.assertRaises(StepFailed):
             sleep_scoring.run_steps(subject="66", date="20260717")

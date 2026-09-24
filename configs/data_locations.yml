@@ -1,5 +1,5 @@
 # Shared data-location profiles. Select one per checkout with:
-#   python scripts/io/repository_paths.py <profile>
+#   python -m hypnose_eeg.io.repository_paths <profile>
 env_prefix: HYPNOSE_EEG
 default_active: null
 

@@ -1,13 +1,13 @@
 """Run Hypnose session quality-control checks.
 
-`summary` wraps `scripts/qc/summary_qc.py`, which already runs every
+`summary` wraps `hypnose_eeg/qc/summary_qc.py`, which already runs every
 session-level QC section (EDF/FIF integrity, Somnotate confidence, artifact
 burden, EEG/EMG channel correlation, sleep-state power spectra, EMG RMS) and
 prints one PASS/REVIEW/FAIL decision -- it is the default step. It also writes
 both of its outputs into the session's quality-control directory on every run:
 `qc_summary.csv` with the section results and `qc_review_epochs.csv` with the
 unified review ranges, each with a `.parquet` copy. The remaining steps wrap
-the individual `scripts/qc/*.py` reports for when a single section's plots or
+the individual `hypnose_eeg/qc/*.py` reports for when a single section's plots or
 table are wanted on their own.
 
 Unrecognized arguments are forwarded verbatim to every selected step (for
@@ -22,8 +22,6 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from src._pipeline import (
     StepFailed,
     add_selector_arguments,
@@ -34,12 +32,12 @@ from src._pipeline import (
 
 STEP_ORDER = ["integrity", "sleep_scoring", "spectra", "channel_correlations", "artifacts", "summary"]
 STEP_MODULES = {
-    "integrity": "scripts.qc.recording_integrity",
-    "sleep_scoring": "scripts.qc.sleep_scoring",
-    "spectra": "scripts.qc.spectra",
-    "channel_correlations": "scripts.qc.channel_correlations",
-    "artifacts": "scripts.qc.artifacts",
-    "summary": "scripts.qc.summary_qc",
+    "integrity": "hypnose_eeg.qc.recording_integrity",
+    "sleep_scoring": "hypnose_eeg.qc.sleep_scoring",
+    "spectra": "hypnose_eeg.qc.spectra",
+    "channel_correlations": "hypnose_eeg.qc.channel_correlations",
+    "artifacts": "hypnose_eeg.qc.artifacts",
+    "summary": "hypnose_eeg.qc.summary_qc",
 }
 DEFAULT_STEPS = ["summary"]
 

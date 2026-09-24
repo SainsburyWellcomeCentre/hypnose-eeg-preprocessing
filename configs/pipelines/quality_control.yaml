@@ -32,7 +32,7 @@ quality_control:
     max_artifact_percent: 5.0
 
   # Flags a recording for review when the pre-scoring artifact scan
-  # (scripts/preprocessing/prescan_artifacts.py) excluded more than this
+  # (hypnose_eeg/preprocessing/prescan_artifacts.py) excluded more than this
   # percentage of the recording from sleep scoring. The artifacts section above
   # only covers scored signal, so without this a mostly-excluded recording
   # would pass. A recording with no prescan output is also sent to review.

@@ -94,7 +94,7 @@ class RunStepsTests(unittest.TestCase):
             self.assertNotIn("--source-dir", args)
         self.assertEqual(
             modules,
-            ["scripts.preprocessing.prescan_artifacts", "scripts.preprocessing.detect_artifacts"],
+            ["hypnose_eeg.preprocessing.prescan_artifacts", "hypnose_eeg.preprocessing.detect_artifacts"],
         )
 
     @patch("src.preprocessing.run_step")
@@ -143,7 +143,7 @@ class RunStepsTests(unittest.TestCase):
     def test_step_failure_stops_remaining_steps(self, mock_run_step):
         mock_run_step.side_effect = [
             None,
-            StepFailed("preprocessing:downsample", "scripts.preprocessing.downsample_recordings", 1),
+            StepFailed("preprocessing:downsample", "hypnose_eeg.preprocessing.downsample_recordings", 1),
         ]
         with self.assertRaises(StepFailed):
             preprocessing.run_steps(

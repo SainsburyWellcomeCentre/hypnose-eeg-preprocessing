@@ -20,6 +20,6 @@ preprocessing:
     # n_samples: initial samples compared between duplicate channels and printed
     # with --dry-run. output_suffix is also read by concatenate_recordings.py so it
     # picks trimmed parts; the downsample/scoring/QC selection helpers only
-    # recognise the default "_trimmed" (scripts/utils/recording_selection.py).
+    # recognise the default "_trimmed" (hypnose_eeg/utils/recording_selection.py).
     n_samples: 100
     output_suffix: "_trimmed"

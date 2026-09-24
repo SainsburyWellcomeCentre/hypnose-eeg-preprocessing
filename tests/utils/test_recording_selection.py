@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.utils.recording_selection import (
+from hypnose_eeg.utils.recording_selection import (
     pair_recordings,
     prefer_concatenated_recording,
     prefer_trimmed_recordings,

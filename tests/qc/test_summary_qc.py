@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from scripts.qc.sleep_scoring import (
+from hypnose_eeg.qc.sleep_scoring import (
     prepare_scoring_output,
     sleep_state_proportion_report,
     sleep_state_proportions,
 )
-from scripts.qc.spectra import DEFAULT_SPECTRA_CONFIG
-from scripts.io.output_paths import recording_output_name
-from scripts.qc.summary_qc import (
+from hypnose_eeg.qc.spectra import DEFAULT_SPECTRA_CONFIG
+from hypnose_eeg.io.output_paths import recording_output_name
+from hypnose_eeg.qc.summary_qc import (
     DEFAULT_REVIEW_FILENAME,
     DEFAULT_SUMMARY_FILENAME,
     REVIEW_COLUMNS,

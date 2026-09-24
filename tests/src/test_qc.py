@@ -15,7 +15,7 @@ class RunStepsTests(unittest.TestCase):
         labels = [c.kwargs["label"] for c in mock_run_step.call_args_list]
         self.assertEqual(labels, ["qc:summary"])
         module = mock_run_step.call_args.args[0]
-        self.assertEqual(module, "scripts.qc.summary_qc")
+        self.assertEqual(module, "hypnose_eeg.qc.summary_qc")
 
     @patch("src.qc.run_step")
     def test_steps_run_in_canonical_order_regardless_of_input_order(self, mock_run_step):
@@ -25,9 +25,9 @@ class RunStepsTests(unittest.TestCase):
         self.assertEqual(
             modules,
             [
-                "scripts.qc.recording_integrity",
-                "scripts.qc.spectra",
-                "scripts.qc.summary_qc",
+                "hypnose_eeg.qc.recording_integrity",
+                "hypnose_eeg.qc.spectra",
+                "hypnose_eeg.qc.summary_qc",
             ],
         )
 
@@ -67,7 +67,7 @@ class RunStepsTests(unittest.TestCase):
 
     @patch("src.qc.run_step")
     def test_step_failure_propagates(self, mock_run_step):
-        mock_run_step.side_effect = StepFailed("qc:summary", "scripts.qc.summary_qc", 1)
+        mock_run_step.side_effect = StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 1)
         with self.assertRaises(StepFailed):
             qc.run_steps(subject="66", date="20260717")
 

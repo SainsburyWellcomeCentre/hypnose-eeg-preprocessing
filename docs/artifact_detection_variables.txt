@@ -5,7 +5,7 @@ Configuration file
 ------------------
 Default path: configs/pipelines/artifact_detection.yaml
 
-The script scripts/preprocessing/detect_artifacts.py reads the variables below
+The script hypnose_eeg/preprocessing/detect_artifacts.py reads the variables below
 from the artifact_detection section of this YAML file. Command-line arguments
 override the indicated configuration values for a single run.
 
@@ -164,7 +164,7 @@ features and hard-failure reasons.
 PRE-SCORING ARTIFACT SCAN
 =========================
 
-Script: scripts/preprocessing/prescan_artifacts.py
+Script: hypnose_eeg/preprocessing/prescan_artifacts.py
 Config section: artifact_prescan (same YAML file)
 
 This scan runs before sleep scoring, so it has no sleep states. It looks for

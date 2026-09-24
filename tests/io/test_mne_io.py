@@ -5,7 +5,7 @@ import unittest
 import mne
 import numpy as np
 
-from scripts.io.mne_io import set_configured_channel_types
+from hypnose_eeg.io.mne_io import set_configured_channel_types
 
 
 def _raw(ch_names: list[str]) -> mne.io.RawArray:

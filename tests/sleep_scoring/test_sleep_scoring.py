@@ -17,7 +17,7 @@ from hypnose_somnotate.preprocessing.gap_correction import (
     ScoringChunk,
 )
 
-from scripts.sleep_scoring.score_recordings import (
+from hypnose_eeg.sleep_scoring.score_recordings import (
     SleepScoringSettings,
     _as_date_range,
     _channel_label_alias,

@@ -20,17 +20,17 @@ class RunStepTests(unittest.TestCase):
     @patch("src._pipeline.subprocess.run")
     def test_runs_module_with_python_from_repo_root(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
-        run_step("scripts.qc.summary_qc", ["--subject", "66"], label="qc:summary")
+        run_step("hypnose_eeg.qc.summary_qc", ["--subject", "66"], label="qc:summary")
 
         called_args, called_kwargs = mock_run.call_args
         argv = called_args[0]
-        self.assertEqual(argv[1:], ["-m", "scripts.qc.summary_qc", "--subject", "66"])
+        self.assertEqual(argv[1:], ["-m", "hypnose_eeg.qc.summary_qc", "--subject", "66"])
         self.assertTrue(str(called_kwargs["cwd"]).endswith("hypnose-eeg-preprocessing"))
 
     @patch("src._pipeline.subprocess.run")
     def test_no_env_override_inherits_the_process_environment(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
-        run_step("scripts.qc.summary_qc", [], label="qc:summary")
+        run_step("hypnose_eeg.qc.summary_qc", [], label="qc:summary")
         self.assertIsNone(mock_run.call_args.kwargs["env"])
 
     @patch("src._pipeline.subprocess.run")
@@ -38,7 +38,7 @@ class RunStepTests(unittest.TestCase):
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
         with patch.dict(os.environ, {"HYPNOSE_TEST_INHERITED": "yes"}):
             run_step(
-                "scripts.qc.summary_qc", [], label="qc:summary",
+                "hypnose_eeg.qc.summary_qc", [], label="qc:summary",
                 env={"HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS": "analysis/artifacts"},
             )
         env = mock_run.call_args.kwargs["env"]
@@ -49,9 +49,9 @@ class RunStepTests(unittest.TestCase):
     def test_nonzero_exit_raises_step_failed(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=2)
         with self.assertRaises(StepFailed) as ctx:
-            run_step("scripts.qc.summary_qc", [], label="qc:summary")
+            run_step("hypnose_eeg.qc.summary_qc", [], label="qc:summary")
         self.assertEqual(ctx.exception.returncode, 2)
-        self.assertEqual(ctx.exception.module, "scripts.qc.summary_qc")
+        self.assertEqual(ctx.exception.module, "hypnose_eeg.qc.summary_qc")
         self.assertIn("qc:summary", str(ctx.exception))
 
 

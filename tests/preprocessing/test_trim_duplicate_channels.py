@@ -9,7 +9,7 @@ from pathlib import Path
 import mne
 import numpy as np
 
-from scripts.preprocessing.trim_duplicate_channels import (
+from hypnose_eeg.preprocessing.trim_duplicate_channels import (
     _resolve_edf_paths,
     build_parser,
     find_duplicate_labels,

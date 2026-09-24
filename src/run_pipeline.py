@@ -35,7 +35,7 @@ QC status (pass or review). The report also records how long the whole batch
 took.
 
 `--view` opens the interactive scoring viewer
-(`scripts/sleep_scoring/view_scored_recording.py`) once the selected stages
+(`hypnose_eeg/review/viewer.py`) once the selected stages
 finish, so a run can end in a look at the traces and predictions it produced.
 It runs last -- after artifact detection and the QC summary, so `--show-artifacts`
 has artifacts to show -- and needs a display. It only reads outputs already on
@@ -62,8 +62,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from src import preprocessing, qc, sleep_scoring
 from src._batch import (
     ALL_SUBJECTS,
@@ -85,8 +83,8 @@ from src._pipeline import (
 )
 from hypnose_helpers.io.layout import normalize_subjid
 
-from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root
-from scripts.utils.recording_selection import find_sessions
+from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
+from hypnose_eeg.utils.recording_selection import find_sessions
 
 STAGE_ORDER = ["preprocessing", "sleep_scoring", "qc"]
 

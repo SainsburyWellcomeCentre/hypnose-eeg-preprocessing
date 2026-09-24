@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from scripts.analysis.statistics import robust_upper_z
+from hypnose_eeg.analysis.statistics import robust_upper_z
 
 
 class RobustStatisticsTests(unittest.TestCase):

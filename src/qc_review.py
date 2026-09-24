@@ -1,6 +1,6 @@
 """List every session whose QC summary asks for review, and which sections did.
 
-Reads the QC summary that `scripts/qc/summary_qc.py` writes into each
+Reads the QC summary that `hypnose_eeg/qc/summary_qc.py` writes into each
 session's quality-control directory, for every session the given subjects have
 under the derivatives root (`--subject all` covers every subject there). A
 session is listed when any section of its summary is not `pass`; each listed
@@ -29,12 +29,9 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pyarrow.parquet as pq
 from hypnose_helpers.io.layout import SessionLayout, SessionRef, normalize_subjid
@@ -53,10 +50,10 @@ from src._pipeline import (
     output_dir_overrides,
     output_layout_env,
 )
-from scripts.io.output_layout import output_dir_name
-from scripts.io.output_paths import save_csv_rows
-from scripts.io.repository_paths import get_derivatives_root
-from scripts.qc.thresholds import load_performance_check
+from hypnose_eeg.io.output_layout import output_dir_name
+from hypnose_eeg.io.output_paths import save_csv_rows
+from hypnose_eeg.io.repository_paths import get_derivatives_root
+from hypnose_eeg.qc.thresholds import load_performance_check
 
 QC_PASS = "pass"
 # The review ranges summary_qc writes beside each summary, under the same

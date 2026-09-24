@@ -47,7 +47,7 @@ artifact_detection:
     suffix: "artifact_epochs"
     overwrite: false
 
-# Pre-scoring scan for long periods of unusable signal (scripts/preprocessing/
+# Pre-scoring scan for long periods of unusable signal (hypnose_eeg/preprocessing/
 # prescan_artifacts.py). Runs before sleep scoring, without sleep states; the
 # periods it finds are left unscored by somnotate (score_recordings.py, see
 # sleep_scoring.use_artifact_prescan). Epoch length, chunking and Welch

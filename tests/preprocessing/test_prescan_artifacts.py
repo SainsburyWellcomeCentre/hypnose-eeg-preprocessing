@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.preprocessing.prescan_artifacts import (
+from hypnose_eeg.preprocessing.prescan_artifacts import (
     PrescanSettings,
     artifact_periods,
     flag_prescan_epochs,

@@ -425,7 +425,7 @@ class SummaryTests(unittest.TestCase):
                 SessionOutcome(
                     "sub-066", 2, "20260718", Path("/r"), status="failed",
                     failed_step="qc:summary", returncode=1,
-                    error="qc:summary (scripts.qc.summary_qc) exited with status 1",
+                    error="qc:summary (hypnose_eeg.qc.summary_qc) exited with status 1",
                     qc_status="fail", qc_failed_sections=["artifacts", "spectra"],
                     erased=[Path("/d/eeg")],
                 ),
@@ -510,7 +510,7 @@ class BatchRunTests(unittest.TestCase):
     ):
         mock_scoring.run_steps.side_effect = [
             None,
-            StepFailed("sleep_scoring:score", "scripts.sleep_scoring.score_recordings", 4),
+            StepFailed("sleep_scoring:score", "hypnose_eeg.sleep_scoring.score_recordings", 4),
             None,
         ]
         self.erase.return_value = [self.derivatives / "sub-066/ses-002_date-20260718/eeg"]
@@ -553,7 +553,7 @@ class BatchRunTests(unittest.TestCase):
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
         mock_qc.run_steps.side_effect = [
-            StepFailed("qc:summary", "scripts.qc.summary_qc", 2), None, None
+            StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 2), None, None
         ]
 
         result = self.run_batch("--keep-failed")
@@ -566,7 +566,7 @@ class BatchRunTests(unittest.TestCase):
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
         mock_qc.run_steps.side_effect = [
-            StepFailed("qc:summary", "scripts.qc.summary_qc", 2), None, None
+            StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 2), None, None
         ]
 
         self.run_batch("--erase-derived-edf")
@@ -578,7 +578,7 @@ class BatchRunTests(unittest.TestCase):
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
         mock_qc.run_steps.side_effect = [
-            StepFailed("qc:summary", "scripts.qc.summary_qc", 2), None, None
+            StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 2), None, None
         ]
 
         self.run_batch("--output-root", "analysis", "--output-dir", "artifacts=arts")
@@ -595,7 +595,7 @@ class BatchRunTests(unittest.TestCase):
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
         mock_qc.run_steps.side_effect = [
-            StepFailed("qc:summary", "scripts.qc.summary_qc", 2), None, None
+            StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 2), None, None
         ]
         self.erase.side_effect = OSError("read-only file system")
 
@@ -618,7 +618,7 @@ class BatchRunTests(unittest.TestCase):
                 files={"eeg/quality_control/x_qc_summary.csv": qc_summary_csv(*rows)},
             )
             if ses == 2:
-                raise StepFailed("qc:summary", "scripts.qc.summary_qc", 1)
+                raise StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 1)
 
         mock_qc.run_steps.side_effect = qc_summary
 
@@ -658,7 +658,7 @@ class BatchRunTests(unittest.TestCase):
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
         mock_qc.run_steps.side_effect = [
-            StepFailed("qc:summary", "scripts.qc.summary_qc", 1), None, None
+            StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 1), None, None
         ]
 
         result = self.run_batch()
@@ -798,7 +798,7 @@ class MultiSubjectBatchTests(unittest.TestCase):
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
         mock_scoring.run_steps.side_effect = [
-            StepFailed("sleep_scoring:score", "scripts.sleep_scoring.score_recordings", 4),
+            StepFailed("sleep_scoring:score", "hypnose_eeg.sleep_scoring.score_recordings", 4),
             None,
             None,
         ]

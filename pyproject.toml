@@ -39,11 +39,15 @@ dev = [
     "pytest>=8,<9",
 ]
 
-# This repository currently exposes executable scripts rather than an importable
-# Python package. Explicitly disable automatic package discovery while retaining
-# standard project metadata and dependency installation via `pip install -e .`.
-[tool.setuptools]
-packages = []
+# `hypnose_eeg` is the importable package; `src/` holds the pipeline entry points
+# run from the repository root (`python -m src.run_pipeline`). Configuration
+# stays in the repository's `configs/`, so install in editable mode
+# (`pip install -e .`).
+[tool.setuptools.packages.find]
+include = ["hypnose_eeg*"]
+
+[tool.setuptools.package-data]
+"hypnose_eeg.io" = ["checkpoints/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

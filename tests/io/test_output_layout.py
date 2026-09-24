@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.io import output_layout
-from scripts.io.output_layout import (
+from hypnose_eeg.io import output_layout
+from hypnose_eeg.io.output_layout import (
     DEFAULT_OUTPUT_DIR_NAMES,
     DEFAULT_OUTPUT_ROOT,
     OUTPUT_LAYOUT_ENV,
@@ -174,7 +174,7 @@ class DownstreamJoinTests(OutputLayoutTestCase):
     """Nested folders must compose with the helpers that join onto a session directory."""
 
     def test_session_output_dir_accepts_nested_folder(self):
-        from scripts.io import output_paths
+        from hypnose_eeg.io import output_paths
 
         os.environ[output_dir_env_var("quality_control")] = "reports/qc"
         session = Path("/deriv/sub-001/ses-1_date-20260101")
@@ -185,7 +185,7 @@ class DownstreamJoinTests(OutputLayoutTestCase):
         self.assertEqual(resolved, session / "eeg" / "reports" / "qc" / "qc_summary.csv")
 
     def test_artifact_output_paths_accepts_nested_folder(self):
-        from scripts.io.output_paths import artifact_output_paths
+        from hypnose_eeg.io.output_paths import artifact_output_paths
 
         os.environ[output_dir_env_var("artifacts")] = "analysis/artifacts"
         fif = Path(

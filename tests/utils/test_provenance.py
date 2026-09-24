@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.utils.provenance import (
+from hypnose_eeg.utils.provenance import (
     PROVENANCE_SCHEMA,
     file_fingerprint,
     git_revision,
@@ -38,7 +38,7 @@ class GitRevisionTests(unittest.TestCase):
                 ("describe", "--tags", "--always", "--dirty"): "aaaaaaa-dirty",
             }.get(args)
 
-        with patch("scripts.utils.provenance._git", side_effect=fake_git):
+        with patch("hypnose_eeg.utils.provenance._git", side_effect=fake_git):
             revision = git_revision()
 
         self.assertEqual(revision["commit"], "a" * 40)
@@ -48,7 +48,7 @@ class GitRevisionTests(unittest.TestCase):
 
     def test_clean_checkout_is_not_reported_dirty(self) -> None:
         with patch(
-            "scripts.utils.provenance._git",
+            "hypnose_eeg.utils.provenance._git",
             side_effect=lambda *args: "b" * 40 if args == ("rev-parse", "HEAD") else None,
         ):
             revision = git_revision()
@@ -57,7 +57,7 @@ class GitRevisionTests(unittest.TestCase):
         self.assertIsNone(revision["branch"])
 
     def test_missing_git_state_is_recorded_rather_than_raised(self) -> None:
-        with patch("scripts.utils.provenance._git", return_value=None):
+        with patch("hypnose_eeg.utils.provenance._git", return_value=None):
             self.assertIsNone(git_revision())
             record = provenance_record("quality_control", outputs=["out.csv"])
 

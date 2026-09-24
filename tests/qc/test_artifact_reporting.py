@@ -4,8 +4,8 @@ import unittest
 
 import pandas as pd
 
-from scripts.qc.artifacts import build_parser
-from scripts.qc.artifacts import build_artifact_report, restrict_to_continuous_epochs
+from hypnose_eeg.qc.artifacts import build_parser
+from hypnose_eeg.qc.artifacts import build_artifact_report, restrict_to_continuous_epochs
 
 
 class ArtifactReportingTests(unittest.TestCase):

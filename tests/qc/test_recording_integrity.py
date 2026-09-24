@@ -8,14 +8,14 @@ from unittest.mock import patch
 
 import numpy as np
 
-from scripts.qc.recording_integrity import (
+from hypnose_eeg.qc.recording_integrity import (
     Gap,
     _format_gap,
     build_parser,
     check_pair,
     detect_signal_gaps,
 )
-from scripts.utils.recording_selection import select_recordings, source_stem_from_fif
+from hypnose_eeg.utils.recording_selection import select_recordings, source_stem_from_fif
 
 
 class FakeRaw:
@@ -58,7 +58,7 @@ class RecordingIntegrityTests(unittest.TestCase):
             )
         )
         with patch(
-            "scripts.qc.recording_integrity.import_mne",
+            "hypnose_eeg.qc.recording_integrity.import_mne",
             return_value=fake_mne,
         ):
             result, gaps = check_pair(

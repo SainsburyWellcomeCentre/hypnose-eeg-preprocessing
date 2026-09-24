@@ -7,15 +7,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.analysis.power_spectra import bandpower, integrated_power
-from scripts.io.output_paths import artifact_output_paths
-from scripts.preprocessing.detect_artifacts import (
+from hypnose_eeg.analysis.power_spectra import bandpower, integrated_power
+from hypnose_eeg.io.output_paths import artifact_output_paths
+from hypnose_eeg.preprocessing.detect_artifacts import (
     ArtifactDetector,
     _resolve_paths,
     build_parser,
 )
-from scripts.utils.config import two_float_tuple
-from scripts.utils.epochs import align_epoch_states, complete_epoch_count, epoch_batch
+from hypnose_eeg.utils.config import two_float_tuple
+from hypnose_eeg.utils.epochs import align_epoch_states, complete_epoch_count, epoch_batch
 
 
 CONFIG_PATH = (

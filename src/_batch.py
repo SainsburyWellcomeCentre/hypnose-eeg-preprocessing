@@ -38,10 +38,10 @@ import pyarrow.parquet as pq
 from hypnose_helpers.io.layout import SessionLayout, SessionRef, normalize_subjid
 from hypnose_helpers.io.selectors import parse_subjects
 
-from scripts.io.output_layout import output_dir_name, output_dir_names, output_root_dir
-from scripts.io.output_paths import save_csv_rows
-from scripts.qc.thresholds import load_performance_check
-from scripts.utils.recording_selection import (
+from hypnose_eeg.io.output_layout import output_dir_name, output_dir_names, output_root_dir
+from hypnose_eeg.io.output_paths import save_csv_rows
+from hypnose_eeg.qc.thresholds import load_performance_check
+from hypnose_eeg.utils.recording_selection import (
     is_concatenated_recording,
     is_trimmed_recording,
 )
@@ -50,7 +50,7 @@ from scripts.utils.recording_selection import (
 # typed out by hand. Spelled as a subject value so one flag covers both.
 ALL_SUBJECTS = "all"
 
-# The file suffixes `scripts/qc/summary_qc.py` writes its section results
+# The file suffixes `hypnose_eeg/qc/summary_qc.py` writes its section results
 # under, prefixed with the recording stem: a CSV and a parquet copy of it.
 QC_SUMMARY_SUFFIX = "qc_summary.csv"
 QC_SUMMARY_PARQUET_SUFFIX = "qc_summary.parquet"

@@ -8,26 +8,26 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.qc.spectra import (
+from hypnose_eeg.qc.spectra import (
     build_parser,
     build_spectral_quality_report,
     load_spectra_config,
     plot_state_emg_rms,
 )
-from scripts.analysis.emg import compute_state_emg_rms
-from scripts.analysis.power_spectra import compute_state_spectra
-from scripts.io.input_paths import (
+from hypnose_eeg.analysis.emg import compute_state_emg_rms
+from hypnose_eeg.analysis.power_spectra import compute_state_spectra
+from hypnose_eeg.io.input_paths import (
     artifact_path,
     scoring_path,
     session_derivatives_dir,
 )
-from scripts.io.output_paths import (
+from hypnose_eeg.io.output_paths import (
     artifact_output_path,
     quality_control_output_path,
     sleep_scoring_output_path,
 )
-from scripts.utils.config import DEFAULT_SPECTRA_CONFIG_PATH
-from scripts.utils.epochs import artifact_epoch_ids, epoch_sleep_states
+from hypnose_eeg.utils.config import DEFAULT_SPECTRA_CONFIG_PATH
+from hypnose_eeg.utils.epochs import artifact_epoch_ids, epoch_sleep_states
 
 
 class SleepStateSpectraTests(unittest.TestCase):

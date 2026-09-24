@@ -15,6 +15,12 @@ in sibling checkouts and installs them in editable mode. Somnotate's legacy
 `pomegranate` dependency builds from source, so a working C/C++ compiler is also
 required.
 
+It also installs this repository in editable mode as the `hypnose_eeg` package,
+so its modules import from any directory and other projects or notebooks in
+the environment can use them. After pulling a change that adds or moves a
+package, re-run `pip install -e .` from the repository root. Configuration is
+read from this checkout's `configs/`, so keep the install editable.
+
 ## Data location
 
 Data stays outside this repository and is referenced through a named,
@@ -26,9 +32,9 @@ The shared profiles live in `configs/data_locations.yml`. Select a
 profile once for each checkout:
 
 ```bash
-python scripts/io/repository_paths.py --list
-python scripts/io/repository_paths.py server-linux   # or server-mac / server-windows
-python scripts/io/repository_paths.py --show
+python -m hypnose_eeg.io.repository_paths --list
+python -m hypnose_eeg.io.repository_paths server-linux   # or server-mac / server-windows
+python -m hypnose_eeg.io.repository_paths --show
 ```
 
 The selection is written to `configs/data_locations.local.yml`,
@@ -92,7 +98,7 @@ its built-in name. The root applies to the group folders whichever way they
 were set, so `HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS=analysis/artifacts` lands in
 `eeg/analysis/artifacts`. Folders may be nested (`analysis/artifacts`) but must
 stay relative to the session directory -- absolute paths and `..` are rejected
--- because readers (`scripts/qc/*`, the viewer) locate earlier outputs through
+-- because readers (`hypnose_eeg/qc/*`, the viewer) locate earlier outputs through
 the same names. From Python,
 `run_steps(..., output_layout=..., output_root=..., output_dirs={...})` on
 `src.preprocessing`/`src.sleep_scoring`/`src.qc` takes the same overrides.
@@ -122,7 +128,7 @@ Pass `--stage preprocessing`/`sleep_scoring`/`qc` (one or more) to
 default step set.
 
 `--view` ends the run in the interactive scoring viewer
-(`scripts/sleep_scoring/view_scored_recording.py`), so a session can be
+(`hypnose_eeg/review/viewer.py`), so a session can be
 inspected as soon as it has been processed. It opens a plot window, so it needs
 a display (see [docs/remote_visualization.md](docs/remote_visualization.md) for
 working over SSH), and it runs after every selected stage — artifact detection
@@ -168,7 +174,7 @@ Batch summary: 12/15 sessions completed across 3 subjects, 1 failed QC
     [    OK] sub-066/ses-001_date-20260711
     ...
   sub-067: 3/5 completed
-    [FAILED] sub-067/ses-004_date-20260714 -- sleep_scoring:score (scripts.sleep_scoring.score_recordings) exited with status 1 (erased 1 path(s))
+    [FAILED] sub-067/ses-004_date-20260714 -- sleep_scoring:score (hypnose_eeg.sleep_scoring.score_recordings) exited with status 1 (erased 1 path(s))
     [FAILED] sub-067/ses-005_date-20260715 -- QC FAIL (artifacts) (erased 1 path(s))
   sub-068: No sessions found for sub-068
 Failed QC:
@@ -236,7 +242,7 @@ QC review: 19/55 checked sessions need review across 2 subjects
 `--output-root`/`--output-dir`/`--output-layout` overrides the QC summary ran
 with, so its summaries are found.
 
-Run any of the four with `--help` for its complete option list; these wrap the `scripts/*` CLIs below as subprocesses rather than
+Run any of the four with `--help` for its complete option list; these wrap the `hypnose_eeg/*` CLIs below as subprocesses rather than
 reimplementing them, so step-specific flags such as `--config` are best
 passed to the underlying script directly when a per-step entry point doesn't
 already expose them.
@@ -275,12 +281,12 @@ failing.
 
 Run processing stages in this order:
 
-1. **Trim duplicate channels** — `scripts/preprocessing/trim_duplicate_channels.py`
-2. **Concatenate recordings** — `scripts/preprocessing/concatenate_recordings.py`
-3. **Downsample recordings** — `scripts/preprocessing/downsample_recordings.py`
-4. **Prescan artifacts** — `scripts/preprocessing/prescan_artifacts.py`
-5. **Sleep scoring** — `scripts/sleep_scoring/score_recordings.py`
-6. **Detect artifacts** — `scripts/preprocessing/detect_artifacts.py`
+1. **Trim duplicate channels** — `hypnose_eeg/preprocessing/trim_duplicate_channels.py`
+2. **Concatenate recordings** — `hypnose_eeg/preprocessing/concatenate_recordings.py`
+3. **Downsample recordings** — `hypnose_eeg/preprocessing/downsample_recordings.py`
+4. **Prescan artifacts** — `hypnose_eeg/preprocessing/prescan_artifacts.py`
+5. **Sleep scoring** — `hypnose_eeg/sleep_scoring/score_recordings.py`
+6. **Detect artifacts** — `hypnose_eeg/preprocessing/detect_artifacts.py`
 
 Trimming is automatic and usually a no-op. Some recordings list the same
 channel label twice in their EDF header, which breaks concatenation (channel
@@ -295,7 +301,7 @@ the channel list, the duplicates found, and whether each repeat carries the
 same samples as the channel it duplicates:
 
 ```bash
-python scripts/preprocessing/trim_duplicate_channels.py --subject 66 --session 1 --dry-run
+python -m hypnose_eeg.preprocessing.trim_duplicate_channels --subject 66 --session 1 --dry-run
 ```
 
 For a recording whose surplus channels are *not* duplicates by name, the manual
@@ -309,10 +315,10 @@ The preprocessing pipeline config leaves source and sink locations unset so
 they are supplied by the active data-location profile:
 
 ```bash
-python scripts/preprocessing/concatenate_recordings.py \
+python -m hypnose_eeg.preprocessing.concatenate_recordings \
   --config configs/pipelines/preprocessing.yaml --dry-run
 
-python scripts/preprocessing/downsample_recordings.py \
+python -m hypnose_eeg.preprocessing.downsample_recordings \
   --config configs/pipelines/preprocessing.yaml --dry-run
 ```
 
@@ -320,10 +326,10 @@ Both also accept `--subject`/`--date`/`--session` to restrict the sweep to one
 session's folder instead of the whole tree:
 
 ```bash
-python scripts/preprocessing/concatenate_recordings.py \
+python -m hypnose_eeg.preprocessing.concatenate_recordings \
   --config configs/pipelines/preprocessing.yaml --subject 66 --date 20260717
 
-python scripts/preprocessing/downsample_recordings.py \
+python -m hypnose_eeg.preprocessing.downsample_recordings \
   --config configs/pipelines/preprocessing.yaml --subject 66 --session 1
 ```
 
@@ -339,8 +345,8 @@ All of these limits are set under `artifact_prescan` in
 `configs/pipelines/artifact_detection.yaml`:
 
 ```bash
-python scripts/preprocessing/prescan_artifacts.py --subject 66 --session 1
-python scripts/preprocessing/prescan_artifacts.py --subject 66 --session 1 \
+python -m hypnose_eeg.preprocessing.prescan_artifacts --subject 66 --session 1
+python -m hypnose_eeg.preprocessing.prescan_artifacts --subject 66 --session 1 \
   --bridge-gap-s 600 --overwrite
 ```
 
@@ -359,10 +365,10 @@ Configure the Somnotate model and channel settings in
 always passed on the command line:
 
 ```bash
-python scripts/sleep_scoring/score_recordings.py \
+python -m hypnose_eeg.sleep_scoring.score_recordings \
   --model my-model --subject 66 --date 20260717
 
-python scripts/sleep_scoring/score_recordings.py \
+python -m hypnose_eeg.sleep_scoring.score_recordings \
   --model my-model --subject 66 --session 1
 ```
 
@@ -375,10 +381,10 @@ Inspect the stored Somnotate predictions and their per-state probabilities for
 one session without loading the EDF or rerunning the model:
 
 ```bash
-python scripts/qc/sleep_scoring.py \
+python -m hypnose_eeg.qc.sleep_scoring \
   --subject 66 --session 1
 
-python scripts/qc/sleep_scoring.py \
+python -m hypnose_eeg.qc.sleep_scoring \
   --subject 66 --date 20260717 --confidence-threshold 0.80
 ```
 
@@ -392,7 +398,7 @@ Run every session-level quality-control section and obtain one analysis-readines
 decision with a unified list of epochs requiring review:
 
 ```bash
-python scripts/qc/summary_qc.py \
+python -m hypnose_eeg.qc.summary_qc \
   --subject 66 --session 1
 ```
 
@@ -417,7 +423,7 @@ intervals. Each is written as a CSV for reading by eye and a parquet copy that
 `threshold` are text, as in the CSV, since some sections report `3/4` or `n/a`). Pass a
 filename to `--summary`/`--review-epochs` to rename either output (the
 recording prefix is still applied), or `--no-summary`/`--no-review-epochs` to
-skip writing it. `recording_integrity.py` and `scripts/qc/sleep_scoring.py`
+skip writing it. `recording_integrity.py` and `hypnose_eeg/qc/sleep_scoring.py`
 name their outputs the same way.
 
 The command checks EDF/FIF integrity and gaps, Somnotate confidence and undefined
@@ -452,10 +458,10 @@ path is an explicit override.
 Visually inspect the raw signals and predicted states for one scored session:
 
 ```bash
-python scripts/sleep_scoring/view_scored_recording.py \
+python -m hypnose_eeg.review.viewer \
   --subject 66 --date 20260717 --hours 3 6
 
-python scripts/sleep_scoring/view_scored_recording.py \
+python -m hypnose_eeg.review.viewer \
   --subject 66 --session 1 --hours 3 6
 ```
 
@@ -467,7 +473,7 @@ whose real-time span contains the requested start. This supports multi-day
 recordings where the selected range begins after the recording's calendar date:
 
 ```bash
-python scripts/sleep_scoring/view_scored_recording.py \
+python -m hypnose_eeg.review.viewer \
   --subject 66 \
   --time-range "20260718 03:00:00" "20260718 06:00:00"
 ```
@@ -479,7 +485,7 @@ regions from the matching `*_artifact_epochs.parquet` in the session's
 `eeg/artifacts/` directory can also be shaded and labelled:
 
 ```bash
-python scripts/sleep_scoring/view_scored_recording.py \
+python -m hypnose_eeg.review.viewer \
   --subject 66 \
   --time-range "20260718 03:00:00" "20260718 06:00:00" \
   --display-rate 128 --show-artifacts
@@ -501,10 +507,10 @@ either session date or session number; rawdata and derivatives paths are resolve
 automatically:
 
 ```bash
-python scripts/qc/recording_integrity.py \
+python -m hypnose_eeg.qc.recording_integrity \
   --subject 66 --date 20260717
 
-python scripts/qc/recording_integrity.py \
+python -m hypnose_eeg.qc.recording_integrity \
   --subject 66 --session 1
 ```
 
@@ -512,7 +518,7 @@ Compare one raw EDF with its derivative FIF, scanning only the EDF for gaps and
 opening the FIF only for duration metadata:
 
 ```bash
-python scripts/qc/recording_integrity.py \
+python -m hypnose_eeg.qc.recording_integrity \
   --edf /path/to/rawdata/session/recording.edf \
   --fif /path/to/derivatives/session/recording_resampled-128hz_raw.fif
 ```
@@ -522,7 +528,7 @@ rawdata and derivatives roots. Use `--edf-pattern` and `--fif-pattern` to narrow
 the batch selection:
 
 ```bash
-python scripts/qc/recording_integrity.py \
+python -m hypnose_eeg.qc.recording_integrity \
   --edf-pattern "sub-066/**/*.edf" \
   --fif-pattern "sub-066/**/*_raw.fif"
 ```
@@ -542,10 +548,10 @@ Plot the mean EEG power spectral density for Wake, NREM, and REM for one
 subject and either a session date or session number:
 
 ```bash
-python scripts/qc/spectra.py \
+python -m hypnose_eeg.qc.spectra \
   --subject 66 --date 20260717
 
-python scripts/qc/spectra.py \
+python -m hypnose_eeg.qc.spectra \
   --subject 66 --session 1
 ```
 
@@ -574,7 +580,7 @@ labels/colors, EMG ordering, and the determining channel are configured in
 Save plots without opening an interactive window with:
 
 ```bash
-python scripts/qc/spectra.py \
+python -m hypnose_eeg.qc.spectra \
   --subject 66 --date 20260717 \
   --save-dir --no-show
 ```
@@ -588,10 +594,10 @@ Plot the distribution of epoch-wise Pearson correlation for every EEG/EMG
 channel pair, separated into Wake, NREM, and REM:
 
 ```bash
-python scripts/qc/channel_correlations.py \
+python -m hypnose_eeg.qc.channel_correlations \
   --subject 66 --date 20260717
 
-python scripts/qc/channel_correlations.py \
+python -m hypnose_eeg.qc.channel_correlations \
   --subject 66 --session 1
 ```
 
@@ -614,10 +620,10 @@ Report artifact counts, duration, percentage per recording hour, sleep-state
 breakdown, and longest contiguous artifact period separately by channel:
 
 ```bash
-python scripts/qc/artifacts.py \
+python -m hypnose_eeg.qc.artifacts \
   --subject 66 --date 20260717
 
-python scripts/qc/artifacts.py \
+python -m hypnose_eeg.qc.artifacts \
   --subject 66 --session 1
 ```
 
