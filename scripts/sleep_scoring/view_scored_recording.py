@@ -23,8 +23,7 @@ from hypnose_helpers.io.selectors import parse_sessions
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.io.input_paths import scoring_path
-from scripts.io.output_layout import output_dir_name
+from scripts.io.input_paths import artifact_path, scoring_path, session_derivatives_dir
 from scripts.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
 from scripts.utils.config import (
     DEFAULT_SLEEP_SCORING_CONFIG_PATH,
@@ -466,31 +465,17 @@ def _open_signal_source(
     return _open_edf_signal_source(path, channel_labels)
 
 
-def _artifact_file(recording: Any) -> Path:
-    """Resolve artifacts from the dedicated directory, with legacy fallback."""
-    scoring_dir = Path(recording.output_dir)
-    # `output_dir` is `<session>/<sleep_scoring folder>`; the configured folder may
-    # be nested, so climb exactly as many levels as it has to reach the session.
-    session_dir = scoring_dir.parents[len(Path(output_dir_name("sleep_scoring")).parts) - 1]
-    directories = (session_dir / output_dir_name("artifacts"), scoring_dir)
-    exact_name = f"{recording.edf_path.stem}_artifact_epochs.parquet"
-    for directory in directories:
-        exact = directory / exact_name
-        if exact.is_file():
-            return exact
-        generic = directory / "artifact_epochs.parquet"
-        if generic.is_file():
-            return generic
-        matches = sorted(directory.glob("*artifact_epochs.parquet"))
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            raise ValueError(
-                f"Multiple artifact epoch files found in {directory}; "
-                f"expected {exact_name}"
-            )
-    searched = ", ".join(str(path) for path in directories)
-    raise FileNotFoundError(f"No artifact_epochs.parquet file found in {searched}")
+def _artifact_file(edf_path: Path, rawdata_root: Path, derivatives_root: Path) -> Path:
+    """Resolve the recording's artifact-epoch parquet from its derivatives session."""
+    # Resolve from the rawdata path rather than `recording.output_dir`: that is
+    # hypnose-somnotate's native `saved_results` folder, not our session layout.
+    path = artifact_path(edf_path, rawdata_root, derivatives_root)
+    if path is None:
+        session_dir = session_derivatives_dir(edf_path, rawdata_root, derivatives_root)
+        raise FileNotFoundError(
+            f"No artifact_epochs.parquet file found for {edf_path.name} in {session_dir}"
+        )
+    return path
 
 
 def _artifact_regions(
@@ -710,13 +695,15 @@ def _run_custom_view(settings: ScoringViewSettings) -> int:
     if settings.show_artifacts:
         import pandas as pd
 
-        artifact_path = _artifact_file(recording)
+        artifact_file = _artifact_file(
+            recording.edf_path, settings.rawdata_root, settings.derivatives_root
+        )
         artifact_table = pd.read_parquet(
-            artifact_path, columns=["time_s", "artifact"]
+            artifact_file, columns=["time_s", "artifact"]
         )
         regions = _artifact_regions(artifact_table, start_s, loaded_end_s)
         _label_artifacts(fig, regions)
-        print(f"Labelled {len(regions)} artifact region(s) from {artifact_path.name}")
+        print(f"Labelled {len(regions)} artifact region(s) from {artifact_file.name}")
     fig.suptitle(title)
 
     import matplotlib.pyplot as plt

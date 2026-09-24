@@ -38,21 +38,35 @@ class SleepScoringViewTests(unittest.TestCase):
 
     def test_artifact_file_prefers_dedicated_session_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            session_dir = Path(directory)
-            scoring_dir = session_dir / "eeg" / "sleep_scoring"
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            edf = rawdata / "sub-066" / "ses-1_date-20260717" / "ephys" / "recording.edf"
+            session_dir = derivatives / "sub-066" / "ses-1_date-20260717"
+            # Somnotate's native output folder, which `recording.output_dir` points at.
+            legacy_dir = session_dir / "saved_results"
             artifact_dir = session_dir / "eeg" / "artifacts"
-            scoring_dir.mkdir(parents=True)
+            edf.parent.mkdir(parents=True)
+            legacy_dir.mkdir(parents=True)
             artifact_dir.mkdir(parents=True)
-            recording = types.SimpleNamespace(
-                output_dir=scoring_dir,
-                edf_path=Path("recording.edf"),
-            )
-            legacy = scoring_dir / "recording_artifact_epochs.parquet"
+            legacy = legacy_dir / "recording_artifact_epochs.parquet"
             dedicated = artifact_dir / "recording_artifact_epochs.parquet"
             legacy.touch()
             dedicated.touch()
 
-            self.assertEqual(_artifact_file(recording), dedicated)
+            self.assertEqual(_artifact_file(edf, rawdata, derivatives), dedicated)
+
+    def test_artifact_file_missing_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rawdata = root / "rawdata"
+            derivatives = root / "derivatives"
+            edf = rawdata / "sub-066" / "ses-1_date-20260717" / "ephys" / "recording.edf"
+            edf.parent.mkdir(parents=True)
+            (derivatives / "sub-066" / "ses-1_date-20260717").mkdir(parents=True)
+
+            with self.assertRaisesRegex(FileNotFoundError, "artifact_epochs.parquet"):
+                _artifact_file(edf, rawdata, derivatives)
 
     def test_hours_are_parsed_and_validated(self) -> None:
         args = build_parser().parse_args(

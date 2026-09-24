@@ -183,10 +183,14 @@ session every output group now sits below `eeg/`; the rest of the defaults are
 unchanged, so an in-repo run still follows the data location alone. See "Output
 folders within a session" in `readme.md`.
 
-## 20. Batch running of pipelines
+~~## 20. Batch running of pipelines~~
 
-## 21. Automate running of the preprocessing for hypnose dataset with reports of errors
+## 21. Guidance for running qc scripts and options for external running when requiring review
 
-## 22. Improve external running of API
+## 22. Automate running of the preprocessing for hypnose dataset with reports of errors
 
-## 23. Reduce amount of text at top of scripts
+## Pipeline output also parquet for qc review for efficiency
+
+## 23. Improve external running of API
+
+## 24. Reduce amount of text at top of scripts
