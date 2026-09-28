@@ -35,7 +35,7 @@ QC status (pass or review). The report also records how long the whole batch
 took.
 
 `--view` opens the interactive scoring viewer
-(`hypnose_eeg/review/viewer.py`) once the selected stages
+(`hypnose_eeg/sleep_scoring/view_scoring.py`) once the selected stages
 finish, so a run can end in a look at the traces and predictions it produced.
 It runs last -- after artifact detection and the QC summary, so `--show-artifacts`
 has artifacts to show -- and needs a display. It only reads outputs already on

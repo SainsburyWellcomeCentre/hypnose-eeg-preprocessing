@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from hypnose_eeg.review.viewer import (
+from hypnose_eeg.sleep_scoring.view_scoring import (
     ScoredWindow,
     ScoringViewSettings,
     ShadedRegions,
@@ -390,7 +390,7 @@ class SleepScoringViewTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"DISPLAY": "localhost:10.0"}),
                 patch(
-                    "hypnose_eeg.review.viewer.show_scored_recording",
+                    "hypnose_eeg.sleep_scoring.view_scoring.show_scored_recording",
                     return_value=0,
                 ) as range_view,
             ):

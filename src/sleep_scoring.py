@@ -1,7 +1,7 @@
 """Run the Hypnose sleep-scoring pipeline: score, and optionally view.
 
 `score` wraps `hypnose_eeg/sleep_scoring/score_recordings.py` and is the default
-step. `view` wraps the interactive `hypnose_eeg/review/viewer.py`
+step. `view` wraps the interactive `hypnose_eeg/sleep_scoring/view_scoring.py`
 viewer; it is excluded by default because it opens a plot window rather than
 running unattended, but remains available via `--steps view`.
 
@@ -30,7 +30,7 @@ from src._pipeline import (
 STEP_ORDER = ["score", "view"]
 STEP_MODULES = {
     "score": "hypnose_eeg.sleep_scoring.score_recordings",
-    "view": "hypnose_eeg.review.viewer",
+    "view": "hypnose_eeg.sleep_scoring.view_scoring",
 }
 DEFAULT_STEPS = ["score"]
 

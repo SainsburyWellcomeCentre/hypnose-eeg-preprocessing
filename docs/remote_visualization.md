@@ -135,7 +135,7 @@ From the remote terminal, including a VS Code terminal once `DISPLAY` is set:
 ```bash
 cd /home/volkan/repos/hypnose-eeg-analysis
 conda activate hypnose-eeg-env
-python -m hypnose_eeg.review.viewer \
+python -m hypnose_eeg.sleep_scoring.view_scoring \
   --subject 66 --date 20260717
 ```
 

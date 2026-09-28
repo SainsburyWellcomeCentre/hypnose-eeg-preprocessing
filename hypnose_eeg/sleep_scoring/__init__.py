@@ -1,1 +1,1 @@
-"""Automated Somnotate sleep scoring."""
+"""Automated Somnotate sleep scoring and viewing of scored recordings."""

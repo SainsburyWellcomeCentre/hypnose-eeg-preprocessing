@@ -201,7 +201,7 @@ parquet copies of the summary and review epochs, falling back to the CSVs.
 
 In progress. Done: `scripts/` is now the installable `hypnose_eeg` package (no
 `sys.path` inserts; configuration loads on first use rather than at import);
-the viewer moved to `hypnose_eeg/review/viewer.py`; `qc/spectra.py` and the
+the viewer moved to `hypnose_eeg/sleep_scoring/view_scoring.py`; `qc/spectra.py` and the
 viewer are split into compute/plot/CLI layers (`compute_session_spectra`,
 `plot_spectra`, `save_spectra`; `view_settings`, `load_scored_window`,
 `plot_scored_window`, `show_scored_recording`). Remaining:

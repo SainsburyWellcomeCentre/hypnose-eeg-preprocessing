@@ -128,7 +128,7 @@ Pass `--stage preprocessing`/`sleep_scoring`/`qc` (one or more) to
 default step set.
 
 `--view` ends the run in the interactive scoring viewer
-(`hypnose_eeg/review/viewer.py`), so a session can be
+(`hypnose_eeg/sleep_scoring/view_scoring.py`), so a session can be
 inspected as soon as it has been processed. It opens a plot window, so it needs
 a display (see [docs/remote_visualization.md](docs/remote_visualization.md) for
 working over SSH), and it runs after every selected stage — artifact detection
@@ -458,10 +458,10 @@ path is an explicit override.
 Visually inspect the raw signals and predicted states for one scored session:
 
 ```bash
-python -m hypnose_eeg.review.viewer \
+python -m hypnose_eeg.sleep_scoring.view_scoring \
   --subject 66 --date 20260717 --hours 3 6
 
-python -m hypnose_eeg.review.viewer \
+python -m hypnose_eeg.sleep_scoring.view_scoring \
   --subject 66 --session 1 --hours 3 6
 ```
 
@@ -473,7 +473,7 @@ whose real-time span contains the requested start. This supports multi-day
 recordings where the selected range begins after the recording's calendar date:
 
 ```bash
-python -m hypnose_eeg.review.viewer \
+python -m hypnose_eeg.sleep_scoring.view_scoring \
   --subject 66 \
   --time-range "20260718 03:00:00" "20260718 06:00:00"
 ```
@@ -485,7 +485,7 @@ regions from the matching `*_artifact_epochs.parquet` in the session's
 `eeg/artifacts/` directory can also be shaded and labelled:
 
 ```bash
-python -m hypnose_eeg.review.viewer \
+python -m hypnose_eeg.sleep_scoring.view_scoring \
   --subject 66 \
   --time-range "20260718 03:00:00" "20260718 06:00:00" \
   --display-rate 128 --show-artifacts
@@ -497,7 +497,7 @@ regions without needing a display, `plot_scored_window()` draws them, and
 `show_scored_recording()` opens the interactive window:
 
 ```python
-from hypnose_eeg.review.viewer import (
+from hypnose_eeg.sleep_scoring.view_scoring import (
     load_scored_window, plot_scored_window, view_settings,
 )
 

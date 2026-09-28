@@ -27,15 +27,15 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
   helpers.
 - `preprocessing/`: preprocessing workflows.
 - `qc/`: quality-control reports and plots.
-- `review/`: visual review of scored recordings (the interactive viewer).
-- `sleep_scoring/`: automated Somnotate sleep scoring.
+- `sleep_scoring/`: automated Somnotate sleep scoring and the interactive
+  viewer for scored recordings (`view_scoring.py`).
 - `utils/`: small cross-cutting helpers such as configuration, artifact, and
   sleep-state handling.
 
 Workflow modules are both command-line entry points (`python -m
 hypnose_eeg.qc.spectra --help`) and Python APIs. `qc/spectra.py` and
-`review/viewer.py` separate computing results, plotting them, and the CLI, so
-their results can be used without the CLI. Configuration is read from
+`sleep_scoring/view_scoring.py` separate computing results, plotting them,
+and the CLI, so their results can be used without the CLI. Configuration is read from
 `configs/` on first use, not at import time.
 
 ## Sections for inclusion
