@@ -6,15 +6,12 @@ dependencies:
   - pip=25.1
   - pyarrow=21.0.0
 
-  # Qt and its Linux XCB runtime belong in Conda so remote viewer sessions do
-  # not depend on distribution-specific system packages. These provide the
-  # native libraries used by PyQt's xcb platform plugin over SSH/X11.
-  - "pyqt>=6.10,<7"
-  - xcb-util-cursor
-  - xcb-util-image
-  - xcb-util-keysyms
-  - xcb-util-renderutil
-  - xcb-util-wm
+  # Qt belongs in Conda so remote viewer sessions do not depend on
+  # distribution-specific system packages. On conda-forge, PyQt 6 is named
+  # "pyqt6" ("pyqt" is PyQt5). On Linux, its qt6-main dependency pulls in the
+  # xcb-util-* libraries used by Qt's xcb platform plugin over SSH/X11; those
+  # packages do not exist for macOS, so they are not listed here directly.
+  - "pyqt6>=6.10,<7"
 
   - pip:
       # EDF reading and EEG analysis. edfio backs MNE's EDF export, used by
