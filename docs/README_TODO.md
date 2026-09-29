@@ -214,3 +214,5 @@ viewer are split into compute/plot/CLI layers (`compute_session_spectra`,
   flags, built on `load_scored_window`/`plot_scored_window`.
 
 ## 24. Reduce amount of text at top of scripts
+
+## Move final executable scripts into src location 
