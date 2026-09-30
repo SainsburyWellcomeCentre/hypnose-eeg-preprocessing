@@ -36,10 +36,11 @@ For a clean installation, use:
 conda env create --file environment.yml
 ```
 
-The environment installs PyQt through Conda together with `xcb-util-cursor`,
-`xcb-util-image`, `xcb-util-keysyms`, `xcb-util-renderutil`, and `xcb-util-wm`.
-These satisfy the native `libqxcb.so` runtime that pip-only PyQt installations
-can leave unresolved on headless Linux machines.
+The environment installs PyQt through Conda (`pyqt6` from conda-forge). On
+Linux, its `qt6-main` dependency brings in `xcb-util-cursor`, `xcb-util-image`,
+`xcb-util-keysyms`, `xcb-util-renderutil`, and `xcb-util-wm`. These satisfy the
+native `libqxcb.so` runtime that pip-only PyQt installations can leave
+unresolved on headless Linux machines.
 
 The remote SSH service must allow X11 forwarding and have `xauth` installed. A
 user can verify `xauth` with:
