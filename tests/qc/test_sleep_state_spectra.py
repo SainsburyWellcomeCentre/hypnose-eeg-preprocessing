@@ -201,8 +201,15 @@ class SleepStateSpectraTests(unittest.TestCase):
 
                 for figure in figures.values():
                     plt.close(figure)
-            self.assertEqual(len(paths), 3)
-            self.assertTrue(all(path.is_file() for path in paths))
+            self.assertEqual(
+                sorted(path.name for path in (root / "qc").iterdir()),
+                [
+                    "rec_sleep_state_emg_rms.pdf",
+                    "rec_sleep_state_power_spectra.pdf",
+                    "rec_sleep_state_spectral_quality.csv",
+                ],
+            )
+            self.assertEqual(sorted(paths), sorted((root / "qc").iterdir()))
 
     def test_spectrum_computation_is_available_from_analysis(self) -> None:
         self.assertTrue(callable(compute_state_spectra))

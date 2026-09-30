@@ -9,12 +9,10 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
-from hypnose_helpers.io.selectors import parse_subject
-from hypnose_helpers.viz.save import save_figure
 from hypnose_helpers.viz.styles import ensure_style
 
 from hypnose_eeg.io.input_paths import artifact_path, scoring_path
-from hypnose_eeg.io.output_paths import quality_control_output_path
+from hypnose_eeg.io.output_paths import quality_control_output_path, save_pdf
 from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
 from hypnose_eeg.qc.spectra import load_spectra_config
 from hypnose_eeg.utils.recording_selection import select_recordings
@@ -323,14 +321,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             save_dir = quality_control_output_path(
                 args.save_dir, edf_path, rawdata_root, derivatives_root
             )
-            output_path = save_figure(
-                figure,
-                f"{edf_path.stem}_sleep_state_correlations",
-                fig_dir=save_dir,
-                subjids=parse_subject(args.subject),
-                dates=args.date,
-            )
-            print(f"Saved: {output_path}")
+            save_pdf(figure, save_dir / f"{edf_path.stem}_sleep_state_correlations.pdf")
 
     if not args.no_show:
         import matplotlib.pyplot as plt

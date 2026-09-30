@@ -1,4 +1,4 @@
-"""Construct categorized output paths in the shared session layout, and write CSVs to them."""
+"""Construct categorized output paths in the shared session layout, and write CSVs and PDFs to them."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from hypnose_eeg.utils.recording_selection import source_stem_from_fif
 
 if TYPE_CHECKING:
     import pandas as pd
+    from matplotlib.figure import Figure
 
 
 OUTPUT_GROUPS = {
@@ -196,5 +197,28 @@ def save_csv_rows(
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+    print(f"Saved: {path}")
+    return path
+
+
+def save_pdf(fig: "Figure", path: str | Path) -> Path:
+    """Save a figure as a provenance-tagged PDF at exactly `path`, and report the save.
+
+    `hypnose_helpers`' `save_figure` always appends `_sub-..._date-...` tags to
+    the filename; recording outputs already name their subject and session in
+    the stem, so the tagged file is renamed to `path`.
+    """
+    from hypnose_helpers.provenance import provenance
+    from hypnose_helpers.viz.save import save_figure
+
+    path = Path(path)
+    tagged = save_figure(
+        fig,
+        path.stem,
+        fig_dir=path.parent,
+        # Record the caller, not this wrapper, as the figure's origin.
+        provenance=provenance(skip_modules=(__name__,)),
+    )
+    Path(tagged).replace(path)
     print(f"Saved: {path}")
     return path

@@ -17,12 +17,10 @@ from typing import TYPE_CHECKING, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
-from hypnose_helpers.io.selectors import parse_subject
-from hypnose_helpers.viz.save import save_figure
 from hypnose_helpers.viz.styles import ensure_style
 
 from hypnose_eeg.io.input_paths import artifact_path, scoring_path
-from hypnose_eeg.io.output_paths import quality_control_output_path, save_csv
+from hypnose_eeg.io.output_paths import quality_control_output_path, save_csv, save_pdf
 from hypnose_eeg.io.repository_paths import resolve_data_roots
 from hypnose_eeg.utils.recording_selection import select_recordings
 from hypnose_eeg.analysis.emg import compute_state_emg_rms
@@ -610,14 +608,8 @@ def save_spectra(
     result: SpectraResult,
     save_dir: str | Path,
     figures: Mapping[str, "Figure"] | None = None,
-    *,
-    subject: str | int | None = None,
-    date: str | None = None,
 ) -> list[Path]:
-    """Write the quality CSV and any `plot_spectra()` figures into `save_dir`.
-
-    `subject`/`date` only add the shared filename tags to the figure PDFs.
-    """
+    """Write the quality CSV and any `plot_spectra()` figures into `save_dir`."""
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     paths = [
@@ -627,17 +619,9 @@ def save_spectra(
         )
     ]
     for key, fig in (figures or {}).items():
-        path = Path(
-            save_figure(
-                fig,
-                f"{result.recording}_{_FIGURE_NAMES[key]}",
-                fig_dir=save_dir,
-                subjids=None if subject is None else parse_subject(subject),
-                dates=date,
-            )
+        paths.append(
+            save_pdf(fig, save_dir / f"{result.recording}_{_FIGURE_NAMES[key]}.pdf")
         )
-        print(f"Saved: {path}")
-        paths.append(path)
     return paths
 
 
@@ -736,7 +720,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             save_dir = quality_control_output_path(
                 args.save_dir, edf_path, rawdata_root, derivatives_root
             )
-            save_spectra(result, save_dir, figures, subject=args.subject, date=args.date)
+            save_spectra(result, save_dir, figures)
 
     if not args.no_show:
         import matplotlib.pyplot as plt
