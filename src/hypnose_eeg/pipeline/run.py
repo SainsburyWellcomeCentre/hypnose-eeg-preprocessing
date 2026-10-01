@@ -42,7 +42,7 @@ has artifacts to show -- and needs a display. It only reads outputs already on
 disk, so it is also available on its own (`--stage qc --view`, or with no
 stage work at all). Viewer-only options such as `--hours` cannot be given here,
 because unrecognized arguments go to every stage; pass those to
-`python -m src.sleep_scoring --steps view` instead.
+`hypnose-eeg-score --steps view` instead.
 
 Sleep scoring, artifact detection, and the QC summary each write a
 `<output stem>_provenance.json` sidecar naming the git commit that produced the

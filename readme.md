@@ -84,8 +84,8 @@ export HYPNOSE_EEG_OUTPUT_ROOT=eeg
 # ...or one folder at a time, relative to that root
 export HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS=analysis/artifacts
 
-# The same three overrides as flags on the src/ entry points
-python -m src.run_pipeline --subject 66 --session 1 --model my-model \
+# The same three overrides as flags on the pipeline commands
+hypnose-eeg-pipeline --subject 66 --session 1 --model my-model \
     --output-layout /path/to/output_layout.yaml --output-root eeg \
     --output-dir artifacts=analysis/artifacts --output-dir quality_control=reports/qc
 ```
@@ -98,51 +98,51 @@ its built-in name. The root applies to the group folders whichever way they
 were set, so `HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS=analysis/artifacts` lands in
 `eeg/analysis/artifacts`. Folders may be nested (`analysis/artifacts`) but must
 stay relative to the session directory -- absolute paths and `..` are rejected
--- because readers (`hypnose_eeg/qc/*`, the viewer) locate earlier outputs through
+-- because readers (`src/hypnose_eeg/qc/*`, the viewer) locate earlier outputs through
 the same names. From Python, `hypnose_eeg.api.DataLocations(output_layout=...,
 output_root=..., output_dirs={...})` carries the same overrides (see [Running
 from Python](#running-from-python)).
 
 ## Unified pipeline entry points
 
-`python -m src.run_pipeline` runs the full pipeline for one subject/session in the
+`hypnose-eeg-pipeline` runs the full pipeline for one subject/session in the
 order the stages actually require — trim, concatenate, downsample and the
 artifact prescan, then sleep scoring, then artifact detection (which depends on
 the sleep-scoring output), then the QC summary:
 
 ```bash
-python -m src.run_pipeline --subject 66 --session 1 --model my-model
+hypnose-eeg-pipeline --subject 66 --session 1 --model my-model
 ```
 
 Each stage also has its own entry point that can be run on its own, with a
 `--steps` selector for that stage's individual scripts:
 
 ```bash
-python -m src.preprocessing --subject 66 --session 1 --steps trim concatenate downsample
-python -m src.sleep_scoring --subject 66 --session 1 --model my-model
-python -m src.qc --subject 66 --session 1
+hypnose-eeg-preprocess --subject 66 --session 1 --steps trim concatenate downsample
+hypnose-eeg-score --subject 66 --session 1 --model my-model
+hypnose-eeg-qc --subject 66 --session 1
 ```
 
 Pass `--stage preprocessing`/`sleep_scoring`/`qc` (one or more) to
-`run_pipeline` to restrict a full run to those stages, each using its own
+`hypnose-eeg-pipeline` to restrict a full run to those stages, each using its own
 default step set.
 
-The stages live in the package (`hypnose_eeg/pipeline/`); `src/` only holds
-these `python -m src.<stage>` entry points. The editable install also puts
-them on the `PATH` as console scripts, which run from any directory:
+These commands are console scripts that the editable install
+(`pip install -e .`) puts on the `PATH` of the activated environment, so they
+run from any directory. Each is also a module, run with `python -m`:
 
-| `python -m` (from the repository root) | Console script |
+| Console script | Module (`src/hypnose_eeg/...`) |
 | --- | --- |
-| `src.run_pipeline` | `hypnose-eeg-pipeline` |
-| `src.preprocessing` | `hypnose-eeg-preprocess` |
-| `src.sleep_scoring` | `hypnose-eeg-score` |
-| `src.qc` | `hypnose-eeg-qc` |
-| `src.qc_review` | `hypnose-eeg-qc-review` |
-| `hypnose_eeg.sleep_scoring.view_scoring` | `hypnose-eeg-view` |
-| `hypnose_eeg.io.repository_paths` | `hypnose-eeg-locations` |
+| `hypnose-eeg-pipeline` | `hypnose_eeg.pipeline.run` |
+| `hypnose-eeg-preprocess` | `hypnose_eeg.pipeline.preprocessing` |
+| `hypnose-eeg-score` | `hypnose_eeg.pipeline.sleep_scoring` |
+| `hypnose-eeg-qc` | `hypnose_eeg.pipeline.qc` |
+| `hypnose-eeg-qc-review` | `hypnose_eeg.pipeline.qc_review` |
+| `hypnose-eeg-view` | `hypnose_eeg.sleep_scoring.view_scoring` |
+| `hypnose-eeg-locations` | `hypnose_eeg.io.repository_paths` |
 
 `--view` ends the run in the interactive scoring viewer
-(`hypnose_eeg/sleep_scoring/view_scoring.py`), so a session can be
+(`src/hypnose_eeg/sleep_scoring/view_scoring.py`), so a session can be
 inspected as soon as it has been processed. It opens a plot window, so it needs
 a display (see [docs/remote_visualization.md](docs/remote_visualization.md) for
 working over SSH), and it runs after every selected stage — artifact detection
@@ -151,11 +151,11 @@ also works on its own:
 
 ```bash
 # Process the session, then look at the result
-python -m src.run_pipeline --subject 66 --session 1 --model my-model --view
+hypnose-eeg-pipeline --subject 66 --session 1 --model my-model --view
 # Just look at an already-processed session
-python -m src.run_pipeline --subject 66 --session 1 --stage qc --view
+hypnose-eeg-pipeline --subject 66 --session 1 --stage qc --view
 # Viewer-only options (--hours, --eeg-channel, --show-artifacts, ...) go here
-python -m src.sleep_scoring --subject 66 --session 1 --steps view --hours 3 6
+hypnose-eeg-score --subject 66 --session 1 --steps view --hours 3 6
 ```
 
 Every step whose output already exists is skipped and the run continues with
@@ -173,9 +173,9 @@ session each of them has, in order. `--subject all` covers every subject in the
 rawdata tree:
 
 ```bash
-python -m src.run_pipeline --subject 66 --all-sessions --model my-model
-python -m src.run_pipeline --subject 66 67 68 --all-sessions --model my-model
-python -m src.run_pipeline --subject all --all-sessions --model my-model
+hypnose-eeg-pipeline --subject 66 --all-sessions --model my-model
+hypnose-eeg-pipeline --subject 66 67 68 --all-sessions --model my-model
+hypnose-eeg-pipeline --subject all --all-sessions --model my-model
 ```
 
 A session that fails does not stop the batch. Its derivative outputs are
@@ -230,7 +230,7 @@ and a batch run has nobody to close it. Review a session afterwards with
 
 ### Which sessions need QC review
 
-`python -m src.qc_review` reads the QC summaries already on disk and lists every
+`hypnose-eeg-qc-review` reads the QC summaries already on disk and lists every
 session of the given subjects whose QC came out REVIEW (or FAIL), with the
 sections behind it -- metric, value, threshold, detail, and how many review
 ranges each section added to the review epochs. It reads the `.parquet` copies
@@ -239,8 +239,8 @@ sessions summarized before those copies were written. Sessions with no summary
 are named per subject. Nothing is recomputed.
 
 ```
-python -m src.qc_review --subject 65 66
-python -m src.qc_review --subject all --report qc_review.csv
+hypnose-eeg-qc-review --subject 65 66
+hypnose-eeg-qc-review --subject all --report qc_review.csv
 ```
 
 ```
@@ -257,7 +257,7 @@ QC review: 19/55 checked sessions need review across 2 subjects
 with, so its summaries are found.
 
 Run any of them with `--help` for its complete option list. Each step calls
-the matching `hypnose_eeg/*` CLI below in the same Python process rather than
+the matching `src/hypnose_eeg/*` CLI below in the same Python process rather than
 reimplementing it, so step-specific flags such as `--config` are best passed
 to the underlying script directly when a per-step entry point doesn't already
 expose them. Output-folder overrides apply only while their step runs.
@@ -345,12 +345,12 @@ failing.
 
 Run processing stages in this order:
 
-1. **Trim duplicate channels** — `hypnose_eeg/preprocessing/trim_duplicate_channels.py`
-2. **Concatenate recordings** — `hypnose_eeg/preprocessing/concatenate_recordings.py`
-3. **Downsample recordings** — `hypnose_eeg/preprocessing/downsample_recordings.py`
-4. **Prescan artifacts** — `hypnose_eeg/preprocessing/prescan_artifacts.py`
-5. **Sleep scoring** — `hypnose_eeg/sleep_scoring/score_recordings.py`
-6. **Detect artifacts** — `hypnose_eeg/preprocessing/detect_artifacts.py`
+1. **Trim duplicate channels** — `src/hypnose_eeg/preprocessing/trim_duplicate_channels.py`
+2. **Concatenate recordings** — `src/hypnose_eeg/preprocessing/concatenate_recordings.py`
+3. **Downsample recordings** — `src/hypnose_eeg/preprocessing/downsample_recordings.py`
+4. **Prescan artifacts** — `src/hypnose_eeg/preprocessing/prescan_artifacts.py`
+5. **Sleep scoring** — `src/hypnose_eeg/sleep_scoring/score_recordings.py`
+6. **Detect artifacts** — `src/hypnose_eeg/preprocessing/detect_artifacts.py`
 
 Trimming is automatic and usually a no-op. Some recordings list the same
 channel label twice in their EDF header, which breaks concatenation (channel
@@ -467,7 +467,7 @@ python -m hypnose_eeg.qc.summary_qc \
 ```
 
 Both outputs are written to the session's `eeg/quality_control/` directory on every
-run, whether the command is invoked directly or through `python -m src.qc`, and
+run, whether the command is invoked directly or through `hypnose-eeg-qc`, and
 both are named after the analyzed recording in the same
 `sub-XXX_ses-YYY_recording-ZZZ_<output>` form as every other per-recording
 derivative:
@@ -487,7 +487,7 @@ intervals. Each is written as a CSV for reading by eye and a parquet copy that
 `threshold` are text, as in the CSV, since some sections report `3/4` or `n/a`). Pass a
 filename to `--summary`/`--review-epochs` to rename either output (the
 recording prefix is still applied), or `--no-summary`/`--no-review-epochs` to
-skip writing it. `recording_integrity.py` and `hypnose_eeg/qc/sleep_scoring.py`
+skip writing it. `recording_integrity.py` and `src/hypnose_eeg/qc/sleep_scoring.py`
 name their outputs the same way.
 
 The command checks EDF/FIF integrity and gaps, Somnotate confidence and undefined

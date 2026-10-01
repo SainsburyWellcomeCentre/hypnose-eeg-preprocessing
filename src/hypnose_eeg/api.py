@@ -2,7 +2,7 @@
 
 A small facade over `hypnose_eeg.pipeline` and the QC/viewer modules, for
 notebooks and other projects that would otherwise shell out to
-`python -m src.run_pipeline`:
+`hypnose-eeg-pipeline`:
 
     from hypnose_eeg import api
 

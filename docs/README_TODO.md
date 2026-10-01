@@ -208,8 +208,7 @@ viewer are split into compute/plot/CLI layers (`compute_session_spectra`,
 - ~~A small `hypnose_eeg/api.py` facade with a `DataLocations` argument and
   console scripts, and `src/qc.run_steps` calling functions in-process
   rather than as subprocesses (folding `src/` into the package).~~ — done: the
-  stages moved to `hypnose_eeg/pipeline/` (`src/` keeps thin `python -m
-  src.<stage>` entry points); `steps.run_step` calls each CLI's `main(argv)`
+  stages moved to `hypnose_eeg/pipeline/`; `steps.run_step` calls each CLI's `main(argv)`
   in-process, applying the output-folder overrides to `os.environ` only for
   that step; `hypnose_eeg/api.py` wraps the stages, batch runs, the in-memory
   QC summary, the QC review, and the viewer, taking an `api.DataLocations` or a
@@ -230,6 +229,13 @@ Remaining:
 
 ## 24. Reduce amount of text at top of scripts
 
-## Move final executable scripts into src location 
+## ~~Move final executable scripts into src location~~
+
+~~Move final executable scripts into src location~~ — done: the repository
+uses the standard src layout. The package moved to `src/hypnose_eeg/`, the
+`python -m src.<stage>` entry-point files were removed, and the pipeline
+commands are the `hypnose-eeg-*` console scripts declared in `pyproject.toml`
+(each also runs as `python -m hypnose_eeg.pipeline.<stage>`). Re-run
+`pip install -e .` after pulling this change.
 
 ## Introduce timer for running pipeline

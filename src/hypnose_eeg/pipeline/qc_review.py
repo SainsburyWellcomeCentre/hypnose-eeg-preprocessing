@@ -12,12 +12,12 @@ FAIL section are listed too, marked as such -- a batch run erases those, but a
 single run leaves them in place.
 
 Nothing is recomputed: only summaries already on disk are read, so run the QC
-summary first (`python -m src.qc --subject 66 --session 1`, or a batch run).
+summary first (`hypnose-eeg-qc --subject 66 --session 1`, or a batch run).
 Sessions without a summary are counted and named per subject, since a session
 that was never checked is not one that passed.
 
-    python -m src.qc_review --subject 65 66
-    python -m src.qc_review --subject all --report qc_review.csv
+    hypnose-eeg-qc-review --subject 65 66
+    hypnose-eeg-qc-review --subject all --report qc_review.csv
 
 `--report FILE` also writes one CSV row per flagged section. Output-folder
 overrides (`--output-root`, `--output-dir quality_control=...`,

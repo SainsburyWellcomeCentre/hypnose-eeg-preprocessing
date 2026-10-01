@@ -12,16 +12,14 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
 ## Top-level folders
 - `configs/`: environment/data referencing and pipeline runtime settings.
 - `notebooks/`: exploratory jupyter notebooks for development.
-- `hypnose_eeg/`: the installable package (`pip install -e .`); every module
-  imports from any directory.
-- `src/`: thin `python -m src.<stage>` entry points for the pipeline stages in
-  `hypnose_eeg/pipeline/`, run from the repository root
-  (`python -m src.run_pipeline`).
+- `src/hypnose_eeg/`: the installable package (`pip install -e .`), in the
+  standard src layout; every module imports from any directory, and the
+  pipeline commands (`hypnose-eeg-pipeline`, ...) are its console scripts.
 - `tests/`: fixtures and integration tests for quality control.
 - `docs/`: contracts and operations runbooks.
 - `cache/`: optional ephemeral local staging.
 
-### `hypnose_eeg/` subpackages
+### `src/hypnose_eeg/` subpackages
 - `analysis/`: reusable scientific calculations; these modules are not
   command-line entry points.
 - `io/`: recording discovery, data-location configuration, and MNE file-loading

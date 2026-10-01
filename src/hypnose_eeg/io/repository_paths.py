@@ -10,8 +10,8 @@ from hypnose_helpers.io.paths import DataLocations
 
 
 def get_repo_root() -> Path:
-    """Return the root of this repository checkout."""
-    return Path(__file__).resolve().parents[2]
+    """Return the root of this repository checkout (above `src/hypnose_eeg/io/`)."""
+    return Path(__file__).resolve().parents[3]
 
 
 _locations = DataLocations(
