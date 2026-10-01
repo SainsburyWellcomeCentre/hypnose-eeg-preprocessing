@@ -157,18 +157,22 @@ def _candidate_sessions(
         return matches
 
     current_date = _parse_date(current.date)
+    current_order = (current.date, current.ses or 0)
     ranked = []
     for session in layout.find_sessions(subjid, missing_ok=True):
         if session.path == current.path:
             continue
         delta = (_parse_date(session.date) - current_date).days
-        if prefer == "previous" and delta > 0:
+        # Sessions on the same date are ordered by session number.
+        later = (session.date, session.ses or 0) > current_order
+        if prefer == "previous" and later:
             continue
         if abs(delta) > max_age_days:
             continue
-        # Closest first; on a tie the earlier session, which the animal had
-        # already settled into rather than is about to.
-        ranked.append(((abs(delta), delta > 0), session))
+        # Closest first; on a tie the earlier session, then the one nearest
+        # in session number.
+        ses_distance = abs((session.ses or 0) - (current.ses or 0))
+        ranked.append(((abs(delta), later, ses_distance), session))
     return [session for _, session in sorted(ranked, key=lambda item: item[0])]
 
 

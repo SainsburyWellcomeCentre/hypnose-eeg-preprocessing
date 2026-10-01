@@ -187,6 +187,25 @@ class ReferenceNormalizationTests(unittest.TestCase):
         _, metadata = load_normalization_stats(own_path)
         self.assertEqual(metadata["signal_s"], 3 * HOUR)
 
+    def test_a_later_session_on_the_same_date_is_not_previous(self) -> None:
+        day_before = self._session(2, "20260711")
+        self._session(3, "20260712")
+        same_day_later = self._session(4, "20260712")
+        self._cache(day_before, signal_hours=22, mean=1.0)
+        self._cache(same_day_later, signal_hours=40, mean=9.0)
+        settings = self._settings(dates=None, sessions=[3])
+
+        outputs, _ = self._run(settings, _Scorer(signal_s=3 * HOUR))
+        record = self._provenance(outputs[0])["parameters"]["normalization"]
+        self.assertEqual(record["reference"]["session"], "ses-002")
+
+        outputs, _ = self._run(
+            replace(settings, reference_prefer="nearest", overwrite=True),
+            _Scorer(signal_s=3 * HOUR),
+        )
+        record = self._provenance(outputs[0])["parameters"]["normalization"]
+        self.assertEqual(record["reference"]["session"], "ses-004")
+
     def test_nearest_preference_may_pick_a_later_session(self) -> None:
         previous = self._session(2, "20260709")
         self._session(3, "20260712")
