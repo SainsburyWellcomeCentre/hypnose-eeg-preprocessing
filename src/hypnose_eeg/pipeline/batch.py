@@ -1,8 +1,10 @@
-"""Session enumeration, failed-session cleanup, and reporting for batch runs.
+"""Session selection, failed-session cleanup, and reporting for batch runs.
 
-`run.py --all-sessions` processes every session one or more subjects
-have, one after the other (`--subject all` covers every subject in the rawdata
-tree). A session that fails must not stop the ones after it, and must
+A batch run processes several sessions one after the other: every session one
+or more subjects have (`run.py --all-sessions`, with `--subject all` covering
+every subject in the rawdata tree), or only the ones selected -- by
+`--session`/`--date` values and ranges shared by every subject, or per subject
+as `--subject 66:1,3 67:2-4`. A session that fails must not stop the ones after it, and must
 not leave half-written outputs behind that a later rerun would mistake for
 completed work -- every stage skips a step whose output already exists, so a
 truncated parquet or a downsampled FIF written before the crash would be
@@ -26,6 +28,7 @@ only files this pipeline produced -- `<stem>_trimmed.edf` and
 from __future__ import annotations
 
 import csv
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -33,8 +36,20 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 import pyarrow.parquet as pq
-from hypnose_helpers.io.layout import SessionLayout, SessionRef, normalize_subjid
-from hypnose_helpers.io.selectors import parse_subjects
+from hypnose_helpers.io.layout import (
+    SessionLayout,
+    SessionRef,
+    filter_sessions,
+    normalize_subjid,
+)
+from hypnose_helpers.io.selectors import (
+    flatten,
+    parse_date_range,
+    parse_dates,
+    parse_session_range,
+    parse_sessions,
+    parse_subjects,
+)
 
 from hypnose_eeg.io.output_layout import output_dir_name, output_dir_names, output_root_dir
 from hypnose_eeg.io.output_paths import save_csv_rows
@@ -48,6 +63,13 @@ from hypnose_eeg.utils.recording_selection import (
 # `--subject all`: every subject the rawdata tree holds, rather than a list
 # typed out by hand. Spelled as a subject value so one flag covers both.
 ALL_SUBJECTS = "all"
+
+# `--subject 66:1,3`: a subject followed by the sessions to run for it.
+SUBJECT_SESSIONS_SEP = ":"
+
+# A hyphen between digits marks an inclusive range (`2-5`, `20260707-20260718`);
+# the hyphens in `ses-3` and `sub-066` follow letters, so are never read as one.
+_RANGE_RE = re.compile(r"(?<=\d)-(?=\d)")
 
 # The file suffixes `hypnose_eeg/qc/summary_qc.py` writes its section results
 # under, prefixed with the recording stem: a CSV and a parquet copy of it.
@@ -131,11 +153,7 @@ def resolve_subjects(rawdata_root: str | Path, values: Sequence[str]) -> list[in
     tokens = [str(value).strip() for value in values]
     if not any(token.lower() == ALL_SUBJECTS for token in tokens):
         return parse_subjects(tokens)
-    if len(tokens) > 1:
-        raise ValueError(
-            f"--subject {ALL_SUBJECTS} already covers every subject; "
-            f"do not list others alongside it"
-        )
+    _check_all_stands_alone(tokens)
     subjects = [
         subjid
         for subjid, _ in SessionLayout(Path(rawdata_root), name="rawdata").iter_subjects()
@@ -145,8 +163,117 @@ def resolve_subjects(rawdata_root: str | Path, values: Sequence[str]) -> list[in
     return subjects
 
 
+@dataclass(frozen=True)
+class SessionSelection:
+    """One subject of a batch run, and which of its sessions to run.
+
+    `filters` holds one `(key, value)` per session number (`"session"`) or
+    date (`"date"`) asked for, each a single value or an inclusive `A-B` range;
+    no filters selects every session the subject has.
+    """
+
+    subject: int
+    filters: tuple[tuple[str, str], ...] = ()
+
+
+def resolve_selections(
+    rawdata_root: str | Path,
+    values: Sequence[str],
+    *,
+    sessions: Sequence[str] | None = None,
+    dates: Sequence[str] | None = None,
+) -> list[SessionSelection]:
+    """The subjects and sessions a batch run covers, from `--subject` values.
+
+    A value can carry its own sessions as `SUBJECT:SESSIONS` (`66:1,3`,
+    `67:2-5`); every other value takes `sessions` or `dates` when given, and
+    every session the subject has when not. Subjects are read as
+    `resolve_subjects` reads them, `all` included. Session numbers and dates
+    are validated here, so a typo fails the run before any session starts.
+    """
+    if sessions and dates:
+        raise ValueError("Select sessions by number or by date, not both")
+    shared = _session_filters("session", sessions) + _session_filters("date", dates)
+    split = [str(value).strip().partition(SUBJECT_SESSIONS_SEP) for value in values]
+    _check_all_stands_alone([subject for subject, _, _ in split])
+
+    selections: list[SessionSelection] = []
+    for subject_text, has_own, own in split:
+        filters = shared
+        if has_own:
+            filters = _session_filters("session", [own])
+            if not filters:
+                raise ValueError(
+                    f"No sessions named after {subject_text}{SUBJECT_SESSIONS_SEP}; "
+                    f"expected for example {subject_text}{SUBJECT_SESSIONS_SEP}1,3"
+                )
+        selections += [
+            SessionSelection(subject, filters)
+            for subject in resolve_subjects(rawdata_root, [subject_text])
+        ]
+    # A subject listed twice the same way is one selection, not two runs.
+    return list(dict.fromkeys(selections))
+
+
+def select_sessions(
+    selection: SessionSelection, available: Sequence[SessionRef]
+) -> list[tuple[list[SessionRef], FileNotFoundError | None]]:
+    """`available` narrowed to `selection`, as one entry per filter it holds.
+
+    A filter that matches nothing comes back as an error in its own entry
+    rather than as a quietly shorter run: asking for sessions 1 and 9 of a
+    subject that has no session 9 should say so. A range only has to match
+    one session.
+    """
+    if not selection.filters:
+        return [(list(available), None)]
+    entries: list[tuple[list[SessionRef], FileNotFoundError | None]] = []
+    for key, value in selection.filters:
+        if key == "session":
+            matched = filter_sessions(available, ses=value)
+        else:
+            matched = filter_sessions(available, date=value)
+        error = None if matched else FileNotFoundError(
+            f"No {key} {value} found for {normalize_subjid(selection.subject)}"
+        )
+        entries.append((matched, error))
+    return entries
+
+
+def _session_filters(key: str, values: Sequence[str] | None) -> tuple[tuple[str, str], ...]:
+    """Validated `(key, value)` filters for session numbers or dates, duplicates dropped."""
+    if key == "session":
+        parse_values, parse_range = parse_sessions, parse_session_range
+    else:
+        parse_values, parse_range = parse_dates, parse_date_range
+    filters: list[tuple[str, str]] = []
+    for token in flatten(values):
+        if is_range(token):
+            parse_range(token)
+        else:
+            parse_values([token])
+        if (key, token) not in filters:
+            filters.append((key, token))
+    return tuple(filters)
+
+
+def is_range(value: str) -> bool:
+    """Whether a session or date value is an inclusive `A-B` range."""
+    return bool(_RANGE_RE.search(value))
+
+
+def _check_all_stands_alone(tokens: Sequence[str]) -> None:
+    """Refuse `all` listed beside other subjects -- it is a whole-dataset run."""
+    if len(tokens) > 1 and any(token.lower() == ALL_SUBJECTS for token in tokens):
+        raise ValueError(
+            f"--subject {ALL_SUBJECTS} already covers every subject; "
+            f"do not list others alongside it"
+        )
+
+
 def missing_subject_outcome(subject: str | int, error: Exception) -> SessionOutcome:
-    """A report row for a subject whose sessions could not be resolved at all.
+    """A report row for a subject whose sessions could not be resolved at all,
+    or for a session or date selected for it that it does not have.
 
     A batch spanning several subjects should no more stop at one unusable
     subject than at one unusable session, so this is recorded and reported

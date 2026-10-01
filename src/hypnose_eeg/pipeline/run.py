@@ -21,9 +21,19 @@ A step whose outputs already exist is skipped and the run continues with the
 next one, so an interrupted or partially-completed session can be resumed by
 rerunning the same command. Pass `--overwrite` to recompute regardless.
 
-`--all-sessions` takes subject IDs alone and runs every session each of them
-has, one subject after the other; `--subject all` covers every subject in the
-rawdata tree. A session that fails does not stop the batch: its derivative
+One subject with one `--session` or `--date` is a single run. Anything more
+is a batch run, one session after the other:
+
+  --subject 66 67 --all-sessions      every session each subject has
+  --subject all --all-sessions        every session of every rawdata subject
+  --subject 66 67 --session 1 3       sessions 1 and 3 of each subject
+  --subject 66 --session 2-5          sessions 2 to 5 (inclusive range)
+  --subject 66:1,3 67:2-4             sessions chosen per subject
+  --subject 66:1 67 --session 2       per-subject sessions, `--session` for the rest
+
+`--date` takes values and ranges the same way. A selected session or date that
+a subject does not have is reported as `missing` rather than skipped silently.
+A session that fails does not stop the batch: its derivative
 outputs are erased -- so the half-finished ones cannot be mistaken for
 completed work by a later rerun -- the failure is recorded in a CSV report, and
 the next session starts. A subject with no resolvable sessions is recorded the
@@ -67,13 +77,17 @@ from typing import Sequence
 from hypnose_eeg.pipeline import preprocessing, qc, sleep_scoring
 from hypnose_eeg.pipeline.batch import (
     ALL_SUBJECTS,
+    SUBJECT_SESSIONS_SEP,
     SessionOutcome,
+    SessionSelection,
     erase_session_outputs,
     format_summary,
+    is_range,
     missing_subject_outcome,
     read_qc_verdict,
     report_path,
-    resolve_subjects,
+    resolve_selections,
+    select_sessions,
     session_selector,
     write_report,
 )
@@ -84,6 +98,7 @@ from hypnose_eeg.pipeline.steps import (
     output_layout_env,
 )
 from hypnose_helpers.io.layout import normalize_subjid
+from hypnose_helpers.io.selectors import flatten
 
 from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
 from hypnose_eeg.utils.recording_selection import find_sessions
@@ -99,13 +114,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--subject", "--subjid", dest="subject", nargs="+", required=True,
         metavar="SUBJECT",
-        help="Subject ID, for example 66 or sub-066. Several may be given with "
-        f"--all-sessions, as may {ALL_SUBJECTS!r} for every subject in the rawdata tree.",
+        help="Subject ID, for example 66 or sub-066; several may be given, or "
+        f"{ALL_SUBJECTS!r} for every subject in the rawdata tree. "
+        f"SUBJECT{SUBJECT_SESSIONS_SEP}SESSIONS (66{SUBJECT_SESSIONS_SEP}1,3 or "
+        f"67{SUBJECT_SESSIONS_SEP}2-4) selects that subject's own sessions.",
     )
     selector = parser.add_mutually_exclusive_group()
-    selector.add_argument("--date", default=None, help="Session date: YYYYMMDD.")
     selector.add_argument(
-        "--session", default=None, help="Session number, for example 1 or ses-1."
+        "--date", nargs="+", default=None, metavar="DATE",
+        help="Session date(s): YYYYMMDD, or an inclusive range such as "
+        "20260707-20260718.",
+    )
+    selector.add_argument(
+        "--session", nargs="+", default=None, metavar="SESSION",
+        help="Session number(s), for example 1 or ses-1, or an inclusive range "
+        "such as 2-5. More than one session is run as a batch.",
     )
     selector.add_argument(
         "--all-sessions", "--batch", dest="all_sessions", action="store_true",
@@ -139,7 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Restrict the run to these stages, each using its own default step set "
         "(default: all three, in dependency order).",
     )
-    batch = parser.add_argument_group("batch options (with --all-sessions)")
+    batch = parser.add_argument_group("batch options (runs covering more than one session)")
     batch.add_argument(
         "--keep-failed", action="store_true",
         help="Record a failed session in the report but leave its outputs on disk "
@@ -201,11 +224,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, extra = parser.parse_known_args(argv)
     output_dirs = output_dir_overrides(parser, args)
-    if args.all_sessions and args.view:
+    single = None if args.all_sessions else _single_session(args.subject, args.session, args.date)
+    if single is None and args.view:
         parser.error(
-            "--view cannot be combined with --all-sessions: the viewer waits for a "
-            "window to be closed, which a batch run has nobody to do. Review a "
-            "session afterwards with --session N --stage qc --view."
+            "--view needs a single session: the viewer waits for a window to be "
+            "closed, which a batch run has nobody to do. Review a session "
+            "afterwards with --session N --stage qc --view."
         )
 
     options = dict(
@@ -215,10 +239,19 @@ def main(argv: list[str] | None = None) -> int:
         output_root=args.output_root,
         output_dirs=output_dirs,
     )
-    if args.all_sessions:
+    if single is None:
+        unselected = [
+            subject for subject in args.subject if SUBJECT_SESSIONS_SEP not in subject
+        ]
+        if unselected and not (args.all_sessions or args.session or args.date):
+            parser.error(
+                f"choose the sessions to run for {' '.join(unselected)}: --session, "
+                f"--date, SUBJECT{SUBJECT_SESSIONS_SEP}SESSIONS, or --all-sessions "
+                "for every session."
+            )
         try:
             result = run_batch(
-                args.subject, **options,
+                args.subject, sessions=args.session, dates=args.date, **options,
                 stages=args.stage, model=args.model, overwrite=args.overwrite,
                 extra_args=extra, keep_failed=args.keep_failed,
                 erase_derived_edf=args.erase_derived_edf, report=args.report,
@@ -227,15 +260,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAILED: {exc}", file=sys.stderr)
             return 1
         return 0 if result.ok else 1
-    if len(args.subject) > 1 or args.subject[0].lower() == ALL_SUBJECTS:
-        parser.error(
-            "several subjects can only be run with --all-sessions; one session of "
-            "one subject is a single run."
-        )
 
     try:
         run_stages(
-            dict(subject=args.subject[0], date=args.date, session=args.session, **options),
+            dict(**single, **options),
             stages=args.stage, model=args.model, overwrite=args.overwrite,
             view=args.view, extra=extra,
         )
@@ -245,9 +273,35 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _single_session(
+    subjects: Sequence[str], sessions: Sequence[str] | None, dates: Sequence[str] | None
+) -> dict[str, str | None] | None:
+    """The stage selectors of a run covering one session, or None for a batch run.
+
+    One subject with at most one session number or date -- `--subject 66
+    --session 1` or `--subject 66:1` alike -- runs without the batch machinery,
+    as it always has (and so can end in `--view`); one subject with no session
+    at all is left for the stages to resolve. Several subjects, `all`, several
+    sessions, or a range make a batch run.
+    """
+    if len(subjects) != 1:
+        return None
+    subject, has_own, own = str(subjects[0]).strip().partition(SUBJECT_SESSIONS_SEP)
+    if subject.lower() == ALL_SUBJECTS or len(flatten(subject)) != 1:
+        return None
+    key = "session" if has_own or sessions else "date"
+    values = flatten([own] if has_own else (sessions or dates))
+    if len(values) > 1 or (values and is_range(values[0])):
+        return None
+    selector: dict[str, str | None] = {"session": None, "date": None}
+    if values:
+        selector[key] = values[0]
+    return dict(subject=subject, **selector)
+
+
 @dataclass
 class BatchResult:
-    """What a batch run did: one outcome per session, plus unresolvable subjects."""
+    """What a batch run did: one outcome per session, plus unresolvable selections."""
 
     outcomes: list[SessionOutcome]
     session_count: int
@@ -257,7 +311,7 @@ class BatchResult:
 
     @property
     def ok(self) -> bool:
-        """Whether sessions ran and none of them, nor any subject, failed."""
+        """Whether sessions ran and none of them failed, nor any selection came up missing."""
         return self.session_count > 0 and all(
             outcome.status == "ok" for outcome in self.outcomes
         )
@@ -282,6 +336,8 @@ class _BatchSettings:
 def run_batch(
     subjects: Sequence[str],
     *,
+    sessions: Sequence[str] | None = None,
+    dates: Sequence[str] | None = None,
     rawdata_root: str | Path | None = None,
     derivatives_root: str | Path | None = None,
     output_layout: str | Path | None = None,
@@ -295,20 +351,24 @@ def run_batch(
     erase_derived_edf: bool = False,
     report: str | Path | None = None,
 ) -> BatchResult:
-    """Run every session of every selected subject, erasing and noting the failures.
+    """Run the selected sessions of every selected subject, erasing and noting the failures.
 
     `subjects` are subject IDs, or `"all"` for every subject in the rawdata
-    tree. A session that fails is recorded and, unless `keep_failed`, has its
-    outputs erased, and the batch carries on; the per-session CSV report goes to
-    `report`, or to a timestamped file below the derivatives root. Raises
+    tree; one written `SUBJECT:SESSIONS` (`"66:1,3"`) runs only those
+    sessions of it. The rest run the `sessions` or `dates` given -- values or
+    inclusive `A-B` ranges -- or every session they have. A session that fails
+    is recorded and, unless `keep_failed`, has its outputs erased, and the
+    batch carries on; the per-session CSV report goes to `report`, or to a
+    timestamped file below the derivatives root. Raises
     `FileNotFoundError`/`ValueError` when the subjects themselves cannot be
-    resolved.
+    resolved or a session or date is malformed.
     """
     rawdata = Path(rawdata_root) if rawdata_root else get_rawdata_root()
     derivatives = Path(derivatives_root) if derivatives_root else get_derivatives_root()
-    resolved_subjects = resolve_subjects(rawdata, subjects)
+    selections = resolve_selections(rawdata, subjects, sessions=sessions, dates=dates)
+    resolved_subjects = list(dict.fromkeys(selection.subject for selection in selections))
 
-    plan = _plan_batch(rawdata, resolved_subjects)
+    plan = _plan_batch(rawdata, selections)
     total = sum(len(sessions) for _, sessions, _ in plan)
     if not total:
         # Nothing resolved for any subject: the errors are already on stderr and
@@ -385,21 +445,34 @@ def run_batch(
 
 
 def _plan_batch(
-    rawdata_root: Path, subjects: list[int]
+    rawdata_root: Path, selections: list[SessionSelection]
 ) -> list[tuple[int, list, Exception | None]]:
     """Resolve each subject's sessions up front, keeping the ones that do not resolve.
 
     Listing every subject before running any of them means an unusable subject
-    is reported in its place in the run rather than only discovered hours in,
-    and never stops the subjects after it.
+    -- or a selected session it does not have -- is reported in its place in
+    the run rather than only discovered hours in, and never stops the subjects
+    after it. A session selected more than once runs once.
     """
     plan: list[tuple[int, list, Exception | None]] = []
-    for subject in subjects:
+    planned: set[Path] = set()
+    for selection in selections:
+        subject = selection.subject
         try:
-            plan.append((subject, find_sessions(rawdata_root, subject=subject), None))
+            available = find_sessions(rawdata_root, subject=subject)
         except (FileNotFoundError, ValueError) as exc:
             print(f"FAILED: {exc}", file=sys.stderr)
             plan.append((subject, [], exc))
+            continue
+        for sessions, error in select_sessions(selection, available):
+            if error is not None:
+                print(f"FAILED: {error}", file=sys.stderr)
+                plan.append((subject, [], error))
+                continue
+            fresh = [session for session in sessions if session.path not in planned]
+            planned.update(session.path for session in fresh)
+            if fresh:
+                plan.append((subject, fresh, None))
     return plan
 
 

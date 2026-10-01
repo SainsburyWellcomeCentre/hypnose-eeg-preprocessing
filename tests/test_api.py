@@ -129,6 +129,18 @@ class PipelineFunctionTests(unittest.TestCase):
         api.run_batch(["all"])
         self.assertEqual(run_batch.call_args.args[0], ["all"])
 
+    @patch("hypnose_eeg.api._run.run_batch")
+    def test_run_batch_selects_sessions_shared_or_per_subject(self, run_batch):
+        api.run_batch([66, 67], sessions=[1, "3-5"])
+        self.assertEqual(run_batch.call_args.args[0], ["66", "67"])
+        self.assertEqual(run_batch.call_args.kwargs["sessions"], ["1", "3-5"])
+        self.assertIsNone(run_batch.call_args.kwargs["dates"])
+
+        api.run_batch({66: [1, 3], 67: "2-4", 68: None}, dates=20260717)
+        self.assertEqual(run_batch.call_args.args[0], ["66:1,3", "67:2-4", "68"])
+        self.assertIsNone(run_batch.call_args.kwargs["sessions"])
+        self.assertEqual(run_batch.call_args.kwargs["dates"], ["20260717"])
+
     @patch("hypnose_eeg.api.compute_session_qc")
     def test_session_qc_applies_the_output_overrides_while_computing(self, compute):
         seen = {}

@@ -166,17 +166,37 @@ place. Pass
 `--overwrite` to recompute them regardless. The QC summary is the exception --
 it is cheap and always refreshed.
 
-### Batch: every session of one or more subjects
+### Batch: several sessions or subjects
 
-`--all-sessions` (or `--batch`) takes subject IDs alone and works through every
-session each of them has, in order. `--subject all` covers every subject in the
-rawdata tree:
+One subject with one `--session` (or `--date`) is a single run. Selecting more
+than that runs a batch, one session after the other. `--all-sessions` (or
+`--batch`) works through every session each subject has, in order, and
+`--subject all` covers every subject in the rawdata tree:
 
 ```bash
 hypnose-eeg-pipeline --subject 66 --all-sessions --model my-model
 hypnose-eeg-pipeline --subject 66 67 68 --all-sessions --model my-model
 hypnose-eeg-pipeline --subject all --all-sessions --model my-model
 ```
+
+To run only some sessions, give `--session` several numbers or an inclusive
+range (the same sessions for every subject), or choose them per subject as
+`SUBJECT:SESSIONS`:
+
+```bash
+hypnose-eeg-pipeline --subject 66 --session 1 3 --model my-model        # sessions 1 and 3
+hypnose-eeg-pipeline --subject 66 67 --session 2-5 --model my-model     # sessions 2-5 of both
+hypnose-eeg-pipeline --subject 66:1,3 67:2-4 --model my-model           # per subject
+hypnose-eeg-pipeline --subject 66:1 67 68 --session 2 --model my-model  # 66 ses 1; 67, 68 ses 2
+hypnose-eeg-pipeline --subject 66 --date 20260711-20260720 --model my-model
+```
+
+`--date` takes dates and date ranges the same way. A per-subject choice
+takes precedence over `--session`/`--date`/`--all-sessions`, which apply to the
+subjects listed without one. A range runs whichever sessions fall inside it,
+but a single session or date that a subject does not have is recorded as
+`missing` in the report (and the batch exits non-zero) rather than skipped
+silently.
 
 A session that fails does not stop the batch. Its derivative outputs are
 erased, the failure is written to a per-run CSV report, and the next session
@@ -200,9 +220,10 @@ A QC summary that comes out FAIL fails its session like any other step (and
 the batch exits non-zero), but it is marked `QC FAIL` and listed under
 `Failed QC` with the sections that failed, so it is not mistaken for a crash.
 
-A subject whose sessions cannot be resolved at all is recorded the same way as
-a failed session (`missing`) rather than stopping the subjects after it; the
-per-subject tallies appear once more than one subject runs.
+A subject whose sessions cannot be resolved at all, like a selected session it
+does not have, is recorded the same way as a failed session (`missing`) rather
+than stopping the subjects after it; the per-subject tallies appear once more
+than one subject runs.
 
 Erasing matters because every step skips work whose output already exists: a
 parquet or FIF half-written before the crash would otherwise be reused by the
@@ -282,6 +303,8 @@ api.preprocess(66, session=1, steps=["trim", "concatenate"], locations=locations
 
 result = api.run_batch([65, 66], model="my-model", locations=locations)
 print(result.ok, result.report)
+api.run_batch([65, 66], sessions=[1, "3-5"], locations=locations)  # chosen sessions
+api.run_batch({65: [1, 3], 66: "2-4"}, locations=locations)       # per subject
 
 qc = api.session_qc(66, session=1, locations=locations)  # computed in memory, nothing written
 print(qc.status)

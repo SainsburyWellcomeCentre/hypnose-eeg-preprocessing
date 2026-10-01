@@ -36,6 +36,7 @@ from hypnose_eeg.pipeline import preprocessing as _preprocessing
 from hypnose_eeg.pipeline import qc as _qc
 from hypnose_eeg.pipeline import run as _run
 from hypnose_eeg.pipeline import sleep_scoring as _sleep_scoring
+from hypnose_eeg.pipeline.batch import SUBJECT_SESSIONS_SEP
 from hypnose_eeg.pipeline.qc_review import SubjectReview, review_subjects, write_review_report
 from hypnose_eeg.pipeline.run import BatchResult
 from hypnose_eeg.pipeline.steps import StepFailed, applied_env, output_layout_env
@@ -207,8 +208,10 @@ def run_session(
 
 
 def run_batch(
-    subjects: Sequence[str | int] | str | int,
+    subjects: Mapping[str | int, Any] | Sequence[str | int] | str | int,
     *,
+    sessions: Sequence[str | int] | str | int | None = None,
+    dates: Sequence[str | int] | str | int | None = None,
     locations: DataLocations | ProfileLocations | None = None,
     stages: Sequence[str] | None = None,
     model: str | Path | None = None,
@@ -218,15 +221,20 @@ def run_batch(
     report: str | Path | None = None,
     extra_args: Sequence[str] | None = None,
 ) -> BatchResult:
-    """Run every session of each subject (`"all"` for every subject), carrying on past failures.
+    """Run several sessions one after the other, carrying on past failures.
 
-    A failed session has its outputs erased unless `keep_failed`; check
-    `result.ok` and `result.outcomes` rather than catching `StepFailed`.
+    Each of `subjects` (`"all"` for every subject) runs the `sessions` or
+    `dates` given -- values, or inclusive ranges such as `"2-5"` -- or every
+    session it has when neither is. A mapping chooses sessions per subject
+    instead: `{66: [1, 3], 67: "2-4", 68: None}`, where None falls back to
+    `sessions`/`dates`. A selected session a subject does not have is reported
+    as `missing`. A failed session has its outputs erased unless `keep_failed`;
+    check `result.ok` and `result.outcomes` rather than catching `StepFailed`.
     """
-    if isinstance(subjects, (str, int)):
-        subjects = [subjects]
     return _run.run_batch(
-        [str(subject) for subject in subjects],
+        _subject_values(subjects),
+        sessions=_values(sessions),
+        dates=_values(dates),
         **_locations(locations).stage_options(),
         stages=_list(stages),
         model=_text(model),
@@ -341,3 +349,23 @@ def _text(value: object) -> str | None:
 
 def _list(values: Sequence[str] | None) -> list[str] | None:
     return None if values is None else [str(value) for value in values]
+
+
+def _values(values: Sequence[str | int] | str | int | None) -> list[str] | None:
+    """`_list` for selectors that may also be one bare value."""
+    if isinstance(values, (str, int)):
+        values = [values]
+    return _list(values)
+
+
+def _subject_values(
+    subjects: Mapping[str | int, Any] | Sequence[str | int] | str | int,
+) -> list[str]:
+    """`--subject` values; a mapping's sessions are written as `SUBJECT:SESSIONS`."""
+    if isinstance(subjects, Mapping):
+        return [
+            str(subject) if chosen is None
+            else f"{subject}{SUBJECT_SESSIONS_SEP}{','.join(_values(chosen))}"
+            for subject, chosen in subjects.items()
+        ]
+    return _values(subjects)

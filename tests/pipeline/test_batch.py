@@ -15,13 +15,16 @@ from hypnose_helpers.io.layout import SessionRef
 from hypnose_eeg.pipeline import run as run_pipeline
 from hypnose_eeg.pipeline.batch import (
     SessionOutcome,
+    SessionSelection,
     erase_session_outputs,
     format_duration,
     format_summary,
     missing_subject_outcome,
     read_qc_verdict,
     report_path,
+    resolve_selections,
     resolve_subjects,
+    select_sessions,
     session_selector,
 )
 from hypnose_eeg.pipeline.steps import StepFailed
@@ -374,6 +377,116 @@ class ResolveSubjectsTests(unittest.TestCase):
             resolve_subjects(self.root, ["sixty-six"])
 
 
+def sessions_filter(*values: str) -> tuple[tuple[str, str], ...]:
+    return tuple(("session", value) for value in values)
+
+
+class ResolveSelectionsTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_no_sessions_selects_every_session(self):
+        self.assertEqual(resolve_selections(self.root, ["66"]), [SessionSelection(66)])
+
+    def test_shared_sessions_apply_to_every_subject(self):
+        self.assertEqual(
+            resolve_selections(self.root, ["66", "67"], sessions=["1", "3"]),
+            [
+                SessionSelection(66, sessions_filter("1", "3")),
+                SessionSelection(67, sessions_filter("1", "3")),
+            ],
+        )
+
+    def test_a_subject_can_name_its_own_sessions(self):
+        self.assertEqual(
+            resolve_selections(self.root, ["66:1,3", "sub-067:2-4", "68"], sessions=["5"]),
+            [
+                SessionSelection(66, sessions_filter("1", "3")),
+                SessionSelection(67, sessions_filter("2-4")),
+                SessionSelection(68, sessions_filter("5")),
+            ],
+        )
+
+    def test_dates_and_date_ranges_are_accepted(self):
+        self.assertEqual(
+            resolve_selections(self.root, ["66"], dates=["20260717", "20260720-20260730"]),
+            [SessionSelection(66, (("date", "20260717"), ("date", "20260720-20260730")))],
+        )
+
+    def test_a_repeated_selection_runs_once(self):
+        self.assertEqual(
+            resolve_selections(self.root, ["66", "sub-066"], sessions=["1", "1"]),
+            [SessionSelection(66, sessions_filter("1"))],
+        )
+
+    def test_all_with_sessions_covers_every_subject(self):
+        for name in ("sub-066", "sub-067"):
+            (self.root / name).mkdir()
+
+        self.assertEqual(
+            resolve_selections(self.root, ["all:2"]),
+            [
+                SessionSelection(66, sessions_filter("2")),
+                SessionSelection(67, sessions_filter("2")),
+            ],
+        )
+
+    def test_all_still_cannot_be_combined_with_named_subjects(self):
+        with self.assertRaises(ValueError):
+            resolve_selections(self.root, ["all:1", "66:2"])
+
+    def test_malformed_selections_are_refused(self):
+        for subjects, kwargs in [
+            (["66"], {"sessions": ["one"]}),
+            (["66"], {"sessions": ["2-x"]}),
+            (["66"], {"dates": ["2026-07-17"]}),
+            (["66:"], {}),
+            (["66:first"], {}),
+            (["66"], {"sessions": ["1"], "dates": ["20260717"]}),
+        ]:
+            with self.subTest(subjects=subjects, **kwargs), self.assertRaises(ValueError):
+                resolve_selections(self.root, subjects, **kwargs)
+
+
+class SelectSessionsTests(unittest.TestCase):
+    def setUp(self):
+        self.available = [
+            session_ref(Path("/raw"), ses, date) for ses, date in SESSION_DATES.items()
+        ]
+
+    def select(self, *filters: tuple[str, str]):
+        return select_sessions(SessionSelection(66, filters), self.available)
+
+    def test_no_filters_keeps_every_session(self):
+        self.assertEqual(
+            select_sessions(SessionSelection(66), self.available), [(self.available, None)]
+        )
+
+    def test_each_value_is_selected_in_the_order_given(self):
+        s1, _, s3 = self.available
+        self.assertEqual(
+            self.select(("session", "3"), ("session", "ses-001")), [([s3], None), ([s1], None)]
+        )
+
+    def test_a_range_selects_every_session_inside_it(self):
+        _, s2, s3 = self.available
+        self.assertEqual(self.select(("session", "2-5")), [([s2, s3], None)])
+
+    def test_a_date_selects_its_session(self):
+        self.assertEqual(self.select(("date", "20260718")), [([self.available[1]], None)])
+
+    def test_a_session_the_subject_lacks_is_an_error_of_its_own(self):
+        (found, none), (missing, error) = self.select(("session", "1"), ("session", "9"))
+
+        self.assertEqual(found, [self.available[0]])
+        self.assertIsNone(none)
+        self.assertEqual(missing, [])
+        self.assertIsInstance(error, FileNotFoundError)
+        self.assertEqual(str(error), "No session 9 found for sub-066")
+
+
 class SummaryTests(unittest.TestCase):
     def test_one_subject_is_listed_flat(self):
         summary = format_summary(
@@ -480,19 +593,100 @@ class BatchRunTests(unittest.TestCase):
         self.addCleanup(eraser.stop)
 
     def run_batch(self, *extra_argv: str) -> int:
+        return self.run_selected("--subject", SUBJECT, "--all-sessions", *extra_argv)
+
+    def run_selected(self, *selection: str) -> int:
         return run_pipeline.main(
             [
-                "--subject", SUBJECT, "--all-sessions",
+                *selection,
                 "--rawdata-root", str(self.rawdata),
                 "--derivatives-root", str(self.derivatives),
                 "--report", str(self.report),
-                *extra_argv,
             ]
         )
 
     def report_rows(self) -> list[dict[str, str]]:
         with self.report.open(newline="") as handle:
             return list(csv.DictReader(handle))
+
+    def qc_selectors(self, mock_qc) -> list[tuple[str | None, str | None]]:
+        return [
+            (call.kwargs["session"], call.kwargs["date"])
+            for call in mock_qc.run_steps.call_args_list
+        ]
+
+    def test_selected_sessions_run_as_a_batch(self, mock_preprocessing, mock_scoring, mock_qc):
+        result = self.run_selected("--subject", SUBJECT, "--session", "3", "1")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("3", None), ("1", None)])
+        self.assertEqual([row["session"] for row in self.report_rows()], ["3", "1"])
+
+    def test_a_session_range_runs_every_session_inside_it(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        result = self.run_selected("--subject", SUBJECT, "--session", "2-3")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("2", None), ("3", None)])
+
+    def test_a_session_selected_twice_runs_once(self, mock_preprocessing, mock_scoring, mock_qc):
+        result = self.run_selected("--subject", SUBJECT, "--session", "1-2", "2")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("1", None), ("2", None)])
+
+    def test_selected_dates_run_as_a_batch(self, mock_preprocessing, mock_scoring, mock_qc):
+        result = self.run_selected("--subject", SUBJECT, "--date", "20260717,20260719")
+
+        self.assertEqual(result, 0)
+        # Each session is re-selected by its number, however it was chosen.
+        self.assertEqual(self.qc_selectors(mock_qc), [("1", None), ("3", None)])
+
+    def test_a_missing_session_is_reported_and_the_rest_still_run(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        result = self.run_selected("--subject", SUBJECT, "--session", "1", "9")
+
+        self.assertEqual(result, 1)
+        self.assertEqual(self.qc_selectors(mock_qc), [("1", None)])
+        rows = self.report_rows()
+        self.assertEqual([row["status"] for row in rows], ["ok", "missing"])
+        self.assertIn("No session 9 found for sub-066", rows[1]["error"])
+        self.erase.assert_not_called()
+
+    def test_a_malformed_session_fails_before_running_anything(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        result = self.run_selected("--subject", SUBJECT, "--session", "1", "two")
+
+        self.assertEqual(result, 1)
+        mock_preprocessing.run_steps.assert_not_called()
+        self.assertFalse(self.report.exists())
+
+    def test_one_session_chosen_either_way_is_a_single_run(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        for selection in (("--subject", SUBJECT, "--session", "2"), ("--subject", f"{SUBJECT}:2")):
+            mock_qc.reset_mock()
+            with self.subTest(selection=selection):
+                result = self.run_selected(*selection)
+
+                self.assertEqual(result, 0)
+                self.assertEqual(mock_qc.run_steps.call_args.kwargs["subject"], SUBJECT)
+                self.assertEqual(self.qc_selectors(mock_qc), [("2", None)])
+        # Single runs keep the batch machinery out of it: no planning, no report.
+        self.find_sessions.assert_not_called()
+        self.assertFalse(self.report.exists())
+
+    def test_the_viewer_is_refused_for_several_selected_sessions(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        with self.assertRaises(SystemExit) as ctx:
+            self.run_selected("--subject", SUBJECT, "--session", "1", "2", "--view")
+
+        self.assertEqual(ctx.exception.code, 2)
+        mock_preprocessing.run_steps.assert_not_called()
 
     def test_every_session_runs_in_order(self, mock_preprocessing, mock_scoring, mock_qc):
         result = self.run_batch()
@@ -900,20 +1094,79 @@ class MultiSubjectBatchTests(unittest.TestCase):
         reports = list(self.derivatives.glob("batch_report_*.csv"))
         self.assertEqual(len(reports), 1)
 
-    def test_several_subjects_need_all_sessions(
+    def run_selected(self, *selection: str) -> int:
+        return run_pipeline.main(
+            [
+                *selection,
+                "--rawdata-root", str(self.rawdata),
+                "--derivatives-root", str(self.derivatives),
+                "--report", str(self.report),
+            ]
+        )
+
+    def qc_selectors(self, mock_qc) -> list[tuple[str, str]]:
+        return [
+            (call.kwargs["subject"], call.kwargs["session"])
+            for call in mock_qc.run_steps.call_args_list
+        ]
+
+    def test_a_shared_session_runs_for_every_subject(
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
-        with self.assertRaises(SystemExit) as ctx:
-            run_pipeline.main(["--subject", "66", "67", "--session", "1"])
+        result = self.run_selected("--subject", "66", "67", "--session", "1")
 
-        self.assertEqual(ctx.exception.code, 2)
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("sub-066", "1"), ("sub-067", "1")])
+
+    def test_sessions_can_be_chosen_per_subject(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        result = self.run_selected("--subject", "66:1", "67:2")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("sub-066", "1"), ("sub-067", "2")])
+
+    def test_per_subject_sessions_take_precedence_over_shared_ones(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        result = self.run_selected("--subject", "66", "67:2", "--session", "1")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("sub-066", "1"), ("sub-067", "2")])
+
+    def test_per_subject_sessions_combine_with_all_sessions_for_the_rest(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        result = self.run_selected("--subject", "67:2", "66", "--all-sessions")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("sub-067", "2"), ("sub-066", "1")])
+
+    def test_all_with_a_session_notes_the_subjects_without_it(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        for subject in self.by_subject:
+            (self.rawdata / f"sub-{subject:03d}").mkdir(parents=True)
+
+        result = self.run_selected("--subject", "all", "--session", "2")
+
+        self.assertEqual(result, 1)
+        self.assertEqual(self.qc_selectors(mock_qc), [("sub-067", "2")])
+        self.assertEqual(
+            [(row["subject"], row["status"]) for row in self.report_rows()],
+            [("sub-066", "missing"), ("sub-067", "ok")],
+        )
+
+    def test_subjects_without_chosen_sessions_are_refused(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        for subjects in (["66", "67"], ["66:1", "67"], ["all"]):
+            with self.subTest(subjects=subjects):
+                with self.assertRaises(SystemExit) as ctx:
+                    run_pipeline.main(["--subject", *subjects])
+
+                self.assertEqual(ctx.exception.code, 2)
         mock_preprocessing.run_steps.assert_not_called()
-
-    def test_all_needs_all_sessions_too(self, mock_preprocessing, mock_scoring, mock_qc):
-        with self.assertRaises(SystemExit) as ctx:
-            run_pipeline.main(["--subject", "all", "--session", "1"])
-
-        self.assertEqual(ctx.exception.code, 2)
 
 
 if __name__ == "__main__":
