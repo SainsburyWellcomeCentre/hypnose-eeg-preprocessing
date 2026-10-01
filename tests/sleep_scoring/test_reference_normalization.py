@@ -84,7 +84,9 @@ class _Scorer:
 
     def __call__(self, edf_path, model_path, *, normalization_stats=None, **kwargs):
         prepared = _prepared(self.signal_s)
-        external = normalization_stats(prepared) if normalization_stats is not None else None
+        external = (
+            normalization_stats(prepared, self.own) if normalization_stats is not None else None
+        )
         self.applied = external
         prepared.normalization = NormalizationResult(
             source="reference" if external is not None else "self",
@@ -148,6 +150,8 @@ class ReferenceNormalizationTests(unittest.TestCase):
             sampling_rate_hz=512,
             global_normalization=True,
             use_artifact_prescan=False,
+            # Offset rejection has its own tests below.
+            max_reference_offset_z=None,
         )
         fields.update(overrides)
         return SleepScoringSettings(**fields)
@@ -249,7 +253,7 @@ class ReferenceNormalizationTests(unittest.TestCase):
         self.assertIsNone(scorer.applied)
         record = self._provenance(outputs[0])["parameters"]["normalization"]
         self.assertEqual(record["reference_status"], "not_found")
-        self.assertTrue(any("no reference session was found" in m for m in messages))
+        self.assertTrue(any("no usable reference session was found" in m for m in messages))
 
     def test_explicit_reference_session_overrides_the_age_limit(self) -> None:
         stale = self._session(1, "20260601")
@@ -303,6 +307,52 @@ class ReferenceNormalizationTests(unittest.TestCase):
 
         self.assertTrue(np.allclose(scorer.applied[0][0], 4.0))
 
+    def test_a_reference_too_far_from_the_recording_is_rejected(self) -> None:
+        matching = self._session(1, "20260710")
+        shifted = self._session(2, "20260711")  # nearer in time, but 4 SD off
+        self._session(3, "20260712")
+        self._cache(matching, signal_hours=22, mean=5.5)
+        self._cache(shifted, signal_hours=22, mean=2.0)
+        scorer = _Scorer(signal_s=3 * HOUR, own_mean=6.0)
+
+        outputs, _ = self._run(self._settings(max_reference_offset_z=1.0), scorer)
+
+        record = self._provenance(outputs[0])["parameters"]["normalization"]
+        self.assertEqual(record["reference"]["session"], "ses-001")
+        self.assertEqual(record["offset_z"], [0.5, 0.5, 0.5])
+        self.assertEqual(
+            [rejected["session"] for rejected in record["rejected_references"]], ["ses-002"]
+        )
+        self.assertEqual(record["rejected_references"][0]["offset_z"], [4.0, 4.0, 4.0])
+
+    def test_no_reference_within_the_offset_limit_falls_back_with_a_warning(self) -> None:
+        previous = self._session(2, "20260711")
+        self._session(3, "20260712")
+        self._cache(previous, signal_hours=22, mean=0.0)
+        scorer = _Scorer(signal_s=3 * HOUR, own_mean=3.0)
+
+        outputs, messages = self._run(self._settings(max_reference_offset_z=1.0), scorer)
+
+        self.assertIsNone(scorer.applied)
+        record = self._provenance(outputs[0])["parameters"]["normalization"]
+        self.assertEqual(record["reference_status"], "not_found")
+        self.assertEqual(len(record["rejected_references"]), 1)
+        self.assertTrue(any("1 rejected for their offset" in m for m in messages))
+
+    def test_an_explicit_reference_is_used_despite_its_offset(self) -> None:
+        previous = self._session(2, "20260711")
+        self._session(3, "20260712")
+        self._cache(previous, signal_hours=22, mean=0.0)
+        scorer = _Scorer(signal_s=3 * HOUR, own_mean=3.0)
+
+        outputs, messages = self._run(
+            self._settings(max_reference_offset_z=1.0, reference_session="2"), scorer
+        )
+
+        record = self._provenance(outputs[0])["parameters"]["normalization"]
+        self.assertEqual(record["reference"]["session"], "ses-002")
+        self.assertTrue(any("named explicitly" in m for m in messages))
+
     def test_reference_normalization_can_be_disabled(self) -> None:
         previous = self._session(2, "20260710")
         self._session(3, "20260712")
@@ -337,16 +387,18 @@ class ReferenceNormalizationTests(unittest.TestCase):
         self.assertEqual(settings.max_reference_age_days, 7.0)
         self.assertEqual(settings.reference_prefer, "nearest")
         self.assertIsNone(settings.reference_session)
+        self.assertEqual(settings.max_reference_offset_z, 1.0)
 
         overridden = settings_from_args(
             build_parser().parse_args(
                 base + ["--no-reference-normalization", "--reference-session", "20260710",
-                        "--min-signal-hours", "4"]
+                        "--min-signal-hours", "4", "--max-reference-offset-z", "2.5"]
             )
         )
         self.assertFalse(overridden.reference_normalization)
         self.assertEqual(overridden.reference_session, "20260710")
         self.assertEqual(overridden.min_signal_hours, 4.0)
+        self.assertEqual(overridden.max_reference_offset_z, 2.5)
 
 
 def _record(**normalization) -> dict:

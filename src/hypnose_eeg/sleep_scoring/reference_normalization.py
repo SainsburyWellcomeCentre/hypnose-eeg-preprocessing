@@ -19,9 +19,13 @@ explicitly. A candidate scored before these files existed -- or never scored
 exclusions) and cached, so later lookups are cheap.
 
 A borrowed baseline is only valid while the recording conditions match --
-same implant and amplifier gain, similar electrode impedance -- which is why
-the reference must be recent, and why scoring records how far the short
-recording's own statistics sit from it (`normalization_offset_z`) for QC.
+same implant and amplifier gain, similar electrode impedance. The reference
+must therefore be recent, and a candidate whose statistics sit more than
+``max_offset_z`` reference SDs from the short recording's own on any channel
+(`normalization_offset_z`: median over frequency bins) is rejected and the
+next one tried. In real data a gain change between sessions shows up as an
+offset of several SDs and, used anyway, turned most NREM into REM; a
+difference in state mix alone moves the median far less.
 """
 
 from __future__ import annotations
@@ -57,6 +61,7 @@ class ReferenceBaseline:
     metadata: dict[str, Any]
     days_from_recording: int
     computed: bool  # True when computed from the EDF in this lookup, not read from cache
+    offset_z: list  # the short recording's offset from it, per channel
 
     @property
     def signal_hours(self) -> float:
@@ -73,6 +78,11 @@ class ReferenceBaseline:
             "days_from_recording": self.days_from_recording,
             "computed_from_edf": self.computed,
         }
+
+
+def _max_abs(values: list) -> float | None:
+    present = [abs(float(value)) for value in values if value is not None]
+    return max(present) if present else None
 
 
 def normalization_stats_file(session_output_dir: Path, edf_path: Path) -> Path:
@@ -231,6 +241,9 @@ def find_reference_baseline(
     max_age_days: float,
     prefer: str,
     reference_session: str | None,
+    own_stats: list,
+    max_offset_z: float | None,
+    offset_z: Callable[[list, list], list],
     exclude_intervals: ExcludeIntervals,
     load_stats: Callable[[Path], tuple[list, dict]],
     save_stats: Callable[[Path, list, dict], Path],
@@ -239,16 +252,20 @@ def find_reference_baseline(
     signal_duration_s: Callable[[Any], float],
     max_single_gap_s: float,
     min_segment_length_s: float,
-) -> ReferenceBaseline | None:
-    """The best session to borrow normalization statistics from, or None.
+) -> tuple[ReferenceBaseline | None, list[dict[str, Any]]]:
+    """The best session to borrow normalization statistics from, and the ones rejected.
 
     Candidates come from `_candidate_sessions`; each is used from its cached
     statistics when they are current, otherwise computed from its EDF and
     cached. A candidate qualifies when its statistics pool at least
-    `min_signal_s` of signal; an explicitly named `reference_session` is used
-    regardless, with a warning when it is short too.
+    `min_signal_s` of signal and sit within `max_offset_z` of `own_stats` on
+    every channel (None disables that check). An explicitly named
+    `reference_session` is used regardless, with a warning for whichever check
+    it fails. Candidates rejected for their offset are returned for the
+    provenance record.
     """
     current_date = _parse_date(current.date)
+    rejected: list[dict[str, Any]] = []
     for session in _candidate_sessions(
         layout,
         subjid,
@@ -319,6 +336,29 @@ def find_reference_baseline(
                 UserWarning,
                 stacklevel=3,
             )
+        offsets = offset_z(own_stats, stats) if own_stats else []
+        largest = _max_abs(offsets)
+        if max_offset_z is not None and largest is not None and largest > max_offset_z:
+            if reference_session is None:
+                print(
+                    f"  Rejected reference {_session_label(session)}: offset "
+                    f"{largest:.2f} SD exceeds {max_offset_z:g} (gain or impedance change?)"
+                )
+                rejected.append(
+                    {
+                        "session": _session_label(session),
+                        "date": session.date,
+                        "offset_z": offsets,
+                    }
+                )
+                continue
+            warnings.warn(
+                f"Reference session {_session_label(session)} sits {largest:.2f} SD from "
+                f"the recording (above {max_offset_z:g}); using it because it was named "
+                "explicitly.",
+                UserWarning,
+                stacklevel=3,
+            )
         return ReferenceBaseline(
             session=_session_label(session),
             date=session.date,
@@ -328,5 +368,6 @@ def find_reference_baseline(
             metadata=metadata,
             days_from_recording=(_parse_date(session.date) - current_date).days,
             computed=computed,
-        )
-    return None
+            offset_z=offsets,
+        ), rejected
+    return None, rejected

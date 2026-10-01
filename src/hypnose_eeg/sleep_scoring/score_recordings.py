@@ -85,6 +85,7 @@ class SleepScoringSettings:
     max_reference_age_days: float = 14.0
     reference_prefer: str = "previous"
     reference_session: str | None = None
+    max_reference_offset_z: float | None = 1.0
 
 
 def _as_list(value: Any, *, option_name: str) -> list[str] | None:
@@ -284,6 +285,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only sessions at most this many days from the recording can be its reference.",
     )
     parser.add_argument(
+        "--max-reference-offset-z",
+        type=float,
+        default=None,
+        help=(
+            "Reject a reference whose statistics sit more than this many SDs from "
+            "the recording's own on any channel (a gain or impedance change)."
+        ),
+    )
+    parser.add_argument(
         "--reference-prefer",
         choices=REFERENCE_PREFERENCES,
         default=None,
@@ -389,6 +399,14 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     if reference_prefer not in REFERENCE_PREFERENCES:
         raise ValueError(f"reference prefer must be one of {', '.join(REFERENCE_PREFERENCES)}")
     reference_session = coalesce(args.reference_session, reference.get("reference_session"))
+    if args.max_reference_offset_z is not None:
+        max_reference_offset_z = args.max_reference_offset_z
+    else:
+        max_reference_offset_z = reference.get("max_offset_z", 1.0)
+    if max_reference_offset_z is not None:
+        max_reference_offset_z = float(max_reference_offset_z)
+        if max_reference_offset_z <= 0:
+            raise ValueError("max_offset_z must be positive")
 
     return SleepScoringSettings(
         subjids=subjids,
@@ -412,6 +430,7 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
         max_reference_age_days=max_reference_age_days,
         reference_prefer=reference_prefer,
         reference_session=None if reference_session is None else str(reference_session),
+        max_reference_offset_z=max_reference_offset_z,
     )
 
 
@@ -606,18 +625,19 @@ class _ReferenceResolver:
         self._session = session
         self.signal_s: float | None = None
         self.baseline: ReferenceBaseline | None = None
+        self.rejected: list[dict[str, Any]] = []
 
     @property
     def min_signal_s(self) -> float:
         return self._settings.min_signal_hours * 3600.0
 
-    def __call__(self, prepared: Any) -> list | None:
+    def __call__(self, prepared: Any, own_stats: list) -> list | None:
         self.signal_s = self._deps.signal_duration_s(prepared)
         if not 0 < self.signal_s < self.min_signal_s:
             return None
         settings = self._settings
         deps = self._deps
-        self.baseline = find_reference_baseline(
+        self.baseline, self.rejected = find_reference_baseline(
             layout=self._layout,
             derivatives_root=settings.derivatives_root,
             subjid=self._subjid,
@@ -629,6 +649,9 @@ class _ReferenceResolver:
             max_age_days=settings.max_reference_age_days,
             prefer=settings.reference_prefer,
             reference_session=settings.reference_session,
+            own_stats=own_stats,
+            max_offset_z=settings.max_reference_offset_z,
+            offset_z=deps.normalization_offset_z,
             exclude_intervals=self._exclude_intervals,
             load_stats=deps.load_normalization_stats,
             save_stats=deps.save_normalization_stats,
@@ -642,10 +665,11 @@ class _ReferenceResolver:
             warnings.warn(
                 f"{self._sub_label} {self._session.path.name} has only "
                 f"{self.signal_s / 3600:.1f} h of signal (below "
-                f"{settings.min_signal_hours:g} h) and no reference session was found "
-                f"(prefer={settings.reference_prefer}, within "
-                f"{settings.max_reference_age_days:g} days); normalizing it against "
-                "its own statistics. Pass --reference-session to choose one.",
+                f"{settings.min_signal_hours:g} h) and no usable reference session was "
+                f"found (prefer={settings.reference_prefer}, within "
+                f"{settings.max_reference_age_days:g} days, "
+                f"{len(self.rejected)} rejected for their offset); normalizing it "
+                "against its own statistics. Pass --reference-session to choose one.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -700,6 +724,8 @@ def _normalization_provenance(
         "max_reference_age_days": settings.max_reference_age_days,
         "reference_prefer": settings.reference_prefer,
         "reference_session": settings.reference_session,
+        "max_reference_offset_z": settings.max_reference_offset_z,
+        "rejected_references": resolver.rejected if resolver is not None else [],
     }
 
 

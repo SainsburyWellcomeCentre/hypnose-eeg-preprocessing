@@ -529,14 +529,22 @@ python -m hypnose_eeg.sleep_scoring.score_recordings \
 ... --no-reference-normalization
 ```
 
+A borrowed baseline is only valid while the gain and electrode impedance are
+unchanged. For each candidate, scoring therefore measures how far the short
+recording's own statistics sit from it (`offset_z`: median over frequency bins,
+in reference SDs, per channel). A candidate more than `max_offset_z` (default
+1.0) away on any channel is rejected and the next one is tried. If no candidate
+qualifies, the recording keeps its own baseline, with a warning. A reference
+named with `--reference-session` is used regardless, with a warning. In
+sub-053, ses-007 (3 h) sat about 4 SD from ses-006 on the day before. Scored
+against it anyway, most of its NREM became REM.
+
 The scoring provenance records under `parameters.normalization` which baseline
-was used and how far the recording's own statistics sit from it
-(`offset_z`: median over frequency bins, in reference SDs, per channel). A
-borrowed baseline is only valid while the gain and electrode impedance are
-unchanged. The QC summary's `normalization` section therefore sends a
-recording to review when any channel's offset exceeds
-`quality_control.reference_normalization.max_offset_z` (default 1.0), or when a
-short recording found no reference and was normalized against itself.
+was used, its offset, and any rejected candidates. The QC summary's
+`normalization` section sends a recording to review when the offset of the
+reference used exceeds `quality_control.reference_normalization.max_offset_z`,
+or when a short recording found no usable reference and was normalized
+against itself.
 
 Inspect the stored Somnotate predictions and their per-state probabilities for
 one session without loading the EDF or rerunning the model:

@@ -66,8 +66,16 @@ sleep_scoring:
     # previous: the nearest earlier session; nearest: either direction (an
     # earlier session wins a tie).
     prefer: previous
+    # A candidate whose statistics sit more than this many reference SDs from
+    # the short recording's own on any channel (median over frequency bins) is
+    # rejected and the next one tried: a gain or impedance change between
+    # sessions makes a borrowed baseline unsafe (sub-053 ses-007 against
+    # ses-006 sat about 4 SD away and turned most NREM into REM). null
+    # disables the check.
+    max_offset_z: 1.0
     # Optional explicit reference for short recordings, as a session number
-    # (3, ses-3) or a date (YYYYMMDD). Overrides prefer and the age limit.
+    # (3, ses-3) or a date (YYYYMMDD). Overrides prefer, the age limit and
+    # max_offset_z (with a warning).
     reference_session: null
 
   # Predicted-state display labels, shared by every QC report. "Undefined" covers

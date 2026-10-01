@@ -301,6 +301,13 @@ def normalization_section(
             ),
         }
     if record.get("short_recording"):
+        rejected = record.get("rejected_references") or []
+        rejected_text = (
+            "; rejected for their offset: "
+            + ", ".join(str(candidate.get("session")) for candidate in rejected)
+            if rejected
+            else ""
+        )
         return {
             "section": "normalization",
             "status": "review",
@@ -310,7 +317,7 @@ def normalization_section(
             "detail": (
                 f"short recording ({signal_text} of signal, below "
                 f"{record.get('min_signal_hours')} h) normalized against its own statistics "
-                f"(reference {status_name}); rescore with --reference-session"
+                f"(reference {status_name}{rejected_text}); rescore with --reference-session"
             ),
         }
     return {
