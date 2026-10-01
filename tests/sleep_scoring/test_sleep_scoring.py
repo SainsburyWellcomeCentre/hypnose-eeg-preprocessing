@@ -147,7 +147,8 @@ class SleepScoringTests(unittest.TestCase):
 
             settings = _settings(
                 root=root, rawdata=rawdata, derivatives=derivatives, model=model,
-                dates=["20260717"], global_normalization=True,
+                dates=["20260717"], global_normalization=True, max_single_gap_s=120.0,
+                min_segment_length_s=240.0,
             )
 
             outputs = run_scoring(settings, score_function=fake_score_recording)
@@ -172,12 +173,16 @@ class SleepScoringTests(unittest.TestCase):
                 hashlib.sha256(model.read_bytes()).hexdigest(),
             )
             self.assertEqual(provenance["inputs"]["subject"], "sub-066")
+            self.assertEqual(provenance["parameters"]["max_single_gap_s"], 120.0)
+            self.assertEqual(provenance["parameters"]["min_segment_length_s"], 240.0)
 
             self.assertEqual(calls[0]["edf_path"], ephys_dir / "sub-066_ses-001_recording-001.edf")
             self.assertEqual(calls[0]["model_path"], model)
             self.assertEqual(calls[0]["channel_labels"], ["EEG1", "EEG2", "EMG"])
             self.assertEqual(calls[0]["sampling_rate_hz"], 512)
             self.assertTrue(calls[0]["global_normalization"])
+            self.assertEqual(calls[0]["max_single_gap_s"], 120.0)
+            self.assertEqual(calls[0]["min_segment_length_s"], 240.0)
 
     def test_run_scoring_skips_a_recording_that_is_already_scored(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

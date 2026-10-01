@@ -216,3 +216,5 @@ viewer are split into compute/plot/CLI layers (`compute_session_spectra`,
 ## 24. Reduce amount of text at top of scripts
 
 ## Move final executable scripts into src location 
+
+## Introduce timer for running pipeline

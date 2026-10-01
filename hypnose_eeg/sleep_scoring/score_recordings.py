@@ -59,6 +59,8 @@ class SleepScoringSettings:
     export_visbrain: bool
     sampling_rate_hz: int
     global_normalization: bool
+    max_single_gap_s: float = 300.0
+    min_segment_length_s: float = 300.0
     overwrite: bool = False
     use_artifact_prescan: bool = True
 
@@ -198,6 +200,26 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--max-single-gap-s",
+        type=float,
+        default=None,
+        help=(
+            "Middle gaps longer than this many seconds split the recording into "
+            "separately scored chunks; shorter gaps are scored through and "
+            "labelled Undefined. Default: from configs/pipelines/sleep_scoring.yaml."
+        ),
+    )
+    parser.add_argument(
+        "--min-segment-length-s",
+        type=float,
+        default=None,
+        help=(
+            "Scoring chunks -- including a whole short recording -- shorter than "
+            "this many seconds are left unscored (kind 'too_short'); too little "
+            "context for the HMM. Default: from configs/pipelines/sleep_scoring.yaml."
+        ),
+    )
+    parser.add_argument(
         "--artifact-prescan",
         dest="use_artifact_prescan",
         action=argparse.BooleanOptionalAction,
@@ -267,6 +289,18 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     )
     global_normalization = _as_bool(global_normalization_value, option_name="global_normalization")
 
+    max_single_gap_s = float(
+        coalesce(args.max_single_gap_s, scoring.get("max_single_gap_s"), 300.0)
+    )
+    if max_single_gap_s < 0:
+        raise ValueError("max_single_gap_s must be non-negative")
+
+    min_segment_length_s = float(
+        coalesce(args.min_segment_length_s, scoring.get("min_segment_length_s"), 300.0)
+    )
+    if min_segment_length_s < 0:
+        raise ValueError("min_segment_length_s must be non-negative")
+
     overwrite_value = coalesce(args.overwrite, scoring.get("overwrite"), False)
     overwrite = _as_bool(overwrite_value, option_name="overwrite")
 
@@ -288,6 +322,8 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
         export_visbrain=export_visbrain,
         sampling_rate_hz=sampling_rate_hz,
         global_normalization=global_normalization,
+        max_single_gap_s=max_single_gap_s,
+        min_segment_length_s=min_segment_length_s,
         overwrite=overwrite,
         use_artifact_prescan=use_artifact_prescan,
     )
@@ -547,6 +583,8 @@ def run_scoring(
                     sampling_rate_hz=settings.sampling_rate_hz,
                     global_normalization=settings.global_normalization,
                     exclude_intervals_s=exclude_intervals_s,
+                    max_single_gap_s=settings.max_single_gap_s,
+                    min_segment_length_s=settings.min_segment_length_s,
                 )
                 deps.print_recording_plan(recording, prepared)
 
@@ -573,6 +611,8 @@ def run_scoring(
                         "channel_labels": channel_labels,
                         "sampling_rate_hz": settings.sampling_rate_hz,
                         "global_normalization": settings.global_normalization,
+                        "max_single_gap_s": settings.max_single_gap_s,
+                        "min_segment_length_s": settings.min_segment_length_s,
                         "export_visbrain": settings.export_visbrain,
                         "use_artifact_prescan": settings.use_artifact_prescan,
                         "artifact_prescan": (

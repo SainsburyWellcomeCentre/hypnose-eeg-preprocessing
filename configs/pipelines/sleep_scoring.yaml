@@ -28,6 +28,18 @@ sleep_scoring:
   # several independent chunks by long gaps.
   global_normalization: true
 
+  # Middle gaps (dropouts, concatenation gaps, prescan artifact periods) longer
+  # than this split the recording into separately scored chunks; shorter ones
+  # are scored through and labelled Undefined. See hypnose_somnotate.
+  # preprocessing.gap_correction.prepare_recording.
+  max_single_gap_s: 300
+
+  # Scoring chunks shorter than this -- including a whole recording that is
+  # this short after trimming leading/trailing gaps -- are left unscored:
+  # labelled Undefined with kind "too_short" in the predictions parquet, since
+  # the HMM has too little context to score them reliably.
+  min_segment_length_s: 300
+
   # If true, the long artifact periods written by the pre-scoring scan
   # (hypnose_eeg/preprocessing/prescan_artifacts.py, configured under
   # artifact_prescan in configs/pipelines/artifact_detection.yaml) are left
