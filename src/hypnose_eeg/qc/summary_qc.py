@@ -12,6 +12,7 @@ the analyzed recording's stem -- for example
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Sequence
@@ -57,7 +58,7 @@ from hypnose_eeg.utils.config import (
     with_overrides,
 )
 from hypnose_eeg.utils.epochs import infer_epoch_seconds
-from hypnose_eeg.utils.provenance import write_provenance
+from hypnose_eeg.utils.provenance import provenance_path, write_provenance
 
 
 DEFAULT_SUMMARY_FILENAME = "qc_summary.csv"
@@ -254,6 +255,84 @@ def artifact_prescan_section(
     return section, reviews
 
 
+def normalization_section(
+    provenance: dict[str, object] | None, *, max_offset_z: float
+) -> dict[str, object]:
+    """QC section for the baseline the recording was normalized against.
+
+    Read from the scoring provenance's `normalization` entry. A short recording
+    scored against a reference baseline is sent to review when any channel's
+    offset from that reference exceeds `max_offset_z` (a gain or impedance
+    change would make the borrowed baseline unsafe); a short recording for
+    which no reference was found is sent to review because it was normalized
+    against its own unrepresentative statistics. Predictions scored before
+    this was recorded pass, with the value reported as n/a.
+    """
+    record = (provenance or {}).get("parameters", {}).get("normalization")
+    if not isinstance(record, dict):
+        return {
+            "section": "normalization",
+            "status": "pass",
+            "metric": "max_abs_reference_offset_z",
+            "value": "n/a",
+            "threshold": max_offset_z,
+            "detail": "no normalization record in the scoring provenance (scored before it was recorded)",
+        }
+
+    signal_hours = record.get("signal_hours")
+    signal_text = "n/a" if signal_hours is None else f"{float(signal_hours):.2f} h"
+    status_name = record.get("reference_status")
+    reference = record.get("reference") or {}
+    offsets = [value for value in (record.get("offset_z") or []) if value is not None]
+
+    if status_name == "used" and offsets:
+        largest = max(abs(float(value)) for value in offsets)
+        return {
+            "section": "normalization",
+            "status": "review" if largest > max_offset_z else "pass",
+            "metric": "max_abs_reference_offset_z",
+            "value": largest,
+            "threshold": max_offset_z,
+            "detail": (
+                f"short recording ({signal_text} of signal) normalized against "
+                f"{reference.get('session')} (date {reference.get('date')}, "
+                f"{reference.get('signal_hours')} h, {reference.get('days_from_recording')} days); "
+                "offsets " + ", ".join(f"{float(value):+.2f}" for value in offsets)
+            ),
+        }
+    if record.get("short_recording"):
+        return {
+            "section": "normalization",
+            "status": "review",
+            "metric": "max_abs_reference_offset_z",
+            "value": "n/a",
+            "threshold": max_offset_z,
+            "detail": (
+                f"short recording ({signal_text} of signal, below "
+                f"{record.get('min_signal_hours')} h) normalized against its own statistics "
+                f"(reference {status_name}); rescore with --reference-session"
+            ),
+        }
+    return {
+        "section": "normalization",
+        "status": "pass",
+        "metric": "max_abs_reference_offset_z",
+        "value": "n/a",
+        "threshold": max_offset_z,
+        "detail": f"{record.get('source')} baseline; {signal_text} of signal",
+    }
+
+
+def _read_provenance(output: Path) -> dict[str, object] | None:
+    path = provenance_path(output)
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def _section(
     rows: list[dict[str, object]],
     section: str,
@@ -433,6 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eeg-eeg-threshold", type=float, default=None)
     parser.add_argument("--eeg-emg-threshold", type=float, default=None)
     parser.add_argument("--max-correlation-review-percent", type=float, default=None)
+    parser.add_argument("--max-reference-offset-z", type=float, default=None)
     parser.add_argument("--welch-seconds", type=float, default=None)
     parser.add_argument("--fmin", type=float, default=None)
     parser.add_argument("--fmax", type=float, default=None)
@@ -574,6 +654,12 @@ def run_qc(
         max_rem_percent=qc_thresholds.max_rem_percent,
     )
     sections.append(sleep_state_proportion_section(proportion_report))
+    sections.append(
+        normalization_section(
+            _read_provenance(scoring_file),
+            max_offset_z=qc_thresholds.max_reference_offset_z,
+        )
+    )
 
     artifact_epochs = pd.read_parquet(artifact_file)
     artifact_epochs = restrict_to_continuous_epochs(artifact_epochs, scored)
@@ -932,6 +1018,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             eeg_eeg_threshold=args.eeg_eeg_threshold,
             eeg_emg_threshold=args.eeg_emg_threshold,
             max_correlation_review_percent=args.max_correlation_review_percent,
+            max_reference_offset_z=args.max_reference_offset_z,
         )
     except (KeyError, TypeError, ValueError) as exc:
         parser.error(str(exc))

@@ -18,6 +18,17 @@ When ``use_artifact_prescan`` is on (the default), the long artifact periods
 to somnotate to be left unscored, so they neither get labelled nor shift the
 normalization of the rest of the recording. A recording without prescan output
 is scored in full, with a warning.
+
+Every scored recording also leaves its own pooled normalization statistics
+beside its predictions (``*_somnotate_normalization.npz``). When
+``reference_normalization`` is on (the default), a recording with less than
+``min_signal_hours`` of scoreable signal -- too little for a representative
+baseline of its own -- is normalized against those statistics from a long
+recording of the same animal instead: the nearest earlier session within
+``max_reference_age_days``, or the session named by ``reference_session``.
+See ``hypnose_eeg/sleep_scoring/reference_normalization.py``. Which baseline
+was used, and how far the recording sits from it, is recorded in the scoring
+provenance for QC.
 """
 
 from __future__ import annotations
@@ -35,6 +46,12 @@ from hypnose_helpers.io.selectors import parse_sessions
 
 from hypnose_eeg.io.output_layout import output_dir_name
 from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root, get_repo_root
+from hypnose_eeg.sleep_scoring.reference_normalization import (
+    REFERENCE_PREFERENCES,
+    ReferenceBaseline,
+    find_reference_baseline,
+    stats_metadata,
+)
 from hypnose_eeg.utils.provenance import file_fingerprint, write_provenance
 from hypnose_eeg.utils.config import (
     DEFAULT_SLEEP_SCORING_CONFIG_PATH,
@@ -63,6 +80,11 @@ class SleepScoringSettings:
     min_segment_length_s: float = 300.0
     overwrite: bool = False
     use_artifact_prescan: bool = True
+    reference_normalization: bool = True
+    min_signal_hours: float = 6.0
+    max_reference_age_days: float = 14.0
+    reference_prefer: str = "previous"
+    reference_session: str | None = None
 
 
 def _as_list(value: Any, *, option_name: str) -> list[str] | None:
@@ -231,6 +253,43 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--reference-normalization",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Normalize recordings with less than --min-signal-hours of signal "
+            "against a long recording of the same animal. Default: true (see "
+            "configs/pipelines/sleep_scoring.yaml)."
+        ),
+    )
+    parser.add_argument(
+        "--reference-session",
+        default=None,
+        help=(
+            "Session to take the reference baseline from for short recordings, "
+            "as a session number (3, ses-3) or a date (YYYYMMDD); overrides the "
+            "automatic choice and its age limit."
+        ),
+    )
+    parser.add_argument(
+        "--min-signal-hours",
+        type=float,
+        default=None,
+        help="Recordings with less scoreable signal than this use a reference baseline.",
+    )
+    parser.add_argument(
+        "--max-reference-age-days",
+        type=float,
+        default=None,
+        help="Only sessions at most this many days from the recording can be its reference.",
+    )
+    parser.add_argument(
+        "--reference-prefer",
+        choices=REFERENCE_PREFERENCES,
+        default=None,
+        help="'previous': earlier sessions only; 'nearest': either direction.",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         default=None,
@@ -309,6 +368,28 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
     )
     use_artifact_prescan = _as_bool(prescan_value, option_name="use_artifact_prescan")
 
+    reference = scoring.get("reference_normalization") or {}
+    if not isinstance(reference, dict):
+        raise ValueError("sleep_scoring.reference_normalization must be a YAML mapping")
+    reference_normalization = _as_bool(
+        coalesce(args.reference_normalization, reference.get("enabled"), True),
+        option_name="reference_normalization.enabled",
+    )
+    min_signal_hours = float(
+        coalesce(args.min_signal_hours, reference.get("min_signal_hours"), 6.0)
+    )
+    if min_signal_hours < 0:
+        raise ValueError("min_signal_hours must be non-negative")
+    max_reference_age_days = float(
+        coalesce(args.max_reference_age_days, reference.get("max_reference_age_days"), 14.0)
+    )
+    if max_reference_age_days < 0:
+        raise ValueError("max_reference_age_days must be non-negative")
+    reference_prefer = str(coalesce(args.reference_prefer, reference.get("prefer"), "previous"))
+    if reference_prefer not in REFERENCE_PREFERENCES:
+        raise ValueError(f"reference prefer must be one of {', '.join(REFERENCE_PREFERENCES)}")
+    reference_session = coalesce(args.reference_session, reference.get("reference_session"))
+
     return SleepScoringSettings(
         subjids=subjids,
         model_path=model_path,
@@ -326,6 +407,11 @@ def settings_from_args(args: argparse.Namespace) -> SleepScoringSettings:
         min_segment_length_s=min_segment_length_s,
         overwrite=overwrite,
         use_artifact_prescan=use_artifact_prescan,
+        reference_normalization=reference_normalization,
+        min_signal_hours=min_signal_hours,
+        max_reference_age_days=max_reference_age_days,
+        reference_prefer=reference_prefer,
+        reference_session=None if reference_session is None else str(reference_session),
     )
 
 
@@ -379,13 +465,32 @@ class _ScoringDependencies:
     convert_state_vector_to_state_intervals: Callable[..., tuple[list, list]]
     export_hypnogram: Callable[..., None]
     configuration: Any
+    normalization_stats_path: Callable[[Any], Path]
+    recording_normalization_stats: Callable[..., tuple[list, Any]]
+    save_normalization_stats: Callable[..., Path]
+    load_normalization_stats: Callable[[Path], tuple[list, dict]]
+    incompatible_normalization_settings: Callable[[dict], list[str]]
+    normalization_offset_z: Callable[[list, list], list]
+    signal_duration_s: Callable[[Any], float]
 
 
 def _import_scoring_dependencies() -> _ScoringDependencies:
     try:
-        from hypnose_somnotate.io.loading import hypnogram_path, prediction_path, segments_path
+        from hypnose_somnotate.io.loading import (
+            hypnogram_path,
+            normalization_stats_path,
+            prediction_path,
+            segments_path,
+        )
         from hypnose_somnotate.io.paths import RecordingRef
-        from hypnose_somnotate.scoring import score_recording
+        from hypnose_somnotate.preprocessing.preprocessing import (
+            incompatible_normalization_settings,
+            load_normalization_stats,
+            normalization_offset_z,
+            save_normalization_stats,
+            signal_duration_s,
+        )
+        from hypnose_somnotate.scoring import recording_normalization_stats, score_recording
         from hypnose_somnotate.scoring.scoring import _print_recording_plan
         from hypnose_somnotate.somnotate._utils import convert_state_vector_to_state_intervals
         from hypnose_somnotate.somnotate_pipeline.io.data_io import export_hypnogram
@@ -406,6 +511,13 @@ def _import_scoring_dependencies() -> _ScoringDependencies:
         convert_state_vector_to_state_intervals=convert_state_vector_to_state_intervals,
         export_hypnogram=export_hypnogram,
         configuration=configuration,
+        normalization_stats_path=normalization_stats_path,
+        recording_normalization_stats=recording_normalization_stats,
+        save_normalization_stats=save_normalization_stats,
+        load_normalization_stats=load_normalization_stats,
+        incompatible_normalization_settings=incompatible_normalization_settings,
+        normalization_offset_z=normalization_offset_z,
+        signal_duration_s=signal_duration_s,
     )
 
 
@@ -464,6 +576,131 @@ def _prescan_periods(
 
     periods = pd.read_parquet(path, columns=["start_s", "end_s"])
     return path, [(float(a), float(b)) for a, b in periods.itertuples(index=False)]
+
+
+class _ReferenceResolver:
+    """Chooses a short recording's reference baseline once somnotate knows its signal length.
+
+    Passed to the scorer as `normalization_stats`: somnotate calls it with the
+    recording's gap/chunk plan, so "short" means scoreable signal after gaps
+    and artifact exclusions, not file length. Returns the reference statistics,
+    or None to keep the recording's own. What it found stays on the instance
+    for the provenance record.
+    """
+
+    def __init__(
+        self,
+        settings: SleepScoringSettings,
+        deps: _ScoringDependencies,
+        layout: SessionLayout,
+        *,
+        subjid: str,
+        sub_label: str,
+        session: Any,
+    ) -> None:
+        self._settings = settings
+        self._deps = deps
+        self._layout = layout
+        self._subjid = subjid
+        self._sub_label = sub_label
+        self._session = session
+        self.signal_s: float | None = None
+        self.baseline: ReferenceBaseline | None = None
+
+    @property
+    def min_signal_s(self) -> float:
+        return self._settings.min_signal_hours * 3600.0
+
+    def __call__(self, prepared: Any) -> list | None:
+        self.signal_s = self._deps.signal_duration_s(prepared)
+        if not 0 < self.signal_s < self.min_signal_s:
+            return None
+        settings = self._settings
+        deps = self._deps
+        self.baseline = find_reference_baseline(
+            layout=self._layout,
+            derivatives_root=settings.derivatives_root,
+            subjid=self._subjid,
+            sub_label=self._sub_label,
+            current=self._session,
+            channel_labels=settings.channel_labels,
+            sampling_rate_hz=settings.sampling_rate_hz,
+            min_signal_s=self.min_signal_s,
+            max_age_days=settings.max_reference_age_days,
+            prefer=settings.reference_prefer,
+            reference_session=settings.reference_session,
+            exclude_intervals=self._exclude_intervals,
+            load_stats=deps.load_normalization_stats,
+            save_stats=deps.save_normalization_stats,
+            incompatible_settings=deps.incompatible_normalization_settings,
+            compute_stats=deps.recording_normalization_stats,
+            signal_duration_s=deps.signal_duration_s,
+            max_single_gap_s=settings.max_single_gap_s,
+            min_segment_length_s=settings.min_segment_length_s,
+        )
+        if self.baseline is None:
+            warnings.warn(
+                f"{self._sub_label} {self._session.path.name} has only "
+                f"{self.signal_s / 3600:.1f} h of signal (below "
+                f"{settings.min_signal_hours:g} h) and no reference session was found "
+                f"(prefer={settings.reference_prefer}, within "
+                f"{settings.max_reference_age_days:g} days); normalizing it against "
+                "its own statistics. Pass --reference-session to choose one.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return None
+        print(
+            f"  Reference baseline: {self.baseline.session} (date {self.baseline.date}, "
+            f"{self.baseline.signal_hours:.1f} h of signal, "
+            f"{self.baseline.days_from_recording:+d} days) for "
+            f"{self.signal_s / 3600:.1f} h of signal"
+        )
+        return self.baseline.stats
+
+    def _exclude_intervals(
+        self, session_output_dir: Path, edf_path: Path
+    ) -> tuple[Path | None, list[tuple[float, float]] | None]:
+        if not self._settings.use_artifact_prescan:
+            return None, None
+        return _prescan_periods(session_output_dir, edf_path)
+
+
+def _normalization_provenance(
+    settings: SleepScoringSettings,
+    normalization: Any,
+    resolver: _ReferenceResolver | None,
+    offset_z: Callable[[list, list], list],
+) -> dict[str, Any]:
+    """The `normalization` entry of the scoring provenance, read back by QC."""
+    signal_s = normalization.signal_s if normalization is not None else None
+    if signal_s is None and resolver is not None:
+        signal_s = resolver.signal_s
+    short = signal_s is not None and 0 < signal_s < settings.min_signal_hours * 3600.0
+    baseline = resolver.baseline if resolver is not None else None
+    if not settings.reference_normalization:
+        status = "disabled"
+    elif not short:
+        status = "not_needed"
+    elif baseline is None:
+        status = "not_found"
+    else:
+        status = "used"
+    offsets = None
+    if baseline is not None and normalization is not None and normalization.own:
+        offsets = offset_z(normalization.own, baseline.stats)
+    return {
+        "source": normalization.source if normalization is not None else None,
+        "signal_hours": None if signal_s is None else round(signal_s / 3600.0, 3),
+        "short_recording": short,
+        "min_signal_hours": settings.min_signal_hours,
+        "reference_status": status,
+        "reference": baseline.describe() if baseline is not None else None,
+        "offset_z": offsets,
+        "max_reference_age_days": settings.max_reference_age_days,
+        "reference_prefer": settings.reference_prefer,
+        "reference_session": settings.reference_session,
+    }
 
 
 def run_scoring(
@@ -576,12 +813,26 @@ def run_scoring(
                         session_output_dir, edf_path
                     )
 
+                resolver = (
+                    _ReferenceResolver(
+                        settings,
+                        deps,
+                        layout,
+                        subjid=subjid,
+                        sub_label=sub_label,
+                        session=session,
+                    )
+                    if settings.reference_normalization
+                    else None
+                )
+
                 df, prepared = scorer(
                     edf_path,
                     settings.model_path,
                     channel_labels=channel_labels,
                     sampling_rate_hz=settings.sampling_rate_hz,
                     global_normalization=settings.global_normalization,
+                    normalization_stats=resolver,
                     exclude_intervals_s=exclude_intervals_s,
                     max_single_gap_s=settings.max_single_gap_s,
                     min_segment_length_s=settings.min_segment_length_s,
@@ -595,9 +846,37 @@ def run_scoring(
                 with open(sidecar_path, "w") as f:
                     json.dump(prepared.to_dict(), f, indent=2)
 
+                # The recording's own pooled statistics, kept so it can serve
+                # as the reference baseline for a later short recording.
+                normalization = getattr(prepared, "normalization", None)
+                outputs = [output_path, sidecar_path]
+                if normalization is not None and normalization.own:
+                    outputs.append(
+                        deps.save_normalization_stats(
+                            deps.normalization_stats_path(recording),
+                            normalization.own,
+                            stats_metadata(
+                                edf_path,
+                                channel_labels=channel_labels,
+                                sampling_rate_hz=settings.sampling_rate_hz,
+                                signal_s=normalization.signal_s,
+                                excluded_artifact_periods=len(exclude_intervals_s or []),
+                            ),
+                        )
+                    )
+                normalization_record = _normalization_provenance(
+                    settings, normalization, resolver, deps.normalization_offset_z
+                )
+                if normalization_record["offset_z"] is not None:
+                    offsets = ", ".join(
+                        "n/a" if value is None else f"{value:+.2f}"
+                        for value in normalization_record["offset_z"]
+                    )
+                    print(f"  Offset from reference (median z per channel): {offsets}")
+
                 write_provenance(
                     "sleep_scoring",
-                    outputs=[output_path, sidecar_path],
+                    outputs=outputs,
                     inputs={
                         "edf_path": str(edf_path),
                         "subject": sub_label,
@@ -619,6 +898,7 @@ def run_scoring(
                             file_fingerprint(prescan_path) if prescan_path else None
                         ),
                         "excluded_artifact_periods": len(exclude_intervals_s or []),
+                        "normalization": normalization_record,
                     },
                 )
 

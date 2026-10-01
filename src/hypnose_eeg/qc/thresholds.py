@@ -33,6 +33,8 @@ class QCThresholds:
     eeg_eeg_threshold: float
     eeg_emg_threshold: float
     max_correlation_review_percent: float
+    # Defaulted so threshold files written before reference normalization still load.
+    max_reference_offset_z: float = 1.0
 
     def __post_init__(self) -> None:
         for field in fields(self):
@@ -134,5 +136,10 @@ def load_qc_thresholds(path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH) -
         eeg_emg_threshold=float(correlation["eeg_emg_threshold"]),
         max_correlation_review_percent=float(
             correlation["max_correlation_review_percent"]
+        ),
+        max_reference_offset_z=float(
+            nested_get(
+                config, ("quality_control", "reference_normalization", "max_offset_z"), 1.0
+            )
         ),
     )

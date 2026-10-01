@@ -505,6 +505,39 @@ The model name resolves below
 accepted. Raw-data and derivatives roots come from the active data-location
 profile unless explicitly overridden.
 
+#### Short recordings: borrowing a baseline
+
+Somnotate normalizes each frequency band against robust statistics pooled over
+the recording. A recording of only a few hours is usually dominated by one state.
+Its statistics shift towards that state, which is then scored as if it were
+average. Every scored recording therefore saves its own statistics beside its
+predictions (`eeg/sleep_scoring/<recording>_somnotate_normalization.npz`). A
+recording with less than `min_signal_hours` (default 6 h) of scoreable signal,
+counted after gaps and prescan exclusions, is normalized against the statistics
+of a long recording of the same animal instead. By default this is the nearest
+earlier session within 14 days. A session that was scored before these files
+existed, or never scored, has its statistics computed from its EDF and cached.
+Settings live under `sleep_scoring.reference_normalization`:
+
+```bash
+# Name the reference yourself (a session number or a date); ignores the age limit
+python -m hypnose_eeg.sleep_scoring.score_recordings \
+  --subject 66 --session 4 --reference-session 3 --overwrite
+
+# Look in both directions, or switch the behaviour off
+... --reference-prefer nearest
+... --no-reference-normalization
+```
+
+The scoring provenance records under `parameters.normalization` which baseline
+was used and how far the recording's own statistics sit from it
+(`offset_z`: median over frequency bins, in reference SDs, per channel). A
+borrowed baseline is only valid while the gain and electrode impedance are
+unchanged. The QC summary's `normalization` section therefore sends a
+recording to review when any channel's offset exceeds
+`quality_control.reference_normalization.max_offset_z` (default 1.0), or when a
+short recording found no reference and was normalized against itself.
+
 Inspect the stored Somnotate predictions and their per-state probabilities for
 one session without loading the EDF or rerunning the model:
 
@@ -560,7 +593,9 @@ sleep-state power spectra, and EMG RMS. Results are `PASS`, `REVIEW`, or `FAIL`.
 The artifact burden only covers scored signal, so a separate `artifact_prescan`
 section sends a recording to review when the pre-scoring scan left more than
 5% of it unscored, or when the scan has not been run. Each excluded period is
-listed as a review range. The power-spectra and EMG
+listed as a review range. The `normalization` section reviews short recordings
+whose borrowed baseline looks unsafe, or that had none (see "Short recordings:
+borrowing a baseline"). The power-spectra and EMG
 sections use the frequency bands, state expectations, RMS ordering, and determining
 EEG channel defined in `configs/pipelines/spectra.yaml`; select another definition
 file with `--spectra-config`. Every review/pass threshold (duration tolerance, gap

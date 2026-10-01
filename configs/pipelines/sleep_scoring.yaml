@@ -48,6 +48,28 @@ sleep_scoring:
   # is scored in full, with a warning.
   use_artifact_prescan: true
 
+  # Short recordings are too short to give a representative normalization
+  # baseline of their own: a few hours dominated by one state shift the robust
+  # mean/std towards that state, which the model then mis-scores. Every scored
+  # recording saves its own pooled statistics
+  # (<recording>_somnotate_normalization.npz, beside its predictions); a
+  # recording with less scoreable signal than min_signal_hours is normalized
+  # against those of a long recording of the same animal instead. See
+  # hypnose_eeg/sleep_scoring/reference_normalization.py.
+  reference_normalization:
+    enabled: true
+    # Scoreable signal (after gaps and prescan artifact exclusions), not file
+    # length, below which a reference baseline is used.
+    min_signal_hours: 6
+    # Electrode impedance drifts, so the reference must be recent.
+    max_reference_age_days: 14
+    # previous: the nearest earlier session; nearest: either direction (an
+    # earlier session wins a tie).
+    prefer: previous
+    # Optional explicit reference for short recordings, as a session number
+    # (3, ses-3) or a date (YYYYMMDD). Overrides prefer and the age limit.
+    reference_session: null
+
   # Predicted-state display labels, shared by every QC report. "Undefined" covers
   # unscored epochs and has no display color.
   sleep_state_names:

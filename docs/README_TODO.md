@@ -187,7 +187,7 @@ folders within a session" in `readme.md`.
 
 ## 21. Guidance for running qc scripts and options for external running when requiring review
 
-~## 22. Automate running of the preprocessing for hypnose dataset with reports of errors~
+~~## 22. Automate running of the preprocessing for hypnose dataset with reports of errors~~
 
 - Not necessary currently
 
@@ -197,7 +197,19 @@ folders within a session" in `readme.md`.
 beside `qc_summary.csv`, and `src/qc_review.py` and the batch QC verdict read the
 parquet copies of the summary and review epochs, falling back to the CSVs.
 
-## Short recordings are currently not being scored well because they don't have long periods of baseline - consider using a previous long session to set baseline (<6 hour recordings>)
+## ~~Short recordings are currently not being scored well because they don't have long periods of baseline - consider using a previous long session to set baseline (<6 hour recordings>)~~
+
+— done: every scored recording saves its own pooled normalization statistics
+(`<recording>_somnotate_normalization.npz`); a recording with less than
+`sleep_scoring.reference_normalization.min_signal_hours` of scoreable signal is
+normalized against those of the nearest earlier long session of the same
+animal (or `--reference-session`), via hypnose-somnotate's new
+`score_recording(normalization_stats=...)`. The reference and the recording's
+offset from it are in the scoring provenance, and the QC summary's
+`normalization` section reviews large offsets or a missing reference. See
+`hypnose_eeg/sleep_scoring/reference_normalization.py`. Still to do: validate on
+real short sessions by comparing hypnograms and per-state spectra with and
+without the reference.
 
 ## ~~23. Improve external running of API~~
 

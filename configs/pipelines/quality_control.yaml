@@ -39,6 +39,15 @@ quality_control:
   artifact_prescan:
     max_excluded_percent: 5.0
 
+  # Short recordings scored against a reference baseline (a long recording of
+  # the same animal; see sleep_scoring.reference_normalization) are flagged
+  # for review when their own spectral statistics sit more than this many
+  # reference SDs from it on any channel (median over frequency bins) -- a
+  # sign of a gain or impedance change that makes the borrowed baseline
+  # unsafe. A short recording for which no reference was found is flagged too.
+  reference_normalization:
+    max_offset_z: 1.0
+
   channel_correlation:
     eeg_eeg_threshold: 0.90
     eeg_emg_threshold: 0.50
