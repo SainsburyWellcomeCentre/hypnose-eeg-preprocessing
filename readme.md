@@ -108,7 +108,8 @@ from Python](#running-from-python)).
 `hypnose-eeg-pipeline` runs the full pipeline for one subject/session in the
 order the stages actually require — trim, concatenate, downsample and the
 artifact prescan, then sleep scoring, then artifact detection (which depends on
-the sleep-scoring output), then the QC summary:
+the sleep-scoring output), then the QC summary and the review figures (see
+[Review figures](#review-figures-no-display-needed)):
 
 ```bash
 hypnose-eeg-pipeline --subject 66 --session 1 --model my-model
@@ -138,6 +139,7 @@ run from any directory. Each is also a module, run with `python -m`:
 | `hypnose-eeg-score` | `hypnose_eeg.pipeline.sleep_scoring` |
 | `hypnose-eeg-qc` | `hypnose_eeg.pipeline.qc` |
 | `hypnose-eeg-qc-review` | `hypnose_eeg.pipeline.qc_review` |
+| `hypnose-eeg-qc-spectra` | `hypnose_eeg.qc.spectra` |
 | `hypnose-eeg-view` | `hypnose_eeg.sleep_scoring.view_scoring` |
 | `hypnose-eeg-locations` | `hypnose_eeg.io.repository_paths` |
 
@@ -277,6 +279,44 @@ QC review: 19/55 checked sessions need review across 2 subjects
 `--output-root`/`--output-dir`/`--output-layout` overrides the QC summary ran
 with, so its summaries are found.
 
+### Review figures (no display needed)
+
+After the QC summary, the QC stage's `figures` step saves PNGs into the
+session's `eeg/quality_control/` folder for every session whose QC summary is
+REVIEW or FAIL, so a flagged session can be looked at without the interactive
+viewer -- on a remote machine, or after a batch run:
+
+- `<recording>_scoring_hours-0-12.png`: the first 12 hours of the scored
+  recording as the viewer draws it -- EEG/EMG traces, EMG RMS, delta and theta
+  envelopes, theta:delta ratio, and Somnotate's states, with gaps, excluded
+  periods and detected artifacts shaded -- on an hours axis.
+- `<recording>_sleep_state_power_spectra.png`,
+  `<recording>_sleep_state_emg_rms.png` and the
+  `_sleep_state_spectral_quality.csv`: the
+  [sleep-state spectra](#sleep-state-power-spectra) behind the power-spectra
+  and EMG checks.
+
+A session that passes QC gets no figures. The step runs by default in the full
+pipeline and in `hypnose-eeg-qc`, and costs about a minute for a session under
+review. `--scoring` and `--spectra` (`review`, `always`, `never`) choose when
+each is drawn, for example to draw a passing session anyway:
+
+```bash
+hypnose-eeg-qc --subject 66 --session 1 --steps figures
+hypnose-eeg-qc --subject 66 --session 1 --steps figures --scoring always --spectra always
+hypnose-eeg-qc --subject 66 --session 1 --steps figures --figure-hours 12 24
+```
+
+A summary that FAILs stops the QC stage before `figures`, so for such a
+session run `--steps figures` afterwards (a batch run erases failed sessions,
+figures included). The defaults -- hours, when to draw each figure, artifact
+shading, size and resolution -- are under
+`review_figures` in `configs/pipelines/quality_control.yaml`; the EEG channel
+and display rate follow the viewer's `sleep_scoring_view` settings. From
+Python: `hypnose_eeg.qc.review_figures.render_session_figures()`, or
+`hypnose_eeg.sleep_scoring.view_scoring.render_scoring()` for one PNG of any
+viewer selection.
+
 Run any of them with `--help` for its complete option list. Each step calls
 the matching `src/hypnose_eeg/*` CLI below in the same Python process rather than
 reimplementing it, so step-specific flags such as `--config` are best passed
@@ -327,6 +367,7 @@ their results are available without the CLI:
 | `qc/sleep_scoring.py` | `compute_session_scoring_qc` | `save_scoring_qc` |
 | `qc/artifacts.py` | `compute_session_artifacts` | `save_artifact_report` |
 | `qc/recording_integrity.py` | `check_session` | `save_integrity_summary`, `save_integrity_gaps` |
+| `qc/review_figures.py` | `review_figure_settings` | `render_session_figures` |
 
 Thresholds default to `configs/pipelines/quality_control.yaml`. Override them
 with `with_overrides(default_qc_thresholds(), max_wake_percent=60.0)` (from
@@ -650,12 +691,11 @@ Plot the mean EEG power spectral density for Wake, NREM, and REM for one
 subject and either a session date or session number:
 
 ```bash
-python -m hypnose_eeg.qc.spectra \
-  --subject 66 --date 20260717
-
-python -m hypnose_eeg.qc.spectra \
-  --subject 66 --session 1
+hypnose-eeg-qc-spectra --subject 66 --date 20260717
+hypnose-eeg-qc-spectra --subject 66 --session 1
 ```
+
+(`hypnose-eeg-qc-spectra` is the console script for `python -m hypnose_eeg.qc.spectra`.)
 
 The script resolves the derivative FIF and matching Somnotate prediction file
 from the active data-location profile. It reads the FIF in bounded chunks rather
@@ -682,9 +722,8 @@ labels/colors, EMG ordering, and the determining channel are configured in
 Save plots without opening an interactive window with:
 
 ```bash
-python -m hypnose_eeg.qc.spectra \
-  --subject 66 --date 20260717 \
-  --save-dir --no-show
+hypnose-eeg-qc-spectra --subject 66 --date 20260717 --save-dir --no-show
+hypnose-eeg-qc-spectra --subject 66 --session 1 --save-dir --no-show --figure-format png
 ```
 
 Use `--fmin`, `--fmax`, `--epoch-seconds`, `--welch-seconds`, and

@@ -187,7 +187,9 @@ folders within a session" in `readme.md`.
 
 ## 21. Guidance for running qc scripts and options for external running when requiring review
 
-## 22. Automate running of the preprocessing for hypnose dataset with reports of errors
+~## 22. Automate running of the preprocessing for hypnose dataset with reports of errors~
+
+- Not necessary currently
 
 ## ~~Pipeline output also parquet for qc review for efficiency~~
 
@@ -197,9 +199,9 @@ parquet copies of the summary and review epochs, falling back to the CSVs.
 
 ## Short recordings are currently not being scored well because they don't have long periods of baseline - consider using a previous long session to set baseline (<6 hour recordings>)
 
-## 23. Improve external running of API
+## ~~23. Improve external running of API~~
 
-In progress. Done: `scripts/` is now the installable `hypnose_eeg` package (no
+Done: `scripts/` is now the installable `hypnose_eeg` package (no
 `sys.path` inserts; configuration loads on first use rather than at import);
 the viewer moved to `hypnose_eeg/sleep_scoring/view_scoring.py`; `qc/spectra.py` and the
 viewer are split into compute/plot/CLI layers (`compute_session_spectra`,
@@ -223,9 +225,14 @@ viewer are split into compute/plot/CLI layers (`compute_session_spectra`,
   validates its own values, and `utils.config.with_overrides()` applies
   CLI-style overrides to it or to `SpectraConfig`.
 
-Remaining:
-- A headless `render_scoring()` that saves a PNG of each section `qc_review`
-  flags, built on `load_scored_window`/`plot_scored_window`.
+- ~~A headless `render_scoring()` that saves a PNG of each section `qc_review`
+  flags, built on `load_scored_window`/`plot_scored_window`.~~ — done:
+  `view_scoring.render_scoring()` saves any viewer selection as a PNG with no
+  display, and the QC stage's new default `figures` step
+  (`hypnose_eeg/qc/review_figures.py`) uses it, for each session whose QC
+  summary is REVIEW or FAIL, to save an overview of its first 12 hours and its
+  sleep-state spectra/EMG RMS figures. `hypnose_eeg.qc.spectra` is also a console
+  script now, `hypnose-eeg-qc-spectra`.
 
 ## 24. Reduce amount of text at top of scripts
 
@@ -238,4 +245,6 @@ commands are the `hypnose-eeg-*` console scripts declared in `pyproject.toml`
 (each also runs as `python -m hypnose_eeg.pipeline.<stage>`). Re-run
 `pip install -e .` after pulling this change.
 
-## Introduce timer for running pipeline
+~~## Introduce timer for running pipeline~~
+
+-Already exists

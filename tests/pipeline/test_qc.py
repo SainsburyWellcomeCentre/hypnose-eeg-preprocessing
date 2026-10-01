@@ -9,13 +9,24 @@ from hypnose_eeg.pipeline.steps import StepFailed
 
 class RunStepsTests(unittest.TestCase):
     @patch("hypnose_eeg.pipeline.qc.run_step")
-    def test_default_step_is_summary_only(self, mock_run_step):
+    def test_default_steps_are_the_summary_then_the_review_figures(self, mock_run_step):
         qc.run_steps(subject="66", session="1")
 
         labels = [c.kwargs["label"] for c in mock_run_step.call_args_list]
-        self.assertEqual(labels, ["qc:summary"])
-        module = mock_run_step.call_args.args[0]
-        self.assertEqual(module, "hypnose_eeg.qc.summary_qc")
+        self.assertEqual(labels, ["qc:summary", "qc:figures"])
+        modules = [c.args[0] for c in mock_run_step.call_args_list]
+        self.assertEqual(
+            modules, ["hypnose_eeg.qc.summary_qc", "hypnose_eeg.qc.review_figures"]
+        )
+
+    @patch("hypnose_eeg.pipeline.qc.run_step")
+    def test_a_failing_summary_stops_before_the_figures(self, mock_run_step):
+        mock_run_step.side_effect = StepFailed("qc:summary", "hypnose_eeg.qc.summary_qc", 1)
+
+        with self.assertRaises(StepFailed):
+            qc.run_steps(subject="66", session="1")
+
+        self.assertEqual(mock_run_step.call_count, 1)
 
     @patch("hypnose_eeg.pipeline.qc.run_step")
     def test_steps_run_in_canonical_order_regardless_of_input_order(self, mock_run_step):

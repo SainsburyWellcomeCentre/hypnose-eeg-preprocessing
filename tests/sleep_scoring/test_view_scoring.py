@@ -439,6 +439,64 @@ class SleepScoringViewTests(unittest.TestCase):
         finally:
             plt.close(fig)
 
+    def test_render_scoring_saves_the_whole_window_as_a_png_in_hours(self) -> None:
+        import matplotlib
+        import numpy as np
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from PIL import Image
+
+        import hypnose_eeg.io.output_paths as output_paths
+        from hypnose_eeg.sleep_scoring.view_scoring import render_scoring
+
+        rate_hz = 128.0  # the EMG band-pass needs more than 90 Hz
+        window = ScoredWindow(
+            title="sub-066 ses-001 (date 20260717) — Hours 1-1.1 from session start",
+            signal_path=Path("rec_raw.fif"),
+            predictions_path=Path("rec_somnotate_predictions.parquet"),
+            signals=np.random.default_rng(0).standard_normal((int(360 * rate_hz), 3)),
+            sampling_rate_hz=rate_hz,
+            predictions=np.repeat([1, 2, 3], 40),
+            start_s=3600.0,
+            end_s=3960.0,
+            regions=[],
+            edf_path=Path("sub-066_ses-001.edf"),
+        )
+        seen = {}
+        real_save_png = output_paths.save_png
+
+        def capture(fig, path, *, dpi):
+            data_axis = fig.axes[0]
+            seen["xlim"] = data_axis.get_xlim()
+            seen["tick"] = data_axis.xaxis.get_major_formatter()(0.0, 0)
+            seen["xlabels"] = [axis.get_xlabel() for axis in fig.axes if axis.get_xlabel()]
+            seen["width"] = fig.get_figwidth()
+            return real_save_png(fig, path, dpi=dpi)
+
+        settings = view_settings(66, session=1, hours=(1, 1.1))
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "hypnose_eeg.sleep_scoring.view_scoring.load_scored_window", return_value=window
+        ), patch.object(output_paths, "save_png", side_effect=capture):
+            path = render_scoring(
+                settings,
+                lambda loaded: Path(tmp) / f"{loaded.edf_path.stem}_overview.png",
+                width_in=20,
+                dpi=40,
+            )
+
+            self.assertEqual(path, Path(tmp) / "sub-066_ses-001_overview.png")
+            with Image.open(path) as image:
+                self.assertEqual(image.format, "PNG")
+                self.assertIn("Provenance", image.text)
+
+        # The whole window is in view at once, labelled in hours from the session start.
+        self.assertAlmostEqual(seen["xlim"][1] - seen["xlim"][0], 360.0, delta=1.0)
+        self.assertEqual(seen["tick"], "1")
+        self.assertEqual(seen["xlabels"], ["Time from session start [h]"])
+        self.assertEqual(seen["width"], 20)
+        self.assertEqual(plt.get_fignums(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

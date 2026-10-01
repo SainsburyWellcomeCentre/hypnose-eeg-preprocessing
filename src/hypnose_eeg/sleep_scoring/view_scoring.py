@@ -7,6 +7,8 @@ recording or calculate a numerical performance metric.
 From Python, `view_settings()` builds the settings, `load_scored_window()` reads
 the selected slice without needing a display, `plot_scored_window()` draws it,
 and `show_scored_recording()` does all three and opens the window.
+`render_scoring()` saves the same drawing as a PNG instead, with no display
+needed (see `hypnose_eeg/qc/review_figures.py`).
 """
 
 from __future__ import annotations
@@ -607,6 +609,8 @@ class ScoredWindow:
     start_s: float  # window start, in seconds from the recording start
     end_s: float
     regions: list[ShadedRegions]
+    # The scored EDF under rawdata -- `signal_path` may be a derivatives FIF.
+    edf_path: Path | None = None
 
 
 @contextmanager
@@ -793,6 +797,7 @@ def load_scored_window(settings: ScoringViewSettings) -> ScoredWindow:
         start_s=start_s,
         end_s=loaded_end_s,
         regions=regions,
+        edf_path=recording.edf_path,
     )
 
 
@@ -839,6 +844,50 @@ def show_scored_recording(settings: ScoringViewSettings) -> int:
 
     plt.show()
     return 0
+
+
+def render_scoring(
+    settings: ScoringViewSettings,
+    path: str | Path | Callable[[ScoredWindow], Path],
+    *,
+    width_in: float = 24.0,
+    dpi: int = 150,
+) -> Path:
+    """Save the selected window as a PNG without opening a window; return its path.
+
+    The headless counterpart of `show_scored_recording()`, for review on
+    machines with no display: the whole loaded window is drawn at once -- the
+    viewer's scrolling span is stretched to cover it -- on a time axis in hours
+    from the session start, so a long stretch reads as an overview. `path` may
+    be a function of the loaded window, for names that depend on which
+    recording was scored.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter, MultipleLocator
+
+    from hypnose_eeg.io.output_paths import save_png
+
+    window = load_scored_window(settings)
+    fig, _viewer = plot_scored_window(
+        window,
+        eeg_channel=settings.eeg_channel,
+        view_length_s=window.end_s - window.start_s,
+    )
+    try:
+        span_h = (window.end_s - window.start_s) / 3600.0
+        step_s = 3600.0 * max(1, math.ceil(span_h / 24))
+        for axis in fig.axes:
+            axis.xaxis.set_major_locator(MultipleLocator(step_s))
+            axis.xaxis.set_major_formatter(
+                FuncFormatter(lambda x, _pos: f"{(x + window.start_s) / 3600.0:g}")
+            )
+            if axis.get_xlabel():
+                axis.set_xlabel("Time from session start [h]")
+        fig.set_size_inches(width_in, fig.get_figheight())
+        destination = path(window) if callable(path) else Path(path)
+        return save_png(fig, destination, dpi=dpi)
+    finally:
+        plt.close(fig)
 
 
 def _edf_contains_time(

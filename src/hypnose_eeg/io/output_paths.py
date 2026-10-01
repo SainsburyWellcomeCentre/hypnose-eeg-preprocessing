@@ -1,4 +1,4 @@
-"""Construct categorized output paths in the shared session layout, and write CSVs and PDFs to them."""
+"""Construct categorized output paths in the shared session layout, and write CSVs, PDFs and PNGs to them."""
 
 from __future__ import annotations
 
@@ -220,5 +220,32 @@ def save_pdf(fig: "Figure", path: str | Path) -> Path:
         provenance=provenance(skip_modules=(__name__,)),
     )
     Path(tagged).replace(path)
+    print(f"Saved: {path}")
+    return path
+
+
+def save_png(fig: "Figure", path: str | Path, *, dpi: int = 150) -> Path:
+    """Save a figure as a PNG at exactly `path`, with its provenance as a text chunk.
+
+    For figures too dense to keep as vectors -- hours of raw trace -- where a
+    PDF would be unwieldy. The provenance record is the one `save_pdf` embeds,
+    as JSON under the PNG's `Provenance` key.
+    """
+    import json
+
+    import matplotlib
+    from hypnose_helpers.provenance import provenance
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = provenance(skip_modules=(__name__,))
+    # Agg refuses a single path with millions of vertices unless it may split it.
+    with matplotlib.rc_context({"agg.path.chunksize": 10000}):
+        fig.savefig(
+            path,
+            dpi=dpi,
+            format="png",
+            metadata={"Provenance": json.dumps(record, default=str)},
+        )
     print(f"Saved: {path}")
     return path

@@ -43,3 +43,21 @@ quality_control:
     eeg_eeg_threshold: 0.90
     eeg_emg_threshold: 0.50
     max_correlation_review_percent: 2.0
+
+# Headless review figures (hypnose_eeg/qc/review_figures.py), saved as PNGs in
+# the session's quality-control directory after the QC summary -- the
+# no-display alternative to opening the interactive scoring viewer. Each is
+# drawn "review" (only when the QC summary is not a plain pass), "always", or
+# "never"; with both at "review", a session that passes gets no figures.
+review_figures:
+  # The scoring overview: the traces, derived envelopes, and Somnotate states
+  # as the viewer shows them, over `hours` elapsed from the session start.
+  scoring: review
+  hours: [0, 12]
+  # The sleep-state power spectra and EMG RMS figures, with their spectral
+  # quality CSV.
+  spectra: review
+  # Shade the detected artifact epochs (needs artifact detection to have run).
+  show_artifacts: true
+  width_in: 24
+  dpi: 150

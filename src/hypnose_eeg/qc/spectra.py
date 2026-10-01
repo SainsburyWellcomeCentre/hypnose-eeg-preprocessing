@@ -4,6 +4,11 @@ Usable from Python as well as the command line:
 `compute_session_spectra()`/`compute_recording_spectra()` return `SpectraResult`s,
 `plot_spectra()` turns one into figures, and `save_spectra()` writes them with
 the quality CSV. `main()` only parses arguments and prints.
+
+From the command line, `hypnose-eeg-qc-spectra --subject 66 --session 1` opens
+the figures in plot windows; add `--save-dir --no-show` (and
+`--figure-format png`) to save them in the session's QC directory instead, with
+no display needed.
 """
 
 from __future__ import annotations
@@ -20,7 +25,12 @@ import pandas as pd
 from hypnose_helpers.viz.styles import ensure_style
 
 from hypnose_eeg.io.input_paths import artifact_path, scoring_path
-from hypnose_eeg.io.output_paths import quality_control_output_path, save_csv, save_pdf
+from hypnose_eeg.io.output_paths import (
+    quality_control_output_path,
+    save_csv,
+    save_pdf,
+    save_png,
+)
 from hypnose_eeg.io.repository_paths import resolve_data_roots
 from hypnose_eeg.utils.recording_selection import select_recordings
 from hypnose_eeg.analysis.emg import compute_state_emg_rms
@@ -608,8 +618,17 @@ def save_spectra(
     result: SpectraResult,
     save_dir: str | Path,
     figures: Mapping[str, "Figure"] | None = None,
+    *,
+    figure_format: str = "pdf",
 ) -> list[Path]:
-    """Write the quality CSV and any `plot_spectra()` figures into `save_dir`."""
+    """Write the quality CSV and any `plot_spectra()` figures into `save_dir`.
+
+    Figures are PDFs, or PNGs with `figure_format="png"` (as the QC review
+    figures are saved).
+    """
+    if figure_format not in ("pdf", "png"):
+        raise ValueError(f"figure_format must be 'pdf' or 'png', not {figure_format!r}")
+    save = save_pdf if figure_format == "pdf" else save_png
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     paths = [
@@ -620,7 +639,7 @@ def save_spectra(
     ]
     for key, fig in (figures or {}).items():
         paths.append(
-            save_pdf(fig, save_dir / f"{result.recording}_{_FIGURE_NAMES[key]}.pdf")
+            save(fig, save_dir / f"{result.recording}_{_FIGURE_NAMES[key]}.{figure_format}")
         )
     return paths
 
@@ -654,7 +673,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const=".",
         default=None,
-        help="Optionally save PDFs and a quality CSV in the session QC directory.",
+        help="Optionally save the figures and a quality CSV in the session QC directory.",
+    )
+    parser.add_argument(
+        "--figure-format", choices=("pdf", "png"), default="pdf",
+        help="Format of the saved figures (default: pdf).",
     )
     parser.add_argument("--no-show", action="store_true", help="Do not open plot windows.")
     return parser
@@ -720,7 +743,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             save_dir = quality_control_output_path(
                 args.save_dir, edf_path, rawdata_root, derivatives_root
             )
-            save_spectra(result, save_dir, figures)
+            save_spectra(result, save_dir, figures, figure_format=args.figure_format)
 
     if not args.no_show:
         import matplotlib.pyplot as plt

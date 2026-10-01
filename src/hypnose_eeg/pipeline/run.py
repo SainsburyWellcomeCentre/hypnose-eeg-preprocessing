@@ -10,7 +10,7 @@ before scoring, which leaves the long artifact periods it finds unscored:
   1. preprocessing: trim, concatenate, downsample, prescan_artifacts
   2. sleep_scoring: score
   3. preprocessing: detect_artifacts
-  4. qc: summary
+  4. qc: summary, figures (review PNGs; see `hypnose_eeg/qc/review_figures.py`)
 
 Restricting to one or more `--stage` values runs each named stage's own
 default step set instead (for example `--stage preprocessing` runs
@@ -206,7 +206,7 @@ def run_stages(
             **common, overwrite=overwrite,
             steps=["detect_artifacts"], extra_args=extra,
         )
-        qc.run_steps(**common, steps=["summary"], extra_args=extra)
+        qc.run_steps(**common, steps=["summary", "figures"], extra_args=extra)
     else:
         if "preprocessing" in stages:
             preprocessing.run_steps(**common, overwrite=overwrite, extra_args=extra)

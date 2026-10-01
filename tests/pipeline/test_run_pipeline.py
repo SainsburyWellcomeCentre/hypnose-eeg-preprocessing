@@ -39,7 +39,7 @@ class FullRunOrderingTests(unittest.TestCase):
         self.assertEqual(scoring_call.kwargs["model"], "my-model")
 
         qc_call = mock_qc.run_steps.call_args
-        self.assertEqual(qc_call.kwargs["steps"], ["summary"])
+        self.assertEqual(qc_call.kwargs["steps"], ["summary", "figures"])
 
 
     @patch("hypnose_eeg.pipeline.run.qc")

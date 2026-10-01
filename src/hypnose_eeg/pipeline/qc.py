@@ -6,9 +6,16 @@ burden, EEG/EMG channel correlation, sleep-state power spectra, EMG RMS) and
 prints one PASS/REVIEW/FAIL decision -- it is the default step. It also writes
 both of its outputs into the session's quality-control directory on every run:
 `qc_summary.csv` with the section results and `qc_review_epochs.csv` with the
-unified review ranges, each with a `.parquet` copy. The remaining steps wrap
-the individual `hypnose_eeg/qc/*.py` reports for when a single section's plots or
-table are wanted on their own.
+unified review ranges, each with a `.parquet` copy.
+
+`figures` (`hypnose_eeg/qc/review_figures.py`), the other default step, then
+saves PNGs for review without needing a display, when the summary is not a
+plain pass: an overview of the first 12 hours of the scored recording, and the
+sleep-state power spectra and EMG RMS figures. A summary that FAILs stops
+the stage before `figures`; rerun with `--steps figures` to draw them anyway.
+
+The remaining steps wrap the individual `hypnose_eeg/qc/*.py` reports for when
+a single section's plots or table are wanted on their own.
 
 Unrecognized arguments are forwarded verbatim to every selected step (for
 example `--no-summary`/`--no-review-epochs` to stop `summary` writing either
@@ -30,7 +37,10 @@ from hypnose_eeg.pipeline.steps import (
     run_step,
 )
 
-STEP_ORDER = ["integrity", "sleep_scoring", "spectra", "channel_correlations", "artifacts", "summary"]
+STEP_ORDER = [
+    "integrity", "sleep_scoring", "spectra", "channel_correlations", "artifacts",
+    "summary", "figures",
+]
 STEP_MODULES = {
     "integrity": "hypnose_eeg.qc.recording_integrity",
     "sleep_scoring": "hypnose_eeg.qc.sleep_scoring",
@@ -38,8 +48,10 @@ STEP_MODULES = {
     "channel_correlations": "hypnose_eeg.qc.channel_correlations",
     "artifacts": "hypnose_eeg.qc.artifacts",
     "summary": "hypnose_eeg.qc.summary_qc",
+    "figures": "hypnose_eeg.qc.review_figures",
 }
-DEFAULT_STEPS = ["summary"]
+# `figures` reads the verdict `summary` writes, so it runs after it.
+DEFAULT_STEPS = ["summary", "figures"]
 
 
 def run_steps(
@@ -91,8 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_selector_arguments(parser)
     parser.add_argument(
         "--steps", nargs="+", choices=STEP_ORDER, default=None,
-        help=f"QC sections to run (default: {' '.join(DEFAULT_STEPS)}, which covers "
-        "every section).",
+        help=f"QC sections to run (default: {' '.join(DEFAULT_STEPS)} -- the summary "
+        "covers every section, then the review figures are saved).",
     )
     return parser
 

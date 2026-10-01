@@ -47,6 +47,7 @@ hypnose-eeg-preprocess = "hypnose_eeg.pipeline.preprocessing:main"
 hypnose-eeg-score = "hypnose_eeg.pipeline.sleep_scoring:main"
 hypnose-eeg-qc = "hypnose_eeg.pipeline.qc:main"
 hypnose-eeg-qc-review = "hypnose_eeg.pipeline.qc_review:main"
+hypnose-eeg-qc-spectra = "hypnose_eeg.qc.spectra:main"
 hypnose-eeg-view = "hypnose_eeg.sleep_scoring.view_scoring:main"
 hypnose-eeg-locations = "hypnose_eeg.io.repository_paths:main"
 

@@ -196,6 +196,7 @@ class SleepStateSpectraTests(unittest.TestCase):
             try:
                 self.assertEqual(set(figures), {"spectra", "emg_rms"})
                 paths = save_spectra(result, root / "qc", figures)
+                png_paths = save_spectra(result, root / "review", figures, figure_format="png")
             finally:
                 import matplotlib.pyplot as plt
 
@@ -210,6 +211,16 @@ class SleepStateSpectraTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(sorted(paths), sorted((root / "qc").iterdir()))
+            self.assertEqual(
+                sorted(path.name for path in png_paths),
+                [
+                    "rec_sleep_state_emg_rms.png",
+                    "rec_sleep_state_power_spectra.png",
+                    "rec_sleep_state_spectral_quality.csv",
+                ],
+            )
+            with self.assertRaises(ValueError):
+                save_spectra(result, root / "review", {}, figure_format="svg")
 
     def test_spectrum_computation_is_available_from_analysis(self) -> None:
         self.assertTrue(callable(compute_state_spectra))
