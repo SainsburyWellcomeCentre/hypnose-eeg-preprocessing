@@ -260,3 +260,5 @@ commands are the `hypnose-eeg-*` console scripts declared in `pyproject.toml`
 ~~## Introduce timer for running pipeline~~
 
 -Already exists
+
+## Make every script have the ability to enter multiple subjects and sessions
