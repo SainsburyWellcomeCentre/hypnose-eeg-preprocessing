@@ -12,8 +12,8 @@ import pandas as pd
 
 from hypnose_helpers.io.layout import SessionRef
 
-from src import run_pipeline
-from src._batch import (
+from hypnose_eeg.pipeline import run as run_pipeline
+from hypnose_eeg.pipeline.batch import (
     SessionOutcome,
     erase_session_outputs,
     format_duration,
@@ -24,7 +24,7 @@ from src._batch import (
     resolve_subjects,
     session_selector,
 )
-from src._pipeline import StepFailed
+from hypnose_eeg.pipeline.steps import StepFailed
 
 SUBJECT = "66"
 SESSION_DATES = {1: "20260717", 2: "20260718", 3: "20260719"}
@@ -456,9 +456,9 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(format_duration(7200), "2h 00m 00s")
 
 
-@patch("src.run_pipeline.qc")
-@patch("src.run_pipeline.sleep_scoring")
-@patch("src.run_pipeline.preprocessing")
+@patch("hypnose_eeg.pipeline.run.qc")
+@patch("hypnose_eeg.pipeline.run.sleep_scoring")
+@patch("hypnose_eeg.pipeline.run.preprocessing")
 class BatchRunTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -471,11 +471,11 @@ class BatchRunTests(unittest.TestCase):
             session_ref(self.rawdata, ses, date) for ses, date in SESSION_DATES.items()
         ]
         finder = patch(
-            "src.run_pipeline.find_sessions", return_value=self.sessions
+            "hypnose_eeg.pipeline.run.find_sessions", return_value=self.sessions
         )
         self.find_sessions = finder.start()
         self.addCleanup(finder.stop)
-        eraser = patch("src.run_pipeline.erase_session_outputs", return_value=[])
+        eraser = patch("hypnose_eeg.pipeline.run.erase_session_outputs", return_value=[])
         self.erase = eraser.start()
         self.addCleanup(eraser.stop)
 
@@ -669,6 +669,35 @@ class BatchRunTests(unittest.TestCase):
         self.assertEqual([row["status"] for row in rows], ["failed", "ok", "ok"])
         self.assertEqual(rows[0]["qc_status"], "")
 
+    def test_a_summary_step_that_raised_is_a_crash_not_a_verdict(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        def qc_summary(**kwargs):
+            ses = int(kwargs["session"])
+            if ses == 1:
+                # A FAIL summary from this run is on disk, but the step then
+                # raised: that is a crash, so the summary is not its verdict.
+                make_session_tree(
+                    self.derivatives, ses, SESSION_DATES[ses],
+                    files={"eeg/quality_control/x_qc_summary.csv": qc_summary_csv(
+                        ("artifacts", "fail"),
+                    )},
+                )
+                raise StepFailed(
+                    "qc:summary", "hypnose_eeg.qc.summary_qc", 1,
+                    error=OSError("disk full"),
+                )
+
+        mock_qc.run_steps.side_effect = qc_summary
+
+        result = self.run_batch()
+
+        self.assertEqual(result, 1)
+        rows = self.report_rows()
+        self.assertEqual(rows[0]["status"], "failed")
+        self.assertEqual(rows[0]["qc_status"], "")
+        self.assertIn("OSError: disk full", rows[0]["error"])
+
     def test_the_batch_duration_is_on_every_row(
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
@@ -730,9 +759,9 @@ class BatchRunTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 2)
 
 
-@patch("src.run_pipeline.qc")
-@patch("src.run_pipeline.sleep_scoring")
-@patch("src.run_pipeline.preprocessing")
+@patch("hypnose_eeg.pipeline.run.qc")
+@patch("hypnose_eeg.pipeline.run.sleep_scoring")
+@patch("hypnose_eeg.pipeline.run.preprocessing")
 class MultiSubjectBatchTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -755,10 +784,10 @@ class MultiSubjectBatchTests(unittest.TestCase):
                 raise FileNotFoundError(f"No sessions found for sub-{int(subject):03d}")
             return sessions
 
-        finder = patch("src.run_pipeline.find_sessions", side_effect=find)
+        finder = patch("hypnose_eeg.pipeline.run.find_sessions", side_effect=find)
         self.find_sessions = finder.start()
         self.addCleanup(finder.stop)
-        eraser = patch("src.run_pipeline.erase_session_outputs", return_value=[])
+        eraser = patch("hypnose_eeg.pipeline.run.erase_session_outputs", return_value=[])
         self.erase = eraser.start()
         self.addCleanup(eraser.stop)
 

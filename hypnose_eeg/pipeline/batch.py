@@ -1,6 +1,6 @@
 """Session enumeration, failed-session cleanup, and reporting for batch runs.
 
-`run_pipeline.py --all-sessions` processes every session one or more subjects
+`run.py --all-sessions` processes every session one or more subjects
 have, one after the other (`--subject all` covers every subject in the rawdata
 tree). A session that fails must not stop the ones after it, and must
 not leave half-written outputs behind that a later rerun would mistake for
@@ -26,13 +26,11 @@ only files this pipeline produced -- `<stem>_trimmed.edf` and
 from __future__ import annotations
 
 import csv
-import os
 import shutil
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, Mapping, Sequence
+from typing import Mapping, Sequence
 
 import pyarrow.parquet as pq
 from hypnose_helpers.io.layout import SessionLayout, SessionRef, normalize_subjid
@@ -40,6 +38,7 @@ from hypnose_helpers.io.selectors import parse_subjects
 
 from hypnose_eeg.io.output_layout import output_dir_name, output_dir_names, output_root_dir
 from hypnose_eeg.io.output_paths import save_csv_rows
+from hypnose_eeg.pipeline.steps import applied_env
 from hypnose_eeg.qc.thresholds import load_performance_check
 from hypnose_eeg.utils.recording_selection import (
     is_concatenated_recording,
@@ -190,7 +189,7 @@ def erase_session_outputs(
     """Remove a session's pipeline outputs; return what was (or would be) removed.
 
     `env` carries the `HYPNOSE_EEG_OUTPUT_*` overrides the run used (see
-    `src._pipeline.output_layout_env`), so the folders erased are the ones the
+    `hypnose_eeg.pipeline.steps.output_layout_env`), so the folders erased are the ones the
     run actually wrote rather than the repository defaults. A session with
     nothing on disk yet erases nothing rather than failing -- a session can fail
     on its very first step.
@@ -300,7 +299,7 @@ def read_qc_verdict(
     )
     if session_dir is None:
         return None
-    with _applied_env(env or {}):
+    with applied_env(env or {}):
         qc_dir = session_dir / output_dir_name("quality_control")
     # Coarse filesystem timestamps can round a fresh write to just before `since`.
     cutoff = None if since is None else since - 2
@@ -456,7 +455,7 @@ def _output_targets(session_dir: Path, env: Mapping[str, str]) -> list[Path]:
     when it has been configured away the groups sit directly in the session
     directory and are listed individually, so nothing else in there is touched.
     """
-    with _applied_env(env):
+    with applied_env(env):
         root = output_root_dir()
         if root:
             return [session_dir / root]
@@ -494,18 +493,3 @@ def _check_inside(target: Path, session_dir: Path) -> None:
     session = session_dir.resolve(strict=False)
     if resolved == session or session not in resolved.parents:
         raise ValueError(f"Refusing to erase {target}: not inside {session_dir}")
-
-
-@contextmanager
-def _applied_env(env: Mapping[str, str]) -> Iterator[None]:
-    """Apply the run's output-layout environment for the duration of a lookup."""
-    previous = {key: os.environ.get(key) for key in env}
-    os.environ.update(env)
-    try:
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value

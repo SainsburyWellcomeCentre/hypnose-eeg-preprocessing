@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import math
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 import pandas as pd
@@ -13,17 +14,21 @@ from hypnose_helpers.viz.styles import ensure_style
 
 from hypnose_eeg.io.input_paths import artifact_path, scoring_path
 from hypnose_eeg.io.output_paths import quality_control_output_path, save_pdf
-from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
-from hypnose_eeg.qc.spectra import load_spectra_config
+from hypnose_eeg.io.repository_paths import resolve_data_roots
+from hypnose_eeg.qc.spectra import default_spectra_config, load_spectra_config
 from hypnose_eeg.utils.recording_selection import select_recordings
 from hypnose_eeg.qc.thresholds import load_qc_thresholds
 from hypnose_eeg.utils.config import (
     DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
     DEFAULT_SPECTRA_CONFIG_PATH,
     coalesce,
+    with_overrides,
 )
 from hypnose_eeg.utils.sleep_states import default_sleep_states
 from hypnose_eeg.analysis.correlation import compute_state_channel_correlations
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 
 def _plotted_states() -> dict[int, str]:
@@ -98,6 +103,124 @@ def plot_correlation_distributions(
     fig.suptitle(title)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     return fig
+
+
+@dataclass(frozen=True, eq=False)
+class CorrelationResult:
+    """One recording's epoch-wise channel correlations and the files they came from."""
+
+    edf_path: Path
+    fif_path: Path
+    scoring_path: Path
+    artifact_path: Path | None  # None when artifact epochs were included
+    correlations: pd.DataFrame
+    channels: list[str]
+
+    @property
+    def recording(self) -> str:
+        return self.edf_path.stem
+
+
+def compute_recording_correlations(
+    edf_path: Path,
+    fif_path: Path,
+    *,
+    rawdata_root: Path,
+    derivatives_root: Path,
+    epoch_seconds: float | None = None,
+    chunk_epochs: int | None = None,
+    include_artifacts: bool = False,
+) -> CorrelationResult:
+    """Correlate every channel pair per epoch for one EDF/FIF pair.
+
+    `epoch_seconds`/`chunk_epochs` default to the spectra configuration's;
+    artifact epochs are excluded unless `include_artifacts`.
+    """
+    spectra_config = default_spectra_config()
+    epoch_seconds = coalesce(epoch_seconds, spectra_config.epoch_seconds)
+    chunk_epochs = coalesce(chunk_epochs, spectra_config.chunk_epochs)
+    if not math.isfinite(epoch_seconds) or epoch_seconds <= 0:
+        raise ValueError("epoch_seconds must be a positive finite number")
+    if chunk_epochs <= 0:
+        raise ValueError("chunk_epochs must be positive")
+    scores = scoring_path(edf_path, rawdata_root, derivatives_root)
+    artifacts = (
+        None
+        if include_artifacts
+        else artifact_path(edf_path, rawdata_root, derivatives_root)
+    )
+    correlations, channels = compute_state_channel_correlations(
+        fif_path,
+        scores,
+        artifact_path=artifacts,
+        epoch_seconds=epoch_seconds,
+        chunk_epochs=chunk_epochs,
+    )
+    return CorrelationResult(
+        edf_path=edf_path,
+        fif_path=fif_path,
+        scoring_path=scores,
+        artifact_path=artifacts,
+        correlations=correlations,
+        channels=channels,
+    )
+
+
+def compute_session_correlations(
+    subject: str | int,
+    *,
+    date: str | int | None = None,
+    session: str | int | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+    epoch_seconds: float | None = None,
+    chunk_epochs: int | None = None,
+    include_artifacts: bool = False,
+) -> list[CorrelationResult]:
+    """Correlate channel pairs for every recording in one subject's session.
+
+    The roots default to the active data-location profile. Count the epochs
+    above review thresholds with `correlation_review(result.correlations, ...)`.
+    """
+    rawdata_root, derivatives_root = resolve_data_roots(rawdata_root, derivatives_root)
+    return [
+        compute_recording_correlations(
+            edf_path,
+            fif_path,
+            rawdata_root=rawdata_root,
+            derivatives_root=derivatives_root,
+            epoch_seconds=epoch_seconds,
+            chunk_epochs=chunk_epochs,
+            include_artifacts=include_artifacts,
+        )
+        for edf_path, fif_path in select_recordings(
+            rawdata_root, derivatives_root, subject=subject, date=date, session=session
+        )
+    ]
+
+
+def plot_correlations(
+    result: CorrelationResult, *, label: str | None = None, bins: int = 40
+) -> "Figure":
+    """Plot a result's per-pair, per-state correlation histograms."""
+    if bins < 2:
+        raise ValueError("bins must be at least 2")
+    return plot_correlation_distributions(
+        result.correlations,
+        title=f"{label or result.recording} — EEG/EMG Pearson correlation",
+        bins=bins,
+    )
+
+
+def save_correlations(
+    result: CorrelationResult, save_dir: str | Path, figure: "Figure"
+) -> list[Path]:
+    """Write a `plot_correlations()` figure as a PDF into `save_dir`."""
+    return [
+        save_pdf(
+            figure, Path(save_dir) / f"{result.recording}_sleep_state_correlations.pdf"
+        )
+    ]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -188,14 +311,32 @@ def _review_threshold(
     return None
 
 
-def _print_review_counts(
+@dataclass(frozen=True, eq=False)
+class CorrelationReview:
+    """Epochs whose absolute Pearson r exceeds its pair type's review threshold."""
+
+    # One row per channel pair and sleep state: channel_1, channel_2,
+    # sleep_state (name), flagged_epochs, epochs, percent, threshold.
+    by_pair: pd.DataFrame
+    flagged_epochs: int  # unique epochs above any pair's threshold
+    valid_epochs: int
+
+    @property
+    def percent(self) -> float:
+        return 100.0 * self.flagged_epochs / self.valid_epochs if self.valid_epochs else 0.0
+
+
+def correlation_review(
     correlations: pd.DataFrame,
     *,
     eeg_eeg_threshold: float,
     eeg_emg_threshold: float,
-) -> None:
-    """Print pair/state counts and unique epochs exceeding review thresholds."""
-    print("Review-threshold epochs (absolute Pearson r):")
+) -> CorrelationReview:
+    """Count the epochs above review thresholds, per pair/state and overall.
+
+    Pairs other than EEG–EEG and EEG–EMG have no threshold and are left out.
+    """
+    rows: list[dict[str, object]] = []
     flagged_epoch_ids: set[int] = set()
     grouped = correlations.groupby(
         [
@@ -213,7 +354,7 @@ def _print_review_counts(
         channel_1_type,
         channel_2_type,
         state,
-    ), rows in grouped:
+    ), pair_rows in grouped:
         threshold = _review_threshold(
             str(channel_1_type),
             str(channel_2_type),
@@ -222,20 +363,60 @@ def _print_review_counts(
         )
         if threshold is None:
             continue
-        flagged = rows["pearson_r"].abs() > threshold
+        flagged = pair_rows["pearson_r"].abs() > threshold
         flagged_count = int(flagged.sum())
-        flagged_epoch_ids.update(rows.loc[flagged, "epoch_id"].astype(int))
-        percentage = 100.0 * flagged_count / len(rows)
-        print(
-            f"  {channel_1} ↔ {channel_2} — {_plotted_states()[int(state)]}: "
-            f"{flagged_count:,} / {len(rows):,} ({percentage:.2f}%) "
-            f"above |r| > {threshold:.2f}"
+        flagged_epoch_ids.update(pair_rows.loc[flagged, "epoch_id"].astype(int))
+        rows.append(
+            {
+                "channel_1": channel_1,
+                "channel_2": channel_2,
+                "sleep_state": _plotted_states()[int(state)],
+                "flagged_epochs": flagged_count,
+                "epochs": len(pair_rows),
+                "percent": 100.0 * flagged_count / len(pair_rows),
+                "threshold": threshold,
+            }
         )
-    valid_epoch_count = correlations["epoch_id"].nunique()
-    percentage = 100.0 * len(flagged_epoch_ids) / valid_epoch_count
+    return CorrelationReview(
+        by_pair=pd.DataFrame(rows, columns=_REVIEW_COLUMNS),
+        flagged_epochs=len(flagged_epoch_ids),
+        valid_epochs=int(correlations["epoch_id"].nunique()),
+    )
+
+
+_REVIEW_COLUMNS = [
+    "channel_1",
+    "channel_2",
+    "sleep_state",
+    "flagged_epochs",
+    "epochs",
+    "percent",
+    "threshold",
+]
+
+
+def _print_review_counts(
+    correlations: pd.DataFrame,
+    *,
+    eeg_eeg_threshold: float,
+    eeg_emg_threshold: float,
+) -> None:
+    """Print pair/state counts and unique epochs exceeding review thresholds."""
+    review = correlation_review(
+        correlations,
+        eeg_eeg_threshold=eeg_eeg_threshold,
+        eeg_emg_threshold=eeg_emg_threshold,
+    )
+    print("Review-threshold epochs (absolute Pearson r):")
+    for row in review.by_pair.itertuples(index=False):
+        print(
+            f"  {row.channel_1} ↔ {row.channel_2} — {row.sleep_state}: "
+            f"{row.flagged_epochs:,} / {row.epochs:,} ({row.percent:.2f}%) "
+            f"above |r| > {row.threshold:.2f}"
+        )
     print(
         f"  Unique epochs above any configured threshold: "
-        f"{len(flagged_epoch_ids):,} / {valid_epoch_count:,} ({percentage:.2f}%)"
+        f"{review.flagged_epochs:,} / {review.valid_epochs:,} ({review.percent:.2f}%)"
     )
 
 
@@ -243,38 +424,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        qc_thresholds = load_qc_thresholds(args.qc_config)
-        spectra_config = load_spectra_config(args.spectra_config)
+        thresholds = with_overrides(
+            load_qc_thresholds(args.qc_config),
+            eeg_eeg_threshold=args.eeg_eeg_threshold,
+            eeg_emg_threshold=args.eeg_emg_threshold,
+        )
+        spectra_config = with_overrides(
+            load_spectra_config(args.spectra_config),
+            epoch_seconds=args.epoch_seconds,
+            chunk_epochs=args.chunk_epochs,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         parser.error(str(exc))
-    args.eeg_eeg_threshold = coalesce(
-        args.eeg_eeg_threshold, qc_thresholds.eeg_eeg_threshold
-    )
-    args.eeg_emg_threshold = coalesce(
-        args.eeg_emg_threshold, qc_thresholds.eeg_emg_threshold
-    )
-    args.epoch_seconds = coalesce(args.epoch_seconds, spectra_config.epoch_seconds)
-    args.chunk_epochs = coalesce(args.chunk_epochs, spectra_config.chunk_epochs)
-
-    if not math.isfinite(args.epoch_seconds) or args.epoch_seconds <= 0:
-        parser.error("--epoch-seconds must be a positive finite number")
-    if args.chunk_epochs <= 0:
-        parser.error("--chunk-epochs must be positive")
     if args.bins < 2:
         parser.error("--bins must be at least 2")
-    for option, threshold in (
-        ("--eeg-eeg-threshold", args.eeg_eeg_threshold),
-        ("--eeg-emg-threshold", args.eeg_emg_threshold),
-    ):
-        if not math.isfinite(threshold) or not 0 <= threshold <= 1:
-            parser.error(f"{option} must be between 0 and 1")
     if args.no_show and args.save_dir is None:
         parser.error("--no-show requires --save-dir")
 
-    rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
-    derivatives_root = Path(
-        args.derivatives_root or get_derivatives_root()
-    ).resolve(strict=False)
+    rawdata_root, derivatives_root = resolve_data_roots(
+        args.rawdata_root, args.derivatives_root
+    )
     pairs = select_recordings(
         rawdata_root,
         derivatives_root,
@@ -283,45 +452,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         session=args.session,
     )
 
-    figures = []
     for edf_path, fif_path in pairs:
-        scores = scoring_path(edf_path, rawdata_root, derivatives_root)
-        artifacts = (
-            None
-            if args.include_artifacts
-            else artifact_path(edf_path, rawdata_root, derivatives_root)
-        )
         print(f"FIF: {fif_path}")
-        print(f"Scoring: {scores}")
-        print(f"Artifacts: {artifacts or 'included/not available'}")
-        correlations, channels = compute_state_channel_correlations(
+        result = compute_recording_correlations(
+            edf_path,
             fif_path,
-            scores,
-            artifact_path=artifacts,
-            epoch_seconds=args.epoch_seconds,
-            chunk_epochs=args.chunk_epochs,
+            rawdata_root=rawdata_root,
+            derivatives_root=derivatives_root,
+            epoch_seconds=spectra_config.epoch_seconds,
+            chunk_epochs=spectra_config.chunk_epochs,
+            include_artifacts=args.include_artifacts,
         )
-        print(f"Channels: {', '.join(channels)}")
-        _print_summary(correlations)
+        print(f"Scoring: {result.scoring_path}")
+        print(f"Artifacts: {result.artifact_path or 'included/not available'}")
+        print(f"Channels: {', '.join(result.channels)}")
+        _print_summary(result.correlations)
         _print_review_counts(
-            correlations,
-            eeg_eeg_threshold=args.eeg_eeg_threshold,
-            eeg_emg_threshold=args.eeg_emg_threshold,
+            result.correlations,
+            eeg_eeg_threshold=thresholds.eeg_eeg_threshold,
+            eeg_emg_threshold=thresholds.eeg_emg_threshold,
         )
-        figure = plot_correlation_distributions(
-            correlations,
-            title=(
-                f"{args.subject} — {args.date or args.session} — "
-                "EEG/EMG Pearson correlation"
-            ),
-            bins=args.bins,
+        figure = plot_correlations(
+            result, label=f"{args.subject} — {args.date or args.session}", bins=args.bins
         )
-        figures.append(figure)
         if args.save_dir is not None:
             save_dir = quality_control_output_path(
                 args.save_dir, edf_path, rawdata_root, derivatives_root
             )
-            save_pdf(figure, save_dir / f"{edf_path.stem}_sleep_state_correlations.pdf")
+            save_correlations(result, save_dir, figure)
 
     if not args.no_show:
         import matplotlib.pyplot as plt

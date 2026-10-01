@@ -14,8 +14,9 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
 - `notebooks/`: exploratory jupyter notebooks for development.
 - `hypnose_eeg/`: the installable package (`pip install -e .`); every module
   imports from any directory.
-- `src/`: pipeline entry points that chain the package's command-line steps,
-  run from the repository root (`python -m src.run_pipeline`).
+- `src/`: thin `python -m src.<stage>` entry points for the pipeline stages in
+  `hypnose_eeg/pipeline/`, run from the repository root
+  (`python -m src.run_pipeline`).
 - `tests/`: fixtures and integration tests for quality control.
 - `docs/`: contracts and operations runbooks.
 - `cache/`: optional ephemeral local staging.
@@ -25,6 +26,9 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
   command-line entry points.
 - `io/`: recording discovery, data-location configuration, and MNE file-loading
   helpers.
+- `pipeline/`: the pipeline stages (preprocessing, sleep scoring, QC), the full
+  and batch runs that chain them, and the QC review. Each stage calls the
+  package's command-line steps in-process.
 - `preprocessing/`: preprocessing workflows.
 - `qc/`: quality-control reports and plots.
 - `sleep_scoring/`: automated Somnotate sleep scoring and the interactive
@@ -33,10 +37,11 @@ Raw and processed/derivatives data live outside the repo and are accessed via co
   sleep-state handling.
 
 Workflow modules are both command-line entry points (`python -m
-hypnose_eeg.qc.spectra --help`) and Python APIs. `qc/spectra.py` and
-`sleep_scoring/view_scoring.py` separate computing results, plotting them,
-and the CLI, so their results can be used without the CLI. Configuration is read from
-`configs/` on first use, not at import time.
+hypnose_eeg.qc.spectra --help`) and Python APIs. The `qc/` modules and
+`sleep_scoring/view_scoring.py` separate computing results, plotting or saving
+them, and the CLI, so their results can be used without the CLI.
+`hypnose_eeg/api.py` is the keyword-argument facade over the pipeline stages.
+Configuration is read from `configs/` on first use, not at import time.
 
 ## Sections for inclusion
 - `io/`: source and sink connectors, contracts, checkpoint helpers.

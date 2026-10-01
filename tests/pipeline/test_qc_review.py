@@ -9,8 +9,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from src import qc_review
-from src.qc_review import format_review, resolve_subjects, review_subject
+from hypnose_eeg.pipeline import qc_review
+from hypnose_eeg.pipeline.qc_review import (
+    format_review,
+    resolve_subjects,
+    review_subject,
+    review_subjects,
+)
 
 QC_FOLDER = "eeg/quality_control"
 
@@ -217,6 +222,23 @@ class QcReviewTests(unittest.TestCase):
             )
 
         self.assertIn("[REVIEW] sub-066/ses-001_date-20260717", out.getvalue())
+
+    def test_review_subjects_follows_the_given_output_overrides(self):
+        qc_dir = self.root / "sub-066" / "ses-001_date-20260717" / "analysis" / "qc"
+        qc_dir.mkdir(parents=True)
+        (qc_dir / "rec_qc_summary.csv").write_text(qc_summary_csv(("a", "review")))
+
+        reviews = review_subjects(
+            ["all"],
+            derivatives_root=self.root,
+            env={
+                "HYPNOSE_EEG_OUTPUT_ROOT": "analysis",
+                "HYPNOSE_EEG_OUTPUT_DIR_QUALITY_CONTROL": "qc",
+            },
+        )
+
+        self.assertEqual([review.subject for review in reviews], ["sub-066"])
+        self.assertEqual([session.status for session in reviews[0].sessions], ["review"])
 
 
 if __name__ == "__main__":

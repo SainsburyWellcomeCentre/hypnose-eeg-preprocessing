@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, fields
 from functools import cache
 from pathlib import Path
 from typing import Mapping
@@ -33,6 +34,39 @@ class QCThresholds:
     eeg_emg_threshold: float
     max_correlation_review_percent: float
 
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if not math.isfinite(value):
+                raise ValueError(f"{field.name} must be a finite number")
+            if field.name in _PERCENT_FIELDS and not 0 <= value <= 100:
+                raise ValueError(f"{field.name} must be between 0 and 100")
+            if field.name in _FRACTION_FIELDS and not 0 <= value <= 1:
+                raise ValueError(f"{field.name} must be between 0 and 1")
+            if field.name in _POSITIVE_FIELDS and value <= 0:
+                raise ValueError(f"{field.name} must be positive")
+            if value < 0:
+                raise ValueError(f"{field.name} must not be negative")
+
+
+_PERCENT_FIELDS = frozenset(
+    {
+        "max_gap_percent",
+        "max_low_confidence_percent",
+        "max_undefined_percent",
+        "max_wake_percent",
+        "max_nrem_percent",
+        "max_rem_percent",
+        "max_artifact_percent",
+        "max_prescan_excluded_percent",
+        "max_correlation_review_percent",
+    }
+)
+_FRACTION_FIELDS = frozenset(
+    {"confidence_threshold", "eeg_eeg_threshold", "eeg_emg_threshold"}
+)
+_POSITIVE_FIELDS = frozenset({"min_gap_s", "gap_scan_chunk_seconds"})
+
 
 def load_performance_check(
     path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
@@ -53,6 +87,15 @@ def load_performance_check(
 def default_performance_check() -> dict[str, int]:
     """Return the repository's severity ranking, loaded on first use."""
     return load_performance_check()
+
+
+@cache
+def default_qc_thresholds() -> QCThresholds:
+    """Return the repository's quality-control thresholds, loaded on first use.
+
+    Override single values with `with_overrides(default_qc_thresholds(), ...)`.
+    """
+    return load_qc_thresholds()
 
 
 def load_qc_thresholds(path: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH) -> QCThresholds:

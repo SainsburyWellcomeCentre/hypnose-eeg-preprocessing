@@ -12,7 +12,7 @@ the analyzed recording's stem -- for example
 from __future__ import annotations
 
 import argparse
-import math
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Sequence
 
@@ -28,7 +28,7 @@ from hypnose_eeg.io.output_paths import (
     recording_output_name,
     save_csv,
 )
-from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
+from hypnose_eeg.io.repository_paths import resolve_data_roots
 from hypnose_eeg.qc.recording_integrity import check_pair
 from hypnose_eeg.utils.recording_selection import select_recordings
 from hypnose_eeg.qc.artifacts import (
@@ -46,11 +46,15 @@ from hypnose_eeg.qc.spectra import (
     build_spectral_quality_report,
     load_spectra_config,
 )
-from hypnose_eeg.qc.thresholds import default_performance_check, load_qc_thresholds
+from hypnose_eeg.qc.thresholds import (
+    QCThresholds,
+    default_performance_check,
+    load_qc_thresholds,
+)
 from hypnose_eeg.utils.config import (
     DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
     DEFAULT_SPECTRA_CONFIG_PATH,
-    coalesce,
+    with_overrides,
 )
 from hypnose_eeg.utils.epochs import infer_epoch_seconds
 from hypnose_eeg.utils.provenance import write_provenance
@@ -315,11 +319,6 @@ def _correlation_threshold(
     return None
 
 
-def _validate_fraction(parser: argparse.ArgumentParser, name: str, value: float) -> None:
-    if not math.isfinite(value) or not 0 <= value <= 100:
-        parser.error(f"{name} must be between 0 and 100")
-
-
 def paired_output_paths(requested: str | Path) -> tuple[Path, Path]:
     """Return paired CSV and parquet paths for a requested summary or review output."""
     path = Path(requested)
@@ -342,6 +341,60 @@ def summary_parquet_table(sections: pd.DataFrame) -> pd.DataFrame:
     for column in ("value", "threshold"):
         table[column] = ["" if pd.isna(value) else str(value) for value in table[column]]
     return table.astype({column: str for column in SECTION_COLUMNS})
+
+
+@dataclass(frozen=True)
+class SummaryQCSettings:
+    """The thresholds and analysis settings every summary QC section uses.
+
+    `spectra` supplies the analysis epoch, read chunking, Welch window, and
+    frequency range shared by the correlation, spectra, and EMG sections, as
+    well as the spectral quality expectations. `qc_config`/`spectra_config`
+    name the files they were loaded from, for the provenance sidecar.
+    """
+
+    thresholds: QCThresholds
+    spectra: SpectraConfig
+    qc_config: str | None = None
+    spectra_config: str | None = None
+
+
+# Spectra-config fields `summary_qc_settings` accepts as overrides; every other
+# override names a `QCThresholds` field.
+SPECTRA_OVERRIDES = frozenset(
+    {"epoch_seconds", "chunk_epochs", "welch_seconds", "fmin_hz", "fmax_hz"}
+)
+
+
+def summary_qc_settings(
+    *,
+    qc_config: str | Path = DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
+    spectra_config: str | Path = DEFAULT_SPECTRA_CONFIG_PATH,
+    **overrides: float | int | None,
+) -> SummaryQCSettings:
+    """Load the QC and spectra YAMLs, then apply any overrides that are not None.
+
+    Overrides are `QCThresholds` fields (`max_artifact_percent=10.0`) or the
+    spectra analysis fields in `SPECTRA_OVERRIDES` (`epoch_seconds=4.0`).
+    Raises ValueError for an unknown name or an out-of-range value.
+    """
+    spectra_names = SPECTRA_OVERRIDES & overrides.keys()
+    threshold_names = overrides.keys() - spectra_names
+    unknown = threshold_names - {field.name for field in fields(QCThresholds)}
+    if unknown:
+        raise ValueError(f"Unknown summary QC setting(s): {', '.join(sorted(unknown))}")
+    return SummaryQCSettings(
+        thresholds=with_overrides(
+            load_qc_thresholds(qc_config),
+            **{name: overrides[name] for name in threshold_names},
+        ),
+        spectra=with_overrides(
+            load_spectra_config(spectra_config),
+            **{name: overrides[name] for name in spectra_names},
+        ),
+        qc_config=str(qc_config),
+        spectra_config=str(spectra_config),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -424,28 +477,31 @@ def run_qc(
     fif_path: Path,
     scoring_file: Path,
     artifact_file: Path,
-    args: argparse.Namespace,
-    spectra_config: SpectraConfig,
+    settings: SummaryQCSettings | None = None,
     prescan_file: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run all QC sections for one recording and return summary/review tables.
 
+    `settings` defaults to the repository's QC and spectra configuration.
     `prescan_file` is the recording's prescan artifact periods, or None when
     the prescan has not run (which sends the artifact_prescan section to review).
     """
+    settings = settings or summary_qc_settings()
+    qc_thresholds = settings.thresholds
+    spectra_config = settings.spectra
     sections: list[dict[str, object]] = []
     reviews: list[dict[str, object]] = []
 
     integrity, gaps = check_pair(
         edf_path,
         fif_path,
-        duration_tolerance_s=args.duration_tolerance,
-        min_gap_s=args.min_gap,
-        chunk_duration_s=args.gap_scan_chunk_seconds,
-        max_gap_percent=args.max_gap_percent,
-        max_longest_gap_s=args.max_longest_gap,
+        duration_tolerance_s=qc_thresholds.duration_tolerance_s,
+        min_gap_s=qc_thresholds.min_gap_s,
+        chunk_duration_s=qc_thresholds.gap_scan_chunk_seconds,
+        max_gap_percent=qc_thresholds.max_gap_percent,
+        max_longest_gap_s=qc_thresholds.max_longest_gap_s,
     )
-    duration_ok = abs(integrity.edf_fif_difference_s) <= args.duration_tolerance
+    duration_ok = abs(integrity.edf_fif_difference_s) <= qc_thresholds.duration_tolerance_s
     integrity_status = "pass" if duration_ok else "fail"
     _section(
         sections,
@@ -453,7 +509,7 @@ def run_qc(
         integrity_status,
         "edf_fif_duration_difference_s",
         integrity.edf_fif_difference_s,
-        args.duration_tolerance,
+        qc_thresholds.duration_tolerance_s,
         f"{len(gaps)} gap(s) detected ({integrity.edf_gap_total_s:.1f}s total, "
         f"{integrity.edf_gap_percent:.2f}% of recording, "
         f"longest {integrity.edf_longest_gap_s:.1f}s)",
@@ -466,13 +522,13 @@ def run_qc(
             end_s=gap.end_s,
             metric="gap_duration_s",
             value=gap.duration_s,
-            threshold=args.min_gap,
+            threshold=qc_thresholds.min_gap_s,
             reason=f"{gap.kind}: {gap.detail}",
         )
 
     raw_scores = pd.read_parquet(scoring_file)
     scored = prepare_scoring_output(
-        raw_scores, confidence_threshold=args.confidence_threshold
+        raw_scores, confidence_threshold=qc_thresholds.confidence_threshold
     )
     scoring_epoch_s = infer_epoch_seconds(scored)
     signal = (
@@ -485,16 +541,16 @@ def run_qc(
     low_percent = 100.0 * int(low_confidence.sum()) / signal_count if signal_count else 100.0
     undefined = scored["predicted_state"].eq("Undefined")
     undefined_percent = 100.0 * int(undefined.sum()) / len(scored) if len(scored) else 100.0
-    scoring_status = "review" if low_percent > args.max_low_confidence_percent else "pass"
+    scoring_status = "review" if low_percent > qc_thresholds.max_low_confidence_percent else "pass"
     _section(
         sections,
         "somnotate_scoring",
         scoring_status,
         "low_confidence_percent",
         low_percent,
-        args.max_low_confidence_percent,
+        qc_thresholds.max_low_confidence_percent,
         f"undefined={undefined_percent:.2f}% (informational; not a review criterion; "
-        f"configured expectation {args.max_undefined_percent:.2f}%)",
+        f"configured expectation {qc_thresholds.max_undefined_percent:.2f}%)",
     )
     scoring_review = scored.loc[low_confidence | undefined]
     for _, row in scoring_review.iterrows():
@@ -507,15 +563,15 @@ def run_qc(
             sleep_state=row["predicted_state"],
             metric="predicted_probability",
             value=row["predicted_probability"],
-            threshold=args.confidence_threshold,
+            threshold=qc_thresholds.confidence_threshold,
             reason="undefined/unscored epoch" if is_undefined else "low prediction confidence",
         )
 
     proportion_report = sleep_state_proportion_report(
         sleep_state_proportions(scored),
-        max_wake_percent=args.max_wake_percent,
-        max_nrem_percent=args.max_nrem_percent,
-        max_rem_percent=args.max_rem_percent,
+        max_wake_percent=qc_thresholds.max_wake_percent,
+        max_nrem_percent=qc_thresholds.max_nrem_percent,
+        max_rem_percent=qc_thresholds.max_rem_percent,
     )
     sections.append(sleep_state_proportion_section(proportion_report))
 
@@ -529,14 +585,14 @@ def run_qc(
         if not artifact_report.overall.empty
         else 0.0
     )
-    artifact_status = "review" if max_channel_percent > args.max_artifact_percent else "pass"
+    artifact_status = "review" if max_channel_percent > qc_thresholds.max_artifact_percent else "pass"
     _section(
         sections,
         "artifacts",
         artifact_status,
         "maximum_channel_artifact_percent",
         max_channel_percent,
-        args.max_artifact_percent,
+        qc_thresholds.max_artifact_percent,
         f"{int(flagged.sum())} flagged epochs ({artifact_percent:.2f}% overall)",
     )
     for _, row in artifact_epochs.loc[flagged].iterrows():
@@ -558,7 +614,7 @@ def run_qc(
         pd.read_parquet(prescan_file) if prescan_file is not None else None,
         scored,
         scoring_epoch_s=scoring_epoch_s,
-        max_excluded_percent=args.max_prescan_excluded_percent,
+        max_excluded_percent=qc_thresholds.max_prescan_excluded_percent,
     )
     sections.append(prescan_section)
     reviews.extend(prescan_reviews)
@@ -567,8 +623,8 @@ def run_qc(
         fif_path,
         scoring_file,
         artifact_path=artifact_file,
-        epoch_seconds=args.analysis_epoch_seconds,
-        chunk_epochs=args.chunk_epochs,
+        epoch_seconds=spectra_config.epoch_seconds,
+        chunk_epochs=spectra_config.chunk_epochs,
     )
     pair_types = list(
         zip(
@@ -580,8 +636,8 @@ def run_qc(
         pair: _correlation_threshold(
             pair[0],
             pair[1],
-            eeg_eeg_threshold=args.eeg_eeg_threshold,
-            eeg_emg_threshold=args.eeg_emg_threshold,
+            eeg_eeg_threshold=qc_thresholds.eeg_eeg_threshold,
+            eeg_emg_threshold=qc_thresholds.eeg_emg_threshold,
         )
         for pair in set(pair_types)
     }
@@ -595,7 +651,7 @@ def run_qc(
         100.0 * flagged_epoch_count / valid_epoch_count if valid_epoch_count else 100.0
     )
     correlation_status = (
-        "review" if correlation_percent > args.max_correlation_review_percent else "pass"
+        "review" if correlation_percent > qc_thresholds.max_correlation_review_percent else "pass"
     )
     _section(
         sections,
@@ -603,7 +659,7 @@ def run_qc(
         correlation_status,
         "review_epoch_percent",
         correlation_percent,
-        args.max_correlation_review_percent,
+        qc_thresholds.max_correlation_review_percent,
         f"{flagged_epoch_count}/{valid_epoch_count} epochs; channels={correlation_channels}",
     )
     for row in flagged_correlations.itertuples(index=False):
@@ -611,7 +667,7 @@ def run_qc(
             reviews,
             section="channel_correlation",
             start_s=float(row.time_s),
-            end_s=float(row.time_s) + args.analysis_epoch_seconds,
+            end_s=float(row.time_s) + spectra_config.epoch_seconds,
             sleep_state=str(
                 spectra_config.sleep_state_names.get(int(row.sleep_state), row.sleep_state)
             ),
@@ -628,11 +684,11 @@ def run_qc(
         artifact_path=(
             None if spectra_config.include_artifacts else artifact_file
         ),
-        epoch_seconds=args.analysis_epoch_seconds,
-        welch_seconds=args.welch_seconds,
-        fmin_hz=args.fmin,
-        fmax_hz=args.fmax,
-        chunk_epochs=args.chunk_epochs,
+        epoch_seconds=spectra_config.epoch_seconds,
+        welch_seconds=spectra_config.welch_seconds,
+        fmin_hz=spectra_config.fmin_hz,
+        fmax_hz=spectra_config.fmax_hz,
+        chunk_epochs=spectra_config.chunk_epochs,
     )
 
     emg_rms, emg_channels = compute_state_emg_rms(
@@ -641,8 +697,8 @@ def run_qc(
         artifact_path=(
             None if spectra_config.include_artifacts else artifact_file
         ),
-        epoch_seconds=args.analysis_epoch_seconds,
-        chunk_epochs=args.chunk_epochs,
+        epoch_seconds=spectra_config.epoch_seconds,
+        chunk_epochs=spectra_config.chunk_epochs,
     )
     spectral_report = build_spectral_quality_report(
         frequencies,
@@ -677,169 +733,145 @@ def _print_results(sections: pd.DataFrame, reviews: pd.DataFrame) -> None:
         print(f"Unique review start times: {reviews['start_s'].nunique():,}")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        spectra_config = load_spectra_config(args.spectra_config)
-    except (KeyError, TypeError, ValueError) as exc:
-        parser.error(str(exc))
-    try:
-        qc_thresholds = load_qc_thresholds(args.qc_config)
-    except (KeyError, TypeError, ValueError) as exc:
-        parser.error(str(exc))
+@dataclass(frozen=True)
+class QCInputs:
+    """The files one recording's summary QC reads, and the roots they resolve under."""
 
-    if args.analysis_epoch_seconds is None:
-        args.analysis_epoch_seconds = spectra_config.epoch_seconds
-    if args.chunk_epochs is None:
-        args.chunk_epochs = spectra_config.chunk_epochs
-    if args.welch_seconds is None:
-        args.welch_seconds = spectra_config.welch_seconds
-    if args.fmin is None:
-        args.fmin = spectra_config.fmin_hz
-    if args.fmax is None:
-        args.fmax = spectra_config.fmax_hz
+    edf_path: Path
+    fif_path: Path
+    scoring_file: Path
+    artifact_file: Path
+    prescan_file: Path | None  # None when the prescan has not run
+    rawdata_root: Path
+    derivatives_root: Path
 
-    args.duration_tolerance = coalesce(
-        args.duration_tolerance, qc_thresholds.duration_tolerance_s
-    )
-    args.min_gap = coalesce(args.min_gap, qc_thresholds.min_gap_s)
-    args.gap_scan_chunk_seconds = coalesce(
-        args.gap_scan_chunk_seconds, qc_thresholds.gap_scan_chunk_seconds
-    )
-    args.max_gap_percent = coalesce(
-        args.max_gap_percent, qc_thresholds.max_gap_percent
-    )
-    args.max_longest_gap = coalesce(
-        args.max_longest_gap, qc_thresholds.max_longest_gap_s
-    )
-    args.confidence_threshold = coalesce(
-        args.confidence_threshold, qc_thresholds.confidence_threshold
-    )
-    args.max_low_confidence_percent = coalesce(
-        args.max_low_confidence_percent, qc_thresholds.max_low_confidence_percent
-    )
-    args.max_undefined_percent = coalesce(
-        args.max_undefined_percent, qc_thresholds.max_undefined_percent
-    )
-    args.max_wake_percent = coalesce(args.max_wake_percent, qc_thresholds.max_wake_percent)
-    args.max_nrem_percent = coalesce(args.max_nrem_percent, qc_thresholds.max_nrem_percent)
-    args.max_rem_percent = coalesce(args.max_rem_percent, qc_thresholds.max_rem_percent)
-    args.max_artifact_percent = coalesce(
-        args.max_artifact_percent, qc_thresholds.max_artifact_percent
-    )
-    args.max_prescan_excluded_percent = coalesce(
-        args.max_prescan_excluded_percent, qc_thresholds.max_prescan_excluded_percent
-    )
-    args.eeg_eeg_threshold = coalesce(
-        args.eeg_eeg_threshold, qc_thresholds.eeg_eeg_threshold
-    )
-    args.eeg_emg_threshold = coalesce(
-        args.eeg_emg_threshold, qc_thresholds.eeg_emg_threshold
-    )
-    args.max_correlation_review_percent = coalesce(
-        args.max_correlation_review_percent,
-        qc_thresholds.max_correlation_review_percent,
-    )
 
-    for name in (
-        "max_low_confidence_percent",
-        "max_undefined_percent",
-        "max_wake_percent",
-        "max_nrem_percent",
-        "max_rem_percent",
-        "max_artifact_percent",
-        "max_prescan_excluded_percent",
-        "max_correlation_review_percent",
-        "max_gap_percent",
-    ):
-        _validate_fraction(parser, f"--{name.replace('_', '-')}", getattr(args, name))
-    for name in ("confidence_threshold", "eeg_eeg_threshold", "eeg_emg_threshold"):
-        value = getattr(args, name)
-        if not math.isfinite(value) or not 0 <= value <= 1:
-            parser.error(f"--{name.replace('_', '-')} must be between 0 and 1")
-    for name in (
-        "analysis_epoch_seconds",
-        "duration_tolerance",
-        "min_gap",
-        "gap_scan_chunk_seconds",
-        "max_longest_gap",
-        "welch_seconds",
-        "fmin",
-        "fmax",
-    ):
-        value = getattr(args, name)
-        if not math.isfinite(value) or value < 0:
-            parser.error(f"--{name.replace('_', '-')} must be non-negative and finite")
-    if args.analysis_epoch_seconds == 0 or args.min_gap == 0 or args.welch_seconds == 0:
-        parser.error("epoch, gap, and Welch durations must be positive")
-    if args.fmax <= args.fmin:
-        parser.error("--fmax must be greater than --fmin")
-    if args.chunk_epochs <= 0:
-        parser.error("--chunk-epochs must be positive")
+@dataclass(frozen=True, eq=False)
+class SessionQC:
+    """One recording's section results and review ranges, with what produced them."""
 
-    rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
-    derivatives_root = Path(
-        args.derivatives_root or get_derivatives_root()
-    ).resolve(strict=False)
-    try:
-        pairs = select_recordings(
-            rawdata_root,
-            derivatives_root,
-            subject=args.subject,
-            date=args.date,
-            session=args.session,
+    inputs: QCInputs
+    settings: SummaryQCSettings
+    sections: pd.DataFrame
+    reviews: pd.DataFrame
+
+    @property
+    def status(self) -> str:
+        """The most severe section status: pass, review, or fail."""
+        return overall_status(self.sections)
+
+
+def find_qc_inputs(
+    subject: str | int,
+    *,
+    date: str | int | None = None,
+    session: str | int | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+) -> QCInputs:
+    """Resolve the one recording a session selects and the outputs QC reads for it.
+
+    The roots default to the active data-location profile. Raises ValueError
+    unless the selection matches exactly one recording, and FileNotFoundError
+    when its artifact parquet is missing.
+    """
+    rawdata_root, derivatives_root = resolve_data_roots(rawdata_root, derivatives_root)
+    pairs = select_recordings(
+        rawdata_root, derivatives_root, subject=subject, date=date, session=session
+    )
+    if len(pairs) != 1:
+        raise ValueError(
+            f"Selection matched {len(pairs)} recordings; choose one recording session"
         )
-        if len(pairs) != 1:
-            raise ValueError(
-                f"Selection matched {len(pairs)} recordings; choose one recording session"
-            )
-        edf_path, fif_path = pairs[0]
-        scoring_file = scoring_path(edf_path, rawdata_root, derivatives_root)
-        artifact_file = artifact_path(edf_path, rawdata_root, derivatives_root)
-        if artifact_file is None:
-            raise FileNotFoundError(f"No artifact parquet found for {edf_path.name}")
-        prescan_file = prescan_artifact_path(edf_path, rawdata_root, derivatives_root)
-        print(f"EDF: {edf_path}")
-        print(f"FIF: {fif_path}")
-        print(f"Scoring: {scoring_file}")
-        print(f"Artifacts: {artifact_file}")
-        print(f"Prescan artifacts: {prescan_file or 'not found'}")
-        sections, reviews = run_qc(
-            edf_path,
-            fif_path,
-            scoring_file,
-            artifact_file,
-            args,
-            spectra_config,
-            prescan_file=prescan_file,
-        )
-    except (ImportError, OSError, ValueError) as exc:
-        parser.error(str(exc))
+    edf_path, fif_path = pairs[0]
+    artifact_file = artifact_path(edf_path, rawdata_root, derivatives_root)
+    if artifact_file is None:
+        raise FileNotFoundError(f"No artifact parquet found for {edf_path.name}")
+    return QCInputs(
+        edf_path=edf_path,
+        fif_path=fif_path,
+        scoring_file=scoring_path(edf_path, rawdata_root, derivatives_root),
+        artifact_file=artifact_file,
+        prescan_file=prescan_artifact_path(edf_path, rawdata_root, derivatives_root),
+        rawdata_root=rawdata_root,
+        derivatives_root=derivatives_root,
+    )
 
-    _print_results(sections, reviews)
+
+def compute_qc(inputs: QCInputs, settings: SummaryQCSettings | None = None) -> SessionQC:
+    """Run every QC section for resolved inputs; nothing is written."""
+    settings = settings or summary_qc_settings()
+    sections, reviews = run_qc(
+        inputs.edf_path,
+        inputs.fif_path,
+        inputs.scoring_file,
+        inputs.artifact_file,
+        settings,
+        prescan_file=inputs.prescan_file,
+    )
+    return SessionQC(inputs=inputs, settings=settings, sections=sections, reviews=reviews)
+
+
+def compute_session_qc(
+    subject: str | int,
+    *,
+    date: str | int | None = None,
+    session: str | int | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+    settings: SummaryQCSettings | None = None,
+) -> SessionQC:
+    """Run every QC section for one subject's session; nothing is written.
+
+    Override thresholds with `summary_qc_settings(max_artifact_percent=10.0)`;
+    write the tables with `save_session_qc()`.
+    """
+    inputs = find_qc_inputs(
+        subject,
+        date=date,
+        session=session,
+        rawdata_root=rawdata_root,
+        derivatives_root=derivatives_root,
+    )
+    return compute_qc(inputs, settings)
+
+
+def save_session_qc(
+    result: SessionQC,
+    *,
+    summary: str | Path | None = DEFAULT_SUMMARY_FILENAME,
+    review_epochs: str | Path | None = DEFAULT_REVIEW_FILENAME,
+) -> list[Path]:
+    """Write the section results and review ranges, each as CSV and parquet.
+
+    Relative names land in the session's quality-control directory, prefixed
+    with the recording stem; None skips that table. A provenance sidecar is
+    written beside whatever was saved.
+    """
+    inputs = result.inputs
+    edf_path = inputs.edf_path
     written: list[Path] = []
-    if args.summary is not None:
+    if summary is not None:
         summary_csv_path, summary_parquet_path = paired_output_paths(
             quality_control_output_path(
-                recording_output_name(args.summary, edf_path),
-                edf_path, rawdata_root, derivatives_root,
+                recording_output_name(summary, edf_path),
+                edf_path, inputs.rawdata_root, inputs.derivatives_root,
             )
         )
-        save_csv(sections, summary_csv_path)
-        summary_parquet_table(sections).to_parquet(summary_parquet_path, index=False)
+        save_csv(result.sections, summary_csv_path)
+        summary_parquet_table(result.sections).to_parquet(summary_parquet_path, index=False)
         print(f"Saved: {summary_parquet_path}")
         written.extend([summary_csv_path, summary_parquet_path])
-    if args.review_epochs is not None:
+    if review_epochs is not None:
         requested_review_path = quality_control_output_path(
-            recording_output_name(args.review_epochs, edf_path),
-            edf_path, rawdata_root, derivatives_root,
+            recording_output_name(review_epochs, edf_path),
+            edf_path, inputs.rawdata_root, inputs.derivatives_root,
         )
         review_csv_path, review_parquet_path = paired_output_paths(
             requested_review_path
         )
-        save_csv(reviews, review_csv_path)
-        reviews.to_parquet(review_parquet_path, index=False)
+        save_csv(result.reviews, review_csv_path)
+        result.reviews.to_parquet(review_parquet_path, index=False)
         print(f"Saved: {review_parquet_path}")
         written.extend([review_parquet_path, review_csv_path])
 
@@ -849,19 +881,77 @@ def main(argv: Sequence[str] | None = None) -> int:
             outputs=written,
             inputs={
                 "edf_path": str(edf_path),
-                "fif_path": str(fif_path),
-                "scoring_file": str(scoring_file),
-                "artifact_file": str(artifact_file),
-                "prescan_file": str(prescan_file) if prescan_file else None,
+                "fif_path": str(inputs.fif_path),
+                "scoring_file": str(inputs.scoring_file),
+                "artifact_file": str(inputs.artifact_file),
+                "prescan_file": str(inputs.prescan_file) if inputs.prescan_file else None,
             },
             parameters={
-                "overall_status": overall_status(sections),
-                "n_review_entries": int(len(reviews)),
-                "qc_config": str(args.qc_config),
-                "spectra_config": str(args.spectra_config),
+                "overall_status": result.status,
+                "n_review_entries": int(len(result.reviews)),
+                "qc_config": result.settings.qc_config,
+                "spectra_config": result.settings.spectra_config,
             },
         )
-    return 0 if overall_status(sections) != "fail" else 1
+    return written
+
+
+def _print_inputs(inputs: QCInputs) -> None:
+    print(f"EDF: {inputs.edf_path}")
+    print(f"FIF: {inputs.fif_path}")
+    print(f"Scoring: {inputs.scoring_file}")
+    print(f"Artifacts: {inputs.artifact_file}")
+    print(f"Prescan artifacts: {inputs.prescan_file or 'not found'}")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        settings = summary_qc_settings(
+            qc_config=args.qc_config,
+            spectra_config=args.spectra_config,
+            epoch_seconds=args.analysis_epoch_seconds,
+            chunk_epochs=args.chunk_epochs,
+            welch_seconds=args.welch_seconds,
+            fmin_hz=args.fmin,
+            fmax_hz=args.fmax,
+            duration_tolerance_s=args.duration_tolerance,
+            min_gap_s=args.min_gap,
+            gap_scan_chunk_seconds=args.gap_scan_chunk_seconds,
+            max_gap_percent=args.max_gap_percent,
+            max_longest_gap_s=args.max_longest_gap,
+            confidence_threshold=args.confidence_threshold,
+            max_low_confidence_percent=args.max_low_confidence_percent,
+            max_undefined_percent=args.max_undefined_percent,
+            max_wake_percent=args.max_wake_percent,
+            max_nrem_percent=args.max_nrem_percent,
+            max_rem_percent=args.max_rem_percent,
+            max_artifact_percent=args.max_artifact_percent,
+            max_prescan_excluded_percent=args.max_prescan_excluded_percent,
+            eeg_eeg_threshold=args.eeg_eeg_threshold,
+            eeg_emg_threshold=args.eeg_emg_threshold,
+            max_correlation_review_percent=args.max_correlation_review_percent,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
+
+    try:
+        inputs = find_qc_inputs(
+            args.subject,
+            date=args.date,
+            session=args.session,
+            rawdata_root=args.rawdata_root,
+            derivatives_root=args.derivatives_root,
+        )
+        _print_inputs(inputs)
+        result = compute_qc(inputs, settings)
+    except (ImportError, OSError, ValueError) as exc:
+        parser.error(str(exc))
+
+    _print_results(result.sections, result.reviews)
+    save_session_qc(result, summary=args.summary, review_epochs=args.review_epochs)
+    return 0 if result.status != "fail" else 1
 
 
 if __name__ == "__main__":

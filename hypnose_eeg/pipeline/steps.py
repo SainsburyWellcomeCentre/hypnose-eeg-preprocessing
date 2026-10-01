@@ -1,7 +1,7 @@
-"""Shared subprocess-orchestration helpers for the src/ pipeline entry points.
+"""Shared step-running helpers for the pipeline stages.
 
 `preprocessing.py`, `sleep_scoring.py`, and `qc.py` each run the existing
-`hypnose_eeg` CLIs as subprocesses (`python -m hypnose_eeg....`) instead of
+`hypnose_eeg` CLIs by calling their `main(argv)` in this process, instead of
 reimplementing their logic, so this module holds the bits they all share:
 running one step and reporting a clear failure, the `--subject`/
 `--date`/`--session`/`--rawdata-root`/`--derivatives-root` selector flags
@@ -14,17 +14,20 @@ The output-folder overrides reach the wrapped scripts through the
 `HYPNOSE_EEG_OUTPUT_DIR_<GROUP>` environment variables
 (`hypnose_eeg/io/output_layout.py`) rather than per-script flags, since
 every script already resolves its folders through `output_dir_name()` and the
-data-location roots are overridable the same way.
+data-location roots are overridable the same way. They are applied to
+`os.environ` for the duration of one step and restored afterwards.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
-import subprocess
 import sys
+import traceback
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Iterator, Mapping, Sequence
 
 from hypnose_eeg.io.output_layout import (
     DEFAULT_OUTPUT_DIR_NAMES,
@@ -34,17 +37,31 @@ from hypnose_eeg.io.output_layout import (
     output_dir_env_var,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
 
 class StepFailed(RuntimeError):
-    """A wrapped `hypnose_eeg` CLI exited with a non-zero status."""
+    """A wrapped `hypnose_eeg` CLI returned or exited with a non-zero status.
 
-    def __init__(self, label: str, module: str, returncode: int) -> None:
-        super().__init__(f"{label} ({module}) exited with status {returncode}")
+    `error` is the exception the step raised, or None when it reported the
+    failure through its exit status (a parser error, or a QC verdict such as
+    `summary_qc` exiting 1 for FAIL).
+    """
+
+    def __init__(
+        self,
+        label: str,
+        module: str,
+        returncode: int,
+        error: BaseException | None = None,
+    ) -> None:
+        if error is None:
+            message = f"{label} ({module}) exited with status {returncode}"
+        else:
+            message = f"{label} ({module}) raised {type(error).__name__}: {error}"
+        super().__init__(message)
         self.label = label
         self.module = module
         self.returncode = returncode
+        self.error = error
 
 
 def run_step(
@@ -54,18 +71,68 @@ def run_step(
     label: str,
     env: Mapping[str, str] | None = None,
 ) -> None:
-    """Run `python -m <module> <args>` from the repo root; raise on failure.
+    """Run `<module>.main(args)` in this process; raise `StepFailed` on failure.
 
-    `env` holds extra environment variables layered over the current process
+    `env` holds extra environment variables applied over the current process
     environment for just this step (used for the output-folder overrides).
+    A `SystemExit` from the step -- argparse usage errors included -- becomes
+    its exit status, and any other exception is printed and reported as status
+    1, which is what the step would have exited with on its own.
+    `KeyboardInterrupt` is left to propagate, since it stops the run, not the
+    step.
     """
-    print(f"==> {label}: python -m {module} {' '.join(args)}")
-    step_env = {**os.environ, **env} if env else None
-    result = subprocess.run(
-        [sys.executable, "-m", module, *args], cwd=REPO_ROOT, env=step_env
-    )
-    if result.returncode != 0:
-        raise StepFailed(label, module, result.returncode)
+    print(f"==> {label}: {module} {' '.join(args)}", flush=True)
+    entry_point = importlib.import_module(module).main
+    try:
+        with applied_env(env or {}):
+            try:
+                status = exit_status(entry_point(list(args)))
+            except SystemExit as exc:
+                status = exit_status(exc.code)
+            except Exception as exc:  # noqa: BLE001 - reported as the step's failure
+                traceback.print_exc()
+                raise StepFailed(label, module, 1, error=exc) from exc
+    finally:
+        _close_figures()
+    if status != 0:
+        raise StepFailed(label, module, status)
+
+
+def exit_status(code: object) -> int:
+    """The process exit status `sys.exit(code)` would produce for a `main()` result."""
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    # sys.exit("message") prints the message and exits 1.
+    print(code, file=sys.stderr)
+    return 1
+
+
+@contextmanager
+def applied_env(env: Mapping[str, str]) -> Iterator[None]:
+    """Apply environment overrides to `os.environ` for a block, then restore them."""
+    previous = {key: os.environ.get(key) for key in env}
+    os.environ.update(env)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _close_figures() -> None:
+    """Close the figures a step left open, so a long batch does not accumulate them.
+
+    A step that shows its plots has already blocked until they were closed;
+    one run with `--no-show` has saved them. Either way they are done with.
+    """
+    pyplot = sys.modules.get("matplotlib.pyplot")
+    if pyplot is not None:
+        pyplot.close("all")
 
 
 def output_layout_env(

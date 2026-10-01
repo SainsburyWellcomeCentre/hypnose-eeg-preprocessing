@@ -326,14 +326,92 @@ def _print_report(report: ArtifactReport) -> None:
         )
 
 
-def _save_report(report: ArtifactReport, save_dir: Path, stem: str) -> None:
+@dataclass(frozen=True, eq=False)
+class ArtifactResult:
+    """One recording's artifact burden report and the files it was built from."""
+
+    edf_path: Path
+    artifact_path: Path
+    scoring_path: Path
+    report: ArtifactReport
+
+    @property
+    def recording(self) -> str:
+        return self.edf_path.stem
+
+
+def compute_recording_artifacts(
+    edf_path: Path,
+    *,
+    rawdata_root: Path,
+    derivatives_root: Path,
+    epoch_seconds: float | None = None,
+) -> ArtifactResult:
+    """Build one recording's artifact report over its continuously scored epochs.
+
+    `epoch_seconds` overrides the duration inferred from the artifact times.
+    """
+    from hypnose_eeg.io.input_paths import artifact_path, scoring_path
+
+    if epoch_seconds is not None and (not math.isfinite(epoch_seconds) or epoch_seconds <= 0):
+        raise ValueError("epoch_seconds must be a positive finite number")
+    artifacts = artifact_path(edf_path, rawdata_root, derivatives_root)
+    if artifacts is None:
+        raise FileNotFoundError(f"No artifact parquet found for {edf_path.name}")
+    scores = scoring_path(edf_path, rawdata_root, derivatives_root)
+    artifact_epochs = restrict_to_continuous_epochs(
+        pd.read_parquet(artifacts), pd.read_parquet(scores), epoch_seconds=epoch_seconds
+    )
+    return ArtifactResult(
+        edf_path=edf_path,
+        artifact_path=artifacts,
+        scoring_path=scores,
+        report=build_artifact_report(artifact_epochs, epoch_seconds=epoch_seconds),
+    )
+
+
+def compute_session_artifacts(
+    subject: str | int,
+    *,
+    date: str | int | None = None,
+    session: str | int | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+    epoch_seconds: float | None = None,
+) -> list[ArtifactResult]:
+    """Build the artifact report for every recording in one subject's session.
+
+    The roots default to the active data-location profile.
+    """
+    from hypnose_eeg.io.repository_paths import resolve_data_roots
+    from hypnose_eeg.utils.recording_selection import select_recordings
+
+    rawdata_root, derivatives_root = resolve_data_roots(rawdata_root, derivatives_root)
+    return [
+        compute_recording_artifacts(
+            edf_path,
+            rawdata_root=rawdata_root,
+            derivatives_root=derivatives_root,
+            epoch_seconds=epoch_seconds,
+        )
+        for edf_path, _ in select_recordings(
+            rawdata_root, derivatives_root, subject=subject, date=date, session=session
+        )
+    ]
+
+
+def save_artifact_report(result: ArtifactResult, save_dir: str | Path) -> list[Path]:
+    """Write the overall, hourly, and sleep-state tables as CSVs into `save_dir`."""
+    save_dir = Path(save_dir)
     outputs = {
-        "overall": report.overall,
-        "hourly": report.hourly,
-        "sleep_state": report.sleep_state,
+        "overall": result.report.overall,
+        "hourly": result.report.hourly,
+        "sleep_state": result.report.sleep_state,
     }
-    for suffix, table in outputs.items():
-        save_csv(table, save_dir / f"{stem}_artifact_report_{suffix}.csv")
+    return [
+        save_csv(table, save_dir / f"{result.recording}_artifact_report_{suffix}.csv")
+        for suffix, table in outputs.items()
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -344,15 +422,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         parser.error("--epoch-seconds must be a positive finite number")
 
-    from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
-    from hypnose_eeg.utils.recording_selection import select_recordings
-    from hypnose_eeg.io.input_paths import artifact_path, scoring_path
     from hypnose_eeg.io.output_paths import artifact_output_path
+    from hypnose_eeg.io.repository_paths import resolve_data_roots
+    from hypnose_eeg.utils.recording_selection import select_recordings
 
-    rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
-    derivatives_root = Path(
-        args.derivatives_root or get_derivatives_root()
-    ).resolve(strict=False)
+    rawdata_root, derivatives_root = resolve_data_roots(
+        args.rawdata_root, args.derivatives_root
+    )
     pairs = select_recordings(
         rawdata_root,
         derivatives_root,
@@ -361,24 +437,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         session=args.session,
     )
     for edf_path, _ in pairs:
-        artifacts = artifact_path(edf_path, rawdata_root, derivatives_root)
-        if artifacts is None:
-            raise FileNotFoundError(f"No artifact parquet found for {edf_path.name}")
-        print(f"Artifacts: {artifacts}")
-        artifact_epochs = pd.read_parquet(artifacts)
-        scores = pd.read_parquet(scoring_path(edf_path, rawdata_root, derivatives_root))
-        artifact_epochs = restrict_to_continuous_epochs(
-            artifact_epochs, scores, epoch_seconds=args.epoch_seconds
+        result = compute_recording_artifacts(
+            edf_path,
+            rawdata_root=rawdata_root,
+            derivatives_root=derivatives_root,
+            epoch_seconds=args.epoch_seconds,
         )
-        report = build_artifact_report(
-            artifact_epochs, epoch_seconds=args.epoch_seconds
-        )
-        _print_report(report)
+        print(f"Artifacts: {result.artifact_path}")
+        _print_report(result.report)
         if args.save_dir is not None:
             save_dir = artifact_output_path(
                 args.save_dir, edf_path, rawdata_root, derivatives_root
             )
-            _save_report(report, save_dir, edf_path.stem)
+            save_artifact_report(result, save_dir)
     return 0
 
 

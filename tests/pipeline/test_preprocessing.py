@@ -3,12 +3,12 @@ from __future__ import annotations
 import unittest
 from unittest.mock import call, patch
 
-from src import preprocessing
-from src._pipeline import StepFailed
+from hypnose_eeg.pipeline import preprocessing
+from hypnose_eeg.pipeline.steps import StepFailed
 
 
 class RunStepsTests(unittest.TestCase):
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_default_steps_run_trim_first_then_the_rest_in_order(self, mock_run_step):
         preprocessing.run_steps(subject="66", session="1")
 
@@ -24,7 +24,7 @@ class RunStepsTests(unittest.TestCase):
             ],
         )
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_output_folder_overrides_reach_every_step_as_env(self, mock_run_step):
         preprocessing.run_steps(
             subject="66", session="1",
@@ -39,13 +39,13 @@ class RunStepsTests(unittest.TestCase):
                 },
             )
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_no_output_overrides_means_empty_env(self, mock_run_step):
         preprocessing.run_steps(subject="66", session="1")
         for c in mock_run_step.call_args_list:
             self.assertEqual(c.kwargs["env"], {})
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_cli_output_flags_are_forwarded(self, mock_run_step):
         preprocessing.main(
             ["--subject", "66", "--session", "1", "--steps", "trim",
@@ -61,7 +61,7 @@ class RunStepsTests(unittest.TestCase):
             },
         )
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_concatenate_and_downsample_use_source_sink_flags(self, mock_run_step):
         preprocessing.run_steps(
             subject="66", date="20260717",
@@ -77,7 +77,7 @@ class RunStepsTests(unittest.TestCase):
             self.assertIn("/deriv", args)
             self.assertNotIn("--rawdata-root", args)
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_artifact_steps_use_rawdata_derivatives_flags(self, mock_run_step):
         preprocessing.run_steps(
             subject="66", date="20260717",
@@ -97,7 +97,7 @@ class RunStepsTests(unittest.TestCase):
             ["hypnose_eeg.preprocessing.prescan_artifacts", "hypnose_eeg.preprocessing.detect_artifacts"],
         )
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_trim_has_no_derivatives_root_flag(self, mock_run_step):
         preprocessing.run_steps(
             subject="66", date="20260717",
@@ -110,7 +110,7 @@ class RunStepsTests(unittest.TestCase):
         self.assertNotIn("--derivatives-root", args)
         self.assertNotIn("--sink-dir", args)
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_dry_run_forwarded_to_every_step_but_the_artifact_steps(self, mock_run_step):
         preprocessing.run_steps(subject="66", date="20260717", dry_run=True)
 
@@ -121,7 +121,7 @@ class RunStepsTests(unittest.TestCase):
             else:
                 self.assertIn("--dry-run", args)
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_overwrite_forwarded_to_every_step(self, mock_run_step):
         preprocessing.run_steps(subject="66", date="20260717", overwrite=True)
 
@@ -129,7 +129,7 @@ class RunStepsTests(unittest.TestCase):
             _, args = c.args
             self.assertIn("--overwrite", args)
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_extra_args_forwarded_to_every_selected_step(self, mock_run_step):
         preprocessing.run_steps(
             subject="66", date="20260717",
@@ -139,7 +139,7 @@ class RunStepsTests(unittest.TestCase):
         _, args = mock_run_step.call_args.args
         self.assertIn("--first", args)
 
-    @patch("src.preprocessing.run_step")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_step")
     def test_step_failure_stops_remaining_steps(self, mock_run_step):
         mock_run_step.side_effect = [
             None,
@@ -153,7 +153,7 @@ class RunStepsTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
-    @patch("src.preprocessing.run_steps")
+    @patch("hypnose_eeg.pipeline.preprocessing.run_steps")
     def test_main_reports_failure_and_returns_its_exit_code(self, mock_run_steps):
         mock_run_steps.side_effect = StepFailed("preprocessing:concatenate", "mod", 3)
         result = preprocessing.main(["--subject", "66", "--date", "20260717"])

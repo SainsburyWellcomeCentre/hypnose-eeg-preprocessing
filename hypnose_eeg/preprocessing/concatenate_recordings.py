@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 import numpy as np
 
@@ -510,7 +510,7 @@ def _result_to_row(result: ConcatenationResult) -> dict[str, Any]:
     return row
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Concatenate sessions that contain multiple EDF recording files."
     )
@@ -564,7 +564,7 @@ def main() -> None:
         default=None,
         help="CSV manifest path.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     config = load_config(args.config)
 
     has_selector = args.subject is not None or args.date is not None or args.session is not None

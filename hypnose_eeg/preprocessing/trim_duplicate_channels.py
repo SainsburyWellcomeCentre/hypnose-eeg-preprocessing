@@ -13,7 +13,7 @@ when a channel label occurs more than once it writes a ``<stem>_trimmed.edf``
 copy beside the source keeping only the first occurrence of every label, under
 the source's own labels. A recording without duplicates is left alone and
 nothing is written, so running the step on a clean session is a no-op. It is
-the first default step of ``src/preprocessing.py`` and runs before
+the first default step of ``hypnose_eeg/pipeline/preprocessing.py`` and runs before
 concatenation; every later step prefers the trimmed copy over its source
 (``hypnose_eeg/utils/recording_selection.py``). An existing trimmed copy is kept
 unless ``--overwrite`` is passed.
@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -362,9 +362,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     config = load_config(args.config)
 
     n_samples = int(

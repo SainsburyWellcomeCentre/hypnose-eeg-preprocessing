@@ -16,7 +16,7 @@ import argparse
 import gc
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from hypnose_helpers.io.layout import parse_session_dirname, parse_subject_dirname
 
@@ -203,7 +203,7 @@ def _result_to_row(result: DownsampleResult) -> dict[str, Any]:
     return row
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Downsample EDF files and save FIF files under derivatives."
     )
@@ -240,7 +240,7 @@ def main() -> None:
         default=None,
         help="CSV manifest path.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     config = load_config(args.config)
 
     has_selector = args.subject is not None or args.date is not None or args.session is not None

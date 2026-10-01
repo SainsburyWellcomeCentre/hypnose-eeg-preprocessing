@@ -39,10 +39,21 @@ dev = [
     "pytest>=8,<9",
 ]
 
-# `hypnose_eeg` is the importable package; `src/` holds the pipeline entry points
-# run from the repository root (`python -m src.run_pipeline`). Configuration
-# stays in the repository's `configs/`, so install in editable mode
-# (`pip install -e .`).
+# Console scripts for the pipeline stages; `python -m src.<stage>` from the
+# repository root runs the same entry points.
+[project.scripts]
+hypnose-eeg-pipeline = "hypnose_eeg.pipeline.run:main"
+hypnose-eeg-preprocess = "hypnose_eeg.pipeline.preprocessing:main"
+hypnose-eeg-score = "hypnose_eeg.pipeline.sleep_scoring:main"
+hypnose-eeg-qc = "hypnose_eeg.pipeline.qc:main"
+hypnose-eeg-qc-review = "hypnose_eeg.pipeline.qc_review:main"
+hypnose-eeg-view = "hypnose_eeg.sleep_scoring.view_scoring:main"
+hypnose-eeg-locations = "hypnose_eeg.io.repository_paths:main"
+
+# `hypnose_eeg` is the importable package, pipeline stages included
+# (`hypnose_eeg.pipeline`, with `hypnose_eeg.api` as its Python facade); `src/`
+# keeps thin `python -m src.<stage>` entry points. Configuration stays in the
+# repository's `configs/`, so install in editable mode (`pip install -e .`).
 [tool.setuptools.packages.find]
 include = ["hypnose_eeg*"]
 

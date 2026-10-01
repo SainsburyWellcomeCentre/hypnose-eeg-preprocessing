@@ -204,12 +204,27 @@ In progress. Done: `scripts/` is now the installable `hypnose_eeg` package (no
 the viewer moved to `hypnose_eeg/sleep_scoring/view_scoring.py`; `qc/spectra.py` and the
 viewer are split into compute/plot/CLI layers (`compute_session_spectra`,
 `plot_spectra`, `save_spectra`; `view_settings`, `load_scored_window`,
-`plot_scored_window`, `show_scored_recording`). Remaining:
-- A small `hypnose_eeg/api.py` facade with a `DataLocations` argument and
+`plot_scored_window`, `show_scored_recording`).
+- ~~A small `hypnose_eeg/api.py` facade with a `DataLocations` argument and
   console scripts, and `src/qc.run_steps` calling functions in-process
-  rather than as subprocesses (folding `src/` into the package).
-- The same compute/plot/CLI split for the other `qc/` modules
-  (`summary_qc.run_qc` still takes an `argparse.Namespace`).
+  rather than as subprocesses (folding `src/` into the package).~~ — done: the
+  stages moved to `hypnose_eeg/pipeline/` (`src/` keeps thin `python -m
+  src.<stage>` entry points); `steps.run_step` calls each CLI's `main(argv)`
+  in-process, applying the output-folder overrides to `os.environ` only for
+  that step; `hypnose_eeg/api.py` wraps the stages, batch runs, the in-memory
+  QC summary, the QC review, and the viewer, taking an `api.DataLocations` or a
+  `hypnose_helpers` `DataLocations`; `hypnose-eeg-*` console scripts are
+  declared in `pyproject.toml`.
+- ~~The same compute/plot/CLI split for the other `qc/` modules
+  (`summary_qc.run_qc` still takes an `argparse.Namespace`).~~ — done:
+  `summary_qc.run_qc` takes a `SummaryQCSettings` (`summary_qc_settings()`),
+  with `compute_session_qc`/`save_session_qc` around it; `artifacts`,
+  `channel_correlations`, `sleep_scoring`, and `recording_integrity` gained
+  `compute_session_*`/`check_session` and save functions. `QCThresholds`
+  validates its own values, and `utils.config.with_overrides()` applies
+  CLI-style overrides to it or to `SpectraConfig`.
+
+Remaining:
 - A headless `render_scoring()` that saves a PNG of each section `qc_review`
   flags, built on `load_scored_window`/`plot_scored_window`.
 

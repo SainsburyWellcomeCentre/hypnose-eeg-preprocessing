@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, TypeVar
 
 from hypnose_eeg.io.repository_paths import get_repo_root
 
@@ -52,6 +53,21 @@ def nested_get(
             return default
         value = value[key]
     return value
+
+
+_Settings = TypeVar("_Settings")
+
+
+def with_overrides(settings: _Settings, **overrides: Any) -> _Settings:
+    """A copy of a frozen settings dataclass with the overrides that are not None.
+
+    Lets a CLI pass every optional flag straight through -- an unset flag is
+    None and keeps the configured value -- and re-runs the dataclass's own
+    validation on the result.
+    """
+    return replace(
+        settings, **{name: value for name, value in overrides.items() if value is not None}
+    )
 
 
 def coalesce(*values: Any) -> Any:

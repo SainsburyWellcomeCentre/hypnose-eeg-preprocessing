@@ -9,7 +9,6 @@ Gap-like EDF annotations are also included in the gap report.
 from __future__ import annotations
 
 import argparse
-import math
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -17,17 +16,21 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
-from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
+from hypnose_eeg.io.repository_paths import (
+    get_derivatives_root,
+    get_rawdata_root,
+    resolve_data_roots,
+)
 from hypnose_eeg.io.mne_io import default_channel_labels, import_mne, set_configured_channel_types
 from hypnose_eeg.io.output_paths import (
     quality_control_output_path,
     recording_output_name,
     save_csv_rows,
 )
-from hypnose_eeg.qc.thresholds import load_qc_thresholds
+from hypnose_eeg.qc.thresholds import QCThresholds, default_qc_thresholds, load_qc_thresholds
 from hypnose_eeg.utils.config import (
     DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-    coalesce,
+    with_overrides,
 )
 from hypnose_eeg.utils.recording_selection import pair_recordings, select_recordings
 
@@ -240,6 +243,66 @@ def check_pair(
     return result, edf_gaps
 
 
+def check_pair_against(
+    edf_path: Path,
+    fif_path: Path,
+    thresholds: QCThresholds | None = None,
+) -> tuple[IntegrityResult, list[Gap]]:
+    """`check_pair` with the integrity thresholds taken from `QCThresholds`.
+
+    `thresholds` defaults to the repository's quality-control configuration.
+    """
+    thresholds = thresholds or default_qc_thresholds()
+    return check_pair(
+        edf_path,
+        fif_path,
+        duration_tolerance_s=thresholds.duration_tolerance_s,
+        min_gap_s=thresholds.min_gap_s,
+        chunk_duration_s=thresholds.gap_scan_chunk_seconds,
+        max_gap_percent=thresholds.max_gap_percent,
+        max_longest_gap_s=thresholds.max_longest_gap_s,
+    )
+
+
+def check_session(
+    subject: str | int,
+    *,
+    date: str | int | None = None,
+    session: str | int | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+    thresholds: QCThresholds | None = None,
+) -> list[tuple[IntegrityResult, list[Gap]]]:
+    """Check every EDF/FIF pair in one subject's session.
+
+    The roots default to the active data-location profile. Override single
+    thresholds with `with_overrides(default_qc_thresholds(), min_gap_s=2.0)`.
+    """
+    rawdata_root, derivatives_root = resolve_data_roots(rawdata_root, derivatives_root)
+    return [
+        check_pair_against(edf_path, fif_path, thresholds)
+        for edf_path, fif_path in select_recordings(
+            rawdata_root, derivatives_root, subject=subject, date=date, session=session
+        )
+    ]
+
+
+def save_integrity_summary(results: Sequence[IntegrityResult], path: str | Path) -> Path:
+    """Write one CSV row per checked pair."""
+    return save_csv_rows(
+        [asdict(result) for result in results],
+        list(IntegrityResult.__dataclass_fields__),
+        path,
+    )
+
+
+def save_integrity_gaps(gaps: Sequence[Gap], path: str | Path) -> Path:
+    """Write one CSV row per detected gap."""
+    return save_csv_rows(
+        [asdict(gap) for gap in gaps], list(Gap.__dataclass_fields__), path
+    )
+
+
 def _format_gap(index: int, gap: Gap) -> str:
     """Format only one gap's duration for concise terminal output."""
     return f"    Gap {index}: {gap.duration_s:.3f} seconds"
@@ -315,38 +378,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        qc_thresholds = load_qc_thresholds(args.qc_config)
+        thresholds = with_overrides(
+            load_qc_thresholds(args.qc_config),
+            duration_tolerance_s=args.duration_tolerance,
+            min_gap_s=args.min_gap,
+            gap_scan_chunk_seconds=args.chunk_duration,
+            max_gap_percent=args.max_gap_percent,
+            max_longest_gap_s=args.max_longest_gap,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         parser.error(str(exc))
-
-    args.duration_tolerance = coalesce(
-        args.duration_tolerance, qc_thresholds.duration_tolerance_s
-    )
-    args.min_gap = coalesce(args.min_gap, qc_thresholds.min_gap_s)
-    args.chunk_duration = coalesce(
-        args.chunk_duration, qc_thresholds.gap_scan_chunk_seconds
-    )
-    args.max_gap_percent = coalesce(
-        args.max_gap_percent, qc_thresholds.max_gap_percent
-    )
-    args.max_longest_gap = coalesce(
-        args.max_longest_gap, qc_thresholds.max_longest_gap_s
-    )
-
-    for name, value in (
-        ("minimum gap", args.min_gap),
-        ("chunk duration", args.chunk_duration),
-    ):
-        if not math.isfinite(value) or value <= 0:
-            parser.error(f"{name} must be a positive finite number")
-    if not math.isfinite(args.duration_tolerance) or args.duration_tolerance < 0:
-        parser.error("duration tolerance must be a non-negative finite number")
-    for name, value in (
-        ("max gap percent", args.max_gap_percent),
-        ("max longest gap", args.max_longest_gap),
-    ):
-        if not math.isfinite(value) or value < 0:
-            parser.error(f"{name} must be a non-negative finite number")
 
     if bool(args.edf) != bool(args.fif):
         parser.error("--edf and --fif must be supplied together")
@@ -393,15 +434,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     gaps: list[Gap] = []
     for edf_path, fif_path in pairs:
         print(f"Checking {edf_path} <-> {fif_path}")
-        result, pair_gaps = check_pair(
-            edf_path,
-            fif_path,
-            duration_tolerance_s=args.duration_tolerance,
-            min_gap_s=args.min_gap,
-            chunk_duration_s=args.chunk_duration,
-            max_gap_percent=args.max_gap_percent,
-            max_longest_gap_s=args.max_longest_gap,
-        )
+        result, pair_gaps = check_pair_against(edf_path, fif_path, thresholds)
         results.append(result)
         gaps.extend(pair_gaps)
         print(
@@ -431,15 +464,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     if args.summary:
-        summary_path = output_path(args.summary)
-        result_rows = [asdict(result) for result in results]
-        save_csv_rows(
-            result_rows, list(IntegrityResult.__dataclass_fields__), summary_path
-        )
+        save_integrity_summary(results, output_path(args.summary))
     if args.gaps:
-        gaps_path = output_path(args.gaps)
-        gap_rows = [asdict(gap) for gap in gaps]
-        save_csv_rows(gap_rows, list(Gap.__dataclass_fields__), gaps_path)
+        save_integrity_gaps(gaps, output_path(args.gaps))
     return 1 if any(result.status != "pass" for result in results) else 0
 
 

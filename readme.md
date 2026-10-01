@@ -99,13 +99,13 @@ were set, so `HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS=analysis/artifacts` lands in
 `eeg/analysis/artifacts`. Folders may be nested (`analysis/artifacts`) but must
 stay relative to the session directory -- absolute paths and `..` are rejected
 -- because readers (`hypnose_eeg/qc/*`, the viewer) locate earlier outputs through
-the same names. From Python,
-`run_steps(..., output_layout=..., output_root=..., output_dirs={...})` on
-`src.preprocessing`/`src.sleep_scoring`/`src.qc` takes the same overrides.
+the same names. From Python, `hypnose_eeg.api.DataLocations(output_layout=...,
+output_root=..., output_dirs={...})` carries the same overrides (see [Running
+from Python](#running-from-python)).
 
 ## Unified pipeline entry points
 
-`src/run_pipeline.py` runs the full pipeline for one subject/session in the
+`python -m src.run_pipeline` runs the full pipeline for one subject/session in the
 order the stages actually require — trim, concatenate, downsample and the
 artifact prescan, then sleep scoring, then artifact detection (which depends on
 the sleep-scoring output), then the QC summary:
@@ -124,8 +124,22 @@ python -m src.qc --subject 66 --session 1
 ```
 
 Pass `--stage preprocessing`/`sleep_scoring`/`qc` (one or more) to
-`run_pipeline.py` to restrict a full run to those stages, each using its own
+`run_pipeline` to restrict a full run to those stages, each using its own
 default step set.
+
+The stages live in the package (`hypnose_eeg/pipeline/`); `src/` only holds
+these `python -m src.<stage>` entry points. The editable install also puts
+them on the `PATH` as console scripts, which run from any directory:
+
+| `python -m` (from the repository root) | Console script |
+| --- | --- |
+| `src.run_pipeline` | `hypnose-eeg-pipeline` |
+| `src.preprocessing` | `hypnose-eeg-preprocess` |
+| `src.sleep_scoring` | `hypnose-eeg-score` |
+| `src.qc` | `hypnose-eeg-qc` |
+| `src.qc_review` | `hypnose-eeg-qc-review` |
+| `hypnose_eeg.sleep_scoring.view_scoring` | `hypnose-eeg-view` |
+| `hypnose_eeg.io.repository_paths` | `hypnose-eeg-locations` |
 
 `--view` ends the run in the interactive scoring viewer
 (`hypnose_eeg/sleep_scoring/view_scoring.py`), so a session can be
@@ -216,7 +230,7 @@ and a batch run has nobody to close it. Review a session afterwards with
 
 ### Which sessions need QC review
 
-`src/qc_review.py` reads the QC summaries already on disk and lists every
+`python -m src.qc_review` reads the QC summaries already on disk and lists every
 session of the given subjects whose QC came out REVIEW (or FAIL), with the
 sections behind it -- metric, value, threshold, detail, and how many review
 ranges each section added to the review epochs. It reads the `.parquet` copies
@@ -242,10 +256,60 @@ QC review: 19/55 checked sessions need review across 2 subjects
 `--output-root`/`--output-dir`/`--output-layout` overrides the QC summary ran
 with, so its summaries are found.
 
-Run any of the four with `--help` for its complete option list; these wrap the `hypnose_eeg/*` CLIs below as subprocesses rather than
-reimplementing them, so step-specific flags such as `--config` are best
-passed to the underlying script directly when a per-step entry point doesn't
-already expose them.
+Run any of them with `--help` for its complete option list. Each step calls
+the matching `hypnose_eeg/*` CLI below in the same Python process rather than
+reimplementing it, so step-specific flags such as `--config` are best passed
+to the underlying script directly when a per-step entry point doesn't already
+expose them. Output-folder overrides apply only while their step runs.
+
+### Running from Python
+
+`hypnose_eeg.api` runs the same stages from a notebook or another project,
+with keyword arguments instead of flags. A step that fails raises `StepFailed`
+rather than returning an exit status -- including a QC summary that comes out
+FAIL:
+
+```python
+from hypnose_eeg import api
+
+locations = api.DataLocations(
+    rawdata_root="/mnt/hypnose/rawdata",
+    derivatives_root="/mnt/hypnose/derivatives",
+    output_dirs={"quality_control": "reports/qc"},  # optional, as --output-dir
+)
+api.run_session(66, session=1, model="my-model", locations=locations)
+api.preprocess(66, session=1, steps=["trim", "concatenate"], locations=locations)
+
+result = api.run_batch([65, 66], model="my-model", locations=locations)
+print(result.ok, result.report)
+
+qc = api.session_qc(66, session=1, locations=locations)  # computed in memory, nothing written
+print(qc.status)
+print(qc.sections)
+reviews = api.review_qc("all", locations=locations)
+```
+
+`locations` defaults to the active data-location profile. Another project can
+pass its own `hypnose_helpers.io.paths.DataLocations` instead, and its profile
+supplies both roots.
+
+The QC modules split computing from plotting and saving in the same way, so
+their results are available without the CLI:
+
+| Module | Compute | Plot / save |
+| --- | --- | --- |
+| `qc/summary_qc.py` | `compute_session_qc`, `summary_qc_settings` | `save_session_qc` |
+| `qc/spectra.py` | `compute_session_spectra` | `plot_spectra`, `save_spectra` |
+| `qc/channel_correlations.py` | `compute_session_correlations`, `correlation_review` | `plot_correlations`, `save_correlations` |
+| `qc/sleep_scoring.py` | `compute_session_scoring_qc` | `save_scoring_qc` |
+| `qc/artifacts.py` | `compute_session_artifacts` | `save_artifact_report` |
+| `qc/recording_integrity.py` | `check_session` | `save_integrity_summary`, `save_integrity_gaps` |
+
+Thresholds default to `configs/pipelines/quality_control.yaml`. Override them
+with `with_overrides(default_qc_thresholds(), max_wake_percent=60.0)` (from
+`hypnose_eeg.utils.config` and `hypnose_eeg.qc.thresholds`), or for the
+summary with `summary_qc_settings(max_artifact_percent=10.0)`. Out-of-range
+values raise `ValueError`.
 
 ## Output provenance
 
@@ -419,7 +483,7 @@ eeg/quality_control/
 
 The summary holds the per-section results; the review epochs hold the review
 intervals. Each is written as a CSV for reading by eye and a parquet copy that
-`src/qc_review.py` and the batch run read (in the summary parquet, `value` and
+`qc_review` and the batch run read (in the summary parquet, `value` and
 `threshold` are text, as in the CSV, since some sections report `3/4` or `n/a`). Pass a
 filename to `--summary`/`--review-epochs` to rename either output (the
 recording prefix is still applied), or `--no-summary`/`--no-review-epochs` to

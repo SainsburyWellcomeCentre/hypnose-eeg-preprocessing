@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
@@ -713,9 +713,9 @@ def _resolve_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     return fif_path, sleep_parquet_path
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     fif_path, sleep_parquet_path = _resolve_paths(parser, args)
     detector = ArtifactDetector.from_yaml(
         args.config,

@@ -9,6 +9,7 @@ import pandas as pd
 
 from hypnose_eeg.qc.channel_correlations import (
     _print_review_counts,
+    correlation_review,
     build_parser,
 )
 from hypnose_eeg.analysis.correlation import epoch_pearson_matrices
@@ -69,6 +70,43 @@ class ChannelCorrelationTests(unittest.TestCase):
         self.assertIn("EEG1 ↔ EEG2 — Wake: 1 / 2 (50.00%)", printed)
         self.assertIn("EEG1 ↔ EMG — Wake: 1 / 2 (50.00%)", printed)
         self.assertIn("Unique epochs above any configured threshold: 1 / 2", printed)
+
+    def test_review_counts_are_available_as_a_table(self) -> None:
+        correlations = pd.DataFrame(
+            {
+                "epoch_id": [0, 1, 0, 1, 0],
+                "sleep_state": [0, 0, 0, 0, 0],
+                "channel_1": ["EEG1", "EEG1", "EEG1", "EEG1", "EMG"],
+                "channel_2": ["EEG2", "EEG2", "EMG", "EMG", "EMG2"],
+                "channel_1_type": ["eeg"] * 4 + ["emg"],
+                "channel_2_type": ["eeg", "eeg", "emg", "emg", "emg"],
+                "pearson_r": [0.95, 0.20, -0.75, 0.60, 0.99],
+            }
+        )
+        review = correlation_review(
+            correlations, eeg_eeg_threshold=0.90, eeg_emg_threshold=0.50
+        )
+        # EMG–EMG pairs have no threshold, so they are not counted.
+        self.assertEqual(
+            review.by_pair[["channel_2", "flagged_epochs", "epochs"]].values.tolist(),
+            [["EEG2", 1, 2], ["EMG", 2, 2]],
+        )
+        self.assertEqual(list(review.by_pair["sleep_state"]), ["Wake", "Wake"])
+        self.assertEqual((review.flagged_epochs, review.valid_epochs), (2, 2))
+        self.assertEqual(review.percent, 100.0)
+
+    def test_no_epochs_is_zero_percent_not_an_error(self) -> None:
+        correlations = pd.DataFrame(
+            columns=[
+                "epoch_id", "sleep_state", "channel_1", "channel_2",
+                "channel_1_type", "channel_2_type", "pearson_r",
+            ]
+        )
+        review = correlation_review(
+            correlations, eeg_eeg_threshold=0.9, eeg_emg_threshold=0.5
+        )
+        self.assertTrue(review.by_pair.empty)
+        self.assertEqual(review.percent, 0.0)
 
 
 if __name__ == "__main__":

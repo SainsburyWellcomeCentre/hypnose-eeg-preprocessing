@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -16,12 +16,12 @@ from hypnose_eeg.io.output_paths import (
     save_csv,
     sleep_scoring_qc_output_path,
 )
-from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
+from hypnose_eeg.io.repository_paths import resolve_data_roots
 from hypnose_eeg.utils.recording_selection import select_recordings
-from hypnose_eeg.qc.thresholds import load_qc_thresholds
+from hypnose_eeg.qc.thresholds import QCThresholds, default_qc_thresholds, load_qc_thresholds
 from hypnose_eeg.utils.config import (
     DEFAULT_QUALITY_CONTROL_CONFIG_PATH,
-    coalesce,
+    with_overrides,
 )
 from hypnose_eeg.utils.epochs import infer_epoch_seconds
 from hypnose_eeg.utils.sleep_states import default_sleep_states
@@ -161,6 +161,119 @@ def sleep_state_proportion_report(
     return report
 
 
+@dataclass(frozen=True, eq=False)
+class ScoringQCResult:
+    """One recording's per-epoch scoring output, state summary, and proportion check."""
+
+    edf_path: Path
+    scoring_path: Path
+    output: pd.DataFrame
+    summary: pd.DataFrame
+    proportion_report: pd.DataFrame
+
+    @property
+    def recording(self) -> str:
+        return self.edf_path.stem
+
+    @property
+    def status(self) -> str:
+        """"review" when any state's share exceeds its limit, else "pass"."""
+        return "review" if (self.proportion_report["status"] == "review").any() else "pass"
+
+
+def compute_recording_scoring_qc(
+    edf_path: Path,
+    *,
+    rawdata_root: Path,
+    derivatives_root: Path,
+    thresholds: QCThresholds | None = None,
+) -> ScoringQCResult:
+    """Summarise one recording's Somnotate predictions and check state proportions.
+
+    `thresholds` defaults to the repository's quality-control configuration.
+    """
+    thresholds = thresholds or default_qc_thresholds()
+    predictions = scoring_path(edf_path, rawdata_root, derivatives_root)
+    output = prepare_scoring_output(
+        pd.read_parquet(predictions),
+        confidence_threshold=thresholds.confidence_threshold,
+    )
+    return ScoringQCResult(
+        edf_path=edf_path,
+        scoring_path=predictions,
+        output=output,
+        summary=scoring_summary(output),
+        proportion_report=sleep_state_proportion_report(
+            sleep_state_proportions(output),
+            max_wake_percent=thresholds.max_wake_percent,
+            max_nrem_percent=thresholds.max_nrem_percent,
+            max_rem_percent=thresholds.max_rem_percent,
+        ),
+    )
+
+
+def compute_session_scoring_qc(
+    subject: str | int,
+    *,
+    date: str | int | None = None,
+    session: str | int | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+    thresholds: QCThresholds | None = None,
+) -> list[ScoringQCResult]:
+    """Summarise the predictions of every recording in one subject's session.
+
+    The roots default to the active data-location profile.
+    """
+    rawdata_root, derivatives_root = resolve_data_roots(rawdata_root, derivatives_root)
+    return [
+        compute_recording_scoring_qc(
+            edf_path,
+            rawdata_root=rawdata_root,
+            derivatives_root=derivatives_root,
+            thresholds=thresholds,
+        )
+        for edf_path, _ in select_recordings(
+            rawdata_root, derivatives_root, subject=subject, date=date, session=session
+        )
+    ]
+
+
+DEFAULT_EPOCHS_FILENAME = "somnotate_scoring_epochs.csv"
+DEFAULT_SUMMARY_FILENAME = "somnotate_scoring_summary.csv"
+DEFAULT_PROPORTIONS_FILENAME = "somnotate_scoring_state_proportions.csv"
+
+
+def save_scoring_qc(
+    result: ScoringQCResult,
+    *,
+    rawdata_root: str | Path,
+    derivatives_root: str | Path,
+    epochs: str | Path | None = DEFAULT_EPOCHS_FILENAME,
+    summary: str | Path | None = DEFAULT_SUMMARY_FILENAME,
+    proportions: str | Path | None = DEFAULT_PROPORTIONS_FILENAME,
+) -> list[Path]:
+    """Write the epoch output, state summary, and proportion report as CSVs.
+
+    Relative names land in the session's sleep-scoring QC directory, prefixed
+    with the recording stem; None skips that table.
+    """
+    written: list[Path] = []
+    for requested, table in (
+        (epochs, result.output),
+        (summary, result.summary),
+        (proportions, result.proportion_report),
+    ):
+        if requested is None:
+            continue
+        path = sleep_scoring_qc_output_path(
+            recording_output_name(requested, result.edf_path),
+            result.edf_path, rawdata_root, derivatives_root,
+        )
+        written.append(save_csv(table, path))
+    return written
+
+
 def _print_report(
     output: pd.DataFrame, summary: pd.DataFrame, proportion_report: pd.DataFrame
 ) -> None:
@@ -258,21 +371,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--save",
         nargs="?",
-        const="somnotate_scoring_epochs.csv",
+        const=DEFAULT_EPOCHS_FILENAME,
         default=None,
         help="Optionally save epoch output in the session sleep-scoring QC directory.",
     )
     parser.add_argument(
         "--summary",
         nargs="?",
-        const="somnotate_scoring_summary.csv",
+        const=DEFAULT_SUMMARY_FILENAME,
         default=None,
         help="Optionally save the state summary in the session sleep-scoring QC directory.",
     )
     parser.add_argument(
         "--proportions",
         nargs="?",
-        const="somnotate_scoring_state_proportions.csv",
+        const=DEFAULT_PROPORTIONS_FILENAME,
         default=None,
         help="Optionally save the state proportion report in the session "
         "sleep-scoring QC directory.",
@@ -284,29 +397,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        qc_thresholds = load_qc_thresholds(args.qc_config)
+        thresholds = with_overrides(
+            load_qc_thresholds(args.qc_config),
+            confidence_threshold=args.confidence_threshold,
+            max_wake_percent=args.max_wake_percent,
+            max_nrem_percent=args.max_nrem_percent,
+            max_rem_percent=args.max_rem_percent,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         parser.error(str(exc))
-    args.confidence_threshold = coalesce(
-        args.confidence_threshold, qc_thresholds.confidence_threshold
-    )
-    if (
-        not math.isfinite(args.confidence_threshold)
-        or not 0 <= args.confidence_threshold <= 1
-    ):
-        parser.error("--confidence-threshold must be between 0 and 1")
-    args.max_wake_percent = coalesce(args.max_wake_percent, qc_thresholds.max_wake_percent)
-    args.max_nrem_percent = coalesce(args.max_nrem_percent, qc_thresholds.max_nrem_percent)
-    args.max_rem_percent = coalesce(args.max_rem_percent, qc_thresholds.max_rem_percent)
-    for name in ("max_wake_percent", "max_nrem_percent", "max_rem_percent"):
-        value = getattr(args, name)
-        if not math.isfinite(value) or not 0 <= value <= 100:
-            parser.error(f"--{name.replace('_', '-')} must be between 0 and 100")
 
-    rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
-    derivatives_root = Path(
-        args.derivatives_root or get_derivatives_root()
-    ).resolve(strict=False)
+    rawdata_root, derivatives_root = resolve_data_roots(
+        args.rawdata_root, args.derivatives_root
+    )
     pairs = select_recordings(
         rawdata_root,
         derivatives_root,
@@ -320,44 +423,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     edf_path, _ = pairs[0]
-    predictions = scoring_path(edf_path, rawdata_root, derivatives_root)
     print(f"Recording: {edf_path}")
-    print(f"Somnotate predictions: {predictions}")
+    print(
+        f"Somnotate predictions: {scoring_path(edf_path, rawdata_root, derivatives_root)}"
+    )
     try:
-        output = prepare_scoring_output(
-            pd.read_parquet(predictions),
-            confidence_threshold=args.confidence_threshold,
-        )
-        summary = scoring_summary(output)
-        proportion_report = sleep_state_proportion_report(
-            sleep_state_proportions(output),
-            max_wake_percent=args.max_wake_percent,
-            max_nrem_percent=args.max_nrem_percent,
-            max_rem_percent=args.max_rem_percent,
+        result = compute_recording_scoring_qc(
+            edf_path,
+            rawdata_root=rawdata_root,
+            derivatives_root=derivatives_root,
+            thresholds=thresholds,
         )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
-    _print_report(output, summary, proportion_report)
+    _print_report(result.output, result.summary, result.proportion_report)
 
-    if args.save is not None:
-        save_path = sleep_scoring_qc_output_path(
-            recording_output_name(args.save, edf_path),
-            edf_path, rawdata_root, derivatives_root,
-        )
-        save_csv(output, save_path)
-    if args.summary is not None:
-        summary_path = sleep_scoring_qc_output_path(
-            recording_output_name(args.summary, edf_path),
-            edf_path, rawdata_root, derivatives_root,
-        )
-        save_csv(summary, summary_path)
-    if args.proportions is not None:
-        proportions_path = sleep_scoring_qc_output_path(
-            recording_output_name(args.proportions, edf_path),
-            edf_path, rawdata_root, derivatives_root,
-        )
-        save_csv(proportion_report, proportions_path)
-    return 1 if (proportion_report["status"] == "review").any() else 0
+    save_scoring_qc(
+        result,
+        rawdata_root=rawdata_root,
+        derivatives_root=derivatives_root,
+        epochs=args.save,
+        summary=args.summary,
+        proportions=args.proportions,
+    )
+    return 1 if result.status == "review" else 0
 
 
 if __name__ == "__main__":

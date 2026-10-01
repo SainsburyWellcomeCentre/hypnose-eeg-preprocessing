@@ -3,14 +3,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, patch
 
-from src import run_pipeline
-from src._pipeline import StepFailed
+from hypnose_eeg.pipeline import run as run_pipeline
+from hypnose_eeg.pipeline.steps import StepFailed
 
 
 class FullRunOrderingTests(unittest.TestCase):
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_no_stage_interleaves_detect_artifacts_after_scoring(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -42,9 +42,9 @@ class FullRunOrderingTests(unittest.TestCase):
         self.assertEqual(qc_call.kwargs["steps"], ["summary"])
 
 
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_output_folder_overrides_reach_every_stage(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -61,9 +61,9 @@ class FullRunOrderingTests(unittest.TestCase):
                 self.assertEqual(call.kwargs["output_layout"], "/x/layout.yaml")
                 self.assertEqual(call.kwargs["output_dirs"], expected_dirs)
 
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_default_run_passes_no_output_overrides(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -78,9 +78,9 @@ class FullRunOrderingTests(unittest.TestCase):
             run_pipeline.main(["--subject", "66", "--output-dir", "figures=x"])
         self.assertEqual(ctx.exception.code, 2)
 
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_overwrite_reaches_every_recomputing_stage(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -90,9 +90,9 @@ class FullRunOrderingTests(unittest.TestCase):
             self.assertTrue(call.kwargs["overwrite"])
         self.assertTrue(mock_sleep_scoring.run_steps.call_args.kwargs["overwrite"])
 
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_steps_with_existing_outputs_are_skipped_by_default(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -104,9 +104,9 @@ class FullRunOrderingTests(unittest.TestCase):
 
 
 class SingleStageTests(unittest.TestCase):
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_restricting_to_preprocessing_runs_its_own_defaults(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -117,9 +117,9 @@ class SingleStageTests(unittest.TestCase):
         mock_sleep_scoring.run_steps.assert_not_called()
         mock_qc.run_steps.assert_not_called()
 
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_multiple_stages_can_be_selected(self, mock_preprocessing, mock_sleep_scoring, mock_qc):
         run_pipeline.main(
             ["--subject", "66", "--session", "1", "--stage", "sleep_scoring", "qc"]
@@ -131,9 +131,9 @@ class SingleStageTests(unittest.TestCase):
 
 
 class ViewerTests(unittest.TestCase):
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_viewer_is_not_opened_by_default(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -142,9 +142,9 @@ class ViewerTests(unittest.TestCase):
         steps = [c.kwargs["steps"] for c in mock_sleep_scoring.run_steps.call_args_list]
         self.assertEqual(steps, [["score"]])
 
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_view_opens_the_viewer_after_every_other_stage(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -164,9 +164,9 @@ class ViewerTests(unittest.TestCase):
         view_call = mock_sleep_scoring.run_steps.call_args_list[-1]
         self.assertEqual(view_call.kwargs["steps"], ["view"])
 
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_view_works_without_rerunning_any_stage(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -181,9 +181,9 @@ class ViewerTests(unittest.TestCase):
             mock_sleep_scoring.run_steps.call_args.kwargs["steps"], ["view"]
         )
 
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_failing_stage_stops_before_the_viewer(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):
@@ -197,9 +197,9 @@ class ViewerTests(unittest.TestCase):
 
 
 class FailureTests(unittest.TestCase):
-    @patch("src.run_pipeline.qc")
-    @patch("src.run_pipeline.sleep_scoring")
-    @patch("src.run_pipeline.preprocessing")
+    @patch("hypnose_eeg.pipeline.run.qc")
+    @patch("hypnose_eeg.pipeline.run.sleep_scoring")
+    @patch("hypnose_eeg.pipeline.run.preprocessing")
     def test_stage_failure_stops_the_pipeline_and_returns_its_exit_code(
         self, mock_preprocessing, mock_sleep_scoring, mock_qc
     ):

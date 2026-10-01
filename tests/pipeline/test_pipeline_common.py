@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
-import subprocess
+import sys
+import types
 import unittest
-from unittest.mock import patch
+from contextlib import redirect_stderr
+from unittest.mock import Mock, patch
 
-from src._pipeline import (
+from hypnose_eeg.pipeline.steps import (
     StepFailed,
     add_selector_arguments,
     output_dir_overrides,
@@ -17,42 +20,87 @@ from src._pipeline import (
 
 
 class RunStepTests(unittest.TestCase):
-    @patch("src._pipeline.subprocess.run")
-    def test_runs_module_with_python_from_repo_root(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
-        run_step("hypnose_eeg.qc.summary_qc", ["--subject", "66"], label="qc:summary")
+    """`run_step` calls a CLI's `main(argv)` in this process."""
 
-        called_args, called_kwargs = mock_run.call_args
-        argv = called_args[0]
-        self.assertEqual(argv[1:], ["-m", "hypnose_eeg.qc.summary_qc", "--subject", "66"])
-        self.assertTrue(str(called_kwargs["cwd"]).endswith("hypnose-eeg-preprocessing"))
+    def _module(self, main) -> str:
+        module = types.ModuleType("fake_step")
+        module.main = main
+        patcher = patch.dict(sys.modules, {"fake_step": module})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return "fake_step"
 
-    @patch("src._pipeline.subprocess.run")
-    def test_no_env_override_inherits_the_process_environment(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
-        run_step("hypnose_eeg.qc.summary_qc", [], label="qc:summary")
-        self.assertIsNone(mock_run.call_args.kwargs["env"])
+    def test_calls_main_with_the_arguments(self):
+        main = Mock(return_value=0)
+        run_step(self._module(main), ["--subject", "66"], label="qc:summary")
+        main.assert_called_once_with(["--subject", "66"])
 
-    @patch("src._pipeline.subprocess.run")
-    def test_env_override_is_layered_over_the_process_environment(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+    def test_none_from_main_is_success(self):
+        run_step(self._module(Mock(return_value=None)), [], label="preprocessing:trim")
+
+    def test_nonzero_return_raises_step_failed(self):
+        with self.assertRaises(StepFailed) as ctx:
+            run_step(self._module(Mock(return_value=2)), [], label="qc:summary")
+        self.assertEqual(ctx.exception.returncode, 2)
+        self.assertEqual(ctx.exception.module, "fake_step")
+        self.assertIsNone(ctx.exception.error)
+        self.assertIn("qc:summary", str(ctx.exception))
+
+    def test_system_exit_becomes_the_exit_status(self):
+        def usage_error(argv):
+            raise SystemExit(2)
+
+        with self.assertRaises(StepFailed) as ctx:
+            run_step(self._module(usage_error), [], label="qc:summary")
+        self.assertEqual(ctx.exception.returncode, 2)
+        self.assertIsNone(ctx.exception.error)
+
+    def test_system_exit_zero_is_success(self):
+        def done(argv):
+            raise SystemExit(0)
+
+        run_step(self._module(done), [], label="qc:summary")
+
+    def test_an_exception_is_a_status_1_failure_carrying_the_error(self):
+        def crash(argv):
+            raise FileNotFoundError("no artifact parquet")
+
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(StepFailed) as ctx:
+                run_step(self._module(crash), [], label="qc:summary")
+        self.assertEqual(ctx.exception.returncode, 1)
+        self.assertIsInstance(ctx.exception.error, FileNotFoundError)
+        self.assertIn("no artifact parquet", str(ctx.exception))
+
+    def test_keyboard_interrupt_propagates(self):
+        with self.assertRaises(KeyboardInterrupt):
+            run_step(self._module(Mock(side_effect=KeyboardInterrupt)), [], label="x")
+
+    def test_env_applies_during_the_step_only(self):
+        seen = {}
+
+        def main(argv):
+            seen.update(os.environ)
+            return 0
+
         with patch.dict(os.environ, {"HYPNOSE_TEST_INHERITED": "yes"}):
+            os.environ.pop("HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS", None)
             run_step(
-                "hypnose_eeg.qc.summary_qc", [], label="qc:summary",
+                self._module(main), [], label="qc:summary",
                 env={"HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS": "analysis/artifacts"},
             )
-        env = mock_run.call_args.kwargs["env"]
-        self.assertEqual(env["HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS"], "analysis/artifacts")
-        self.assertEqual(env["HYPNOSE_TEST_INHERITED"], "yes")
+            self.assertNotIn("HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS", os.environ)
+        self.assertEqual(seen["HYPNOSE_EEG_OUTPUT_DIR_ARTIFACTS"], "analysis/artifacts")
+        self.assertEqual(seen["HYPNOSE_TEST_INHERITED"], "yes")
 
-    @patch("src._pipeline.subprocess.run")
-    def test_nonzero_exit_raises_step_failed(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=2)
-        with self.assertRaises(StepFailed) as ctx:
-            run_step("hypnose_eeg.qc.summary_qc", [], label="qc:summary")
-        self.assertEqual(ctx.exception.returncode, 2)
-        self.assertEqual(ctx.exception.module, "hypnose_eeg.qc.summary_qc")
-        self.assertIn("qc:summary", str(ctx.exception))
+    def test_env_is_restored_after_a_failure(self):
+        with patch.dict(os.environ, {"HYPNOSE_EEG_OUTPUT_ROOT": "eeg"}):
+            with self.assertRaises(StepFailed):
+                run_step(
+                    self._module(Mock(return_value=1)), [], label="qc:summary",
+                    env={"HYPNOSE_EEG_OUTPUT_ROOT": "ephys"},
+                )
+            self.assertEqual(os.environ["HYPNOSE_EEG_OUTPUT_ROOT"], "eeg")
 
 
 class SelectorArgumentsTests(unittest.TestCase):
