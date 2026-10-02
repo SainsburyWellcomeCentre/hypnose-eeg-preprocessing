@@ -517,8 +517,7 @@ def _import_scoring_dependencies() -> _ScoringDependencies:
     except ImportError as exc:
         raise ImportError(
             "Sleep scoring requires hypnose-somnotate with its scoring dependencies. "
-            "Create the environment from environment.yml or install "
-            "'hypnose-somnotate[scoring]'."
+            "Run 'uv sync' from the repository root to install them."
         ) from exc
     return _ScoringDependencies(
         score_recording=score_recording,

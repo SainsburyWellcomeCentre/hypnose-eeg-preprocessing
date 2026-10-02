@@ -173,9 +173,12 @@ class SummaryQualityControlTests(unittest.TestCase):
         )
 
     def test_absolute_output_paths_are_left_alone(self) -> None:
+        # Built from the current anchor so the path is absolute on Windows too,
+        # where "/elsewhere" has no drive and counts as relative.
+        custom = Path(Path.cwd().anchor, "elsewhere", "custom.csv")
         self.assertEqual(
-            recording_output_name("/elsewhere/custom.csv", "sub-066_ses-001_recording-concat.edf"),
-            Path("/elsewhere/custom.csv"),
+            recording_output_name(str(custom), "sub-066_ses-001_recording-concat.edf"),
+            custom,
         )
 
     def test_cli_selects_subject_by_date_or_session(self) -> None:

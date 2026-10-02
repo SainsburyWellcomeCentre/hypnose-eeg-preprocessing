@@ -8,39 +8,37 @@ local Mac:
 remote Python + Qt -> encrypted SSH/X11 tunnel -> local XQuartz window
 ```
 
-The remote and local requirements are separate. The Conda environment supplies
-Python, PyQt, and Qt's Linux XCB libraries. The Mac supplies XQuartz and the SSH
-client configuration. Creating the remote environment cannot install or
-configure software on the local Mac.
+The remote and local requirements are separate. The uv environment supplies
+Python and PyQt; the remote host's system packages supply Qt's Linux XCB
+libraries. The Mac supplies XQuartz and the SSH client configuration. Creating
+the remote environment cannot install or configure software on the local Mac.
 
 ## 1. Remote environment
 
 Create or update the environment from the repository root on the remote host:
 
 ```bash
-conda activate hypnose-eeg-env
-python -m pip uninstall -y PyQt6 PyQt6-Qt6 PyQt6-sip
-conda env update --name hypnose-eeg-env --file environment.yml --prune
-conda deactivate
-conda activate hypnose-eeg-env
+uv sync
 ```
 
-The uninstall step is needed only when updating an environment created from an
-older revision, which installed PyQt as pip wheels. It runs before Conda installs
-its replacement and avoids two package managers owning the same Qt files. A new
-environment does not need that migration step.
-
-For a clean installation, use:
+The environment installs PyQt as pip wheels (`PyQt6`, which bundles Qt). Those
+wheels do not ship the XCB libraries that Qt's `libqxcb.so` platform plugin
+loads, so on a headless Linux machine an administrator must install them once
+through the system package manager. On Debian/Ubuntu:
 
 ```bash
-conda env create --file environment.yml
+sudo apt install libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+  libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+  libxcb-xkb1 libxkbcommon-x11-0
 ```
 
-The environment installs PyQt through Conda (`pyqt6` from conda-forge). On
-Linux, its `qt6-main` dependency brings in `xcb-util-cursor`, `xcb-util-image`,
-`xcb-util-keysyms`, `xcb-util-renderutil`, and `xcb-util-wm`. These satisfy the
-native `libqxcb.so` runtime that pip-only PyQt installations can leave
-unresolved on headless Linux machines.
+On RHEL/Fedora the equivalents are `xcb-util-cursor`, `xcb-util-image`,
+`xcb-util-keysyms`, `xcb-util-renderutil`, `xcb-util-wm`, and
+`libxkbcommon-x11`. To list any library the plugin still cannot resolve:
+
+```bash
+ldd .venv/lib/python3.12/site-packages/PyQt6/Qt6/plugins/platforms/libqxcb.so | grep "not found"
+```
 
 The remote SSH service must allow X11 forwarding and have `xauth` installed. A
 user can verify `xauth` with:
@@ -135,7 +133,7 @@ From the remote terminal, including a VS Code terminal once `DISPLAY` is set:
 
 ```bash
 cd /home/volkan/repos/hypnose-eeg-analysis
-conda activate hypnose-eeg-env
+source .venv/bin/activate   # or prefix the command with `uv run`
 python -m hypnose_eeg.sleep_scoring.view_scoring \
   --subject 66 --date 20260717
 ```
@@ -147,8 +145,8 @@ on the Mac through XQuartz.
 
 - Empty remote `DISPLAY`: the SSH connection was not created with X11
   forwarding. Fix the local SSH configuration and establish a new connection.
-- `xcb` plugin found but not loadable: update or recreate the Conda environment
-  so its declared Qt/XCB packages are installed.
+- `xcb` plugin found but not loadable: install the system XCB packages listed
+  in section 1 and check `libqxcb.so` with `ldd`.
 - `could not connect to display`: the Qt runtime loaded, but the X11 tunnel or
   local XQuartz process is unavailable.
 - An old `tmux` or `screen` session can retain a missing/stale `DISPLAY`; test in

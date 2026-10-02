@@ -310,8 +310,10 @@ class SleepScoringViewTests(unittest.TestCase):
             _single_value([66, 67], option_name="subject")
 
     def test_missing_display_is_reported_before_qt_starts(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "No graphical display"):
-            require_graphical_display({})
+        # The check only applies on Linux, where the viewer runs over SSH/X11.
+        with patch.object(sys, "platform", "linux"):
+            with self.assertRaisesRegex(RuntimeError, "No graphical display"):
+                require_graphical_display({})
 
     def test_run_view_forwards_somnotate_view_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

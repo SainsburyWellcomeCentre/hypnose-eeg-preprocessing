@@ -16,3 +16,6 @@ outputs/reports/
 
 # OS files
 .DS_Store
+
+# Virtual environment
+.venv/

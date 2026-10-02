@@ -5,10 +5,18 @@ recordings.
 
 ## Environment
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/). From the
+repository root:
+
 ```bash
-conda env create -f environment.yml
-conda activate hypnose-eeg-env
+uv sync
 ```
+
+This creates `.venv/` with Python 3.12 (downloaded by uv if needed) and installs
+the exact versions recorded in `uv.lock`, including the `dev` (pytest) and
+`notebook` (JupyterLab, Qt browser) groups. Run commands inside it with
+`uv run <command>`, or activate it with `source .venv/bin/activate`
+(`.venv\Scripts\activate` on Windows).
 
 The environment expects the `hypnose-helpers` and `hypnose-somnotate` repositories
 in sibling checkouts and installs them in editable mode. Somnotate's legacy
@@ -17,9 +25,10 @@ required.
 
 It also installs this repository in editable mode as the `hypnose_eeg` package,
 so its modules import from any directory and other projects or notebooks in
-the environment can use them. After pulling a change that adds or moves a
-package, re-run `pip install -e .` from the repository root. Configuration is
-read from this checkout's `configs/`, so keep the install editable.
+the environment can use them. After pulling a change, re-run `uv sync`.
+Configuration is read from this checkout's `configs/`, so keep the install
+editable. Add or change dependencies with `uv add` / `uv remove` so that
+`pyproject.toml` and `uv.lock` stay in step.
 
 ## Data location
 
@@ -129,8 +138,8 @@ Pass `--stage preprocessing`/`sleep_scoring`/`qc` (one or more) to
 default step set.
 
 These commands are console scripts that the editable install
-(`pip install -e .`) puts on the `PATH` of the activated environment, so they
-run from any directory. Each is also a module, run with `python -m`:
+(`uv sync`) puts on the `PATH` of the activated environment, so they
+run from any directory (or prefix them with `uv run`). Each is also a module, run with `python -m`:
 
 | Console script | Module (`src/hypnose_eeg/...`) |
 | --- | --- |

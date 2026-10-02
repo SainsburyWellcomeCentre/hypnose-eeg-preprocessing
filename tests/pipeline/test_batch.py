@@ -257,11 +257,12 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(path, root / "batch_report_20260922-141530.csv")
 
     def test_a_failed_outcome_row_carries_the_step_and_what_was_erased(self):
+        erased = [Path("/derivatives/a"), Path("/derivatives/b")]
         outcome = SessionOutcome(
             subject="sub-066", session=2, date="20260718",
             session_dir=Path("/rawdata/sub-066/ses-002_date-20260718"),
             status="failed", failed_step="preprocessing:concatenate", returncode=3,
-            error="boom", erased=[Path("/derivatives/a"), Path("/derivatives/b")],
+            error="boom", erased=erased,
         )
 
         row = outcome.as_row()
@@ -269,7 +270,8 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(row["status"], "failed")
         self.assertEqual(row["failed_step"], "preprocessing:concatenate")
         self.assertEqual(row["returncode"], 3)
-        self.assertEqual(row["erased"], "/derivatives/a;/derivatives/b")
+        # Paths are written with the platform's separator.
+        self.assertEqual(row["erased"], f"{erased[0]};{erased[1]}")
 
 
 class QCVerdictTests(unittest.TestCase):

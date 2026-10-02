@@ -117,7 +117,9 @@ class SleepScoringTests(unittest.TestCase):
             _match_channel_labels(["EEG EEG1A-B"], {"ECG"}, source="raw.edf")
 
     def test_model_name_resolves_below_derivatives(self) -> None:
-        derivatives = Path("/data/derivatives")
+        # Resolved up front because the model path is returned resolved, which
+        # adds the drive on Windows.
+        derivatives = Path("/data/derivatives").resolve()
         self.assertEqual(
             _resolve_model_path("baseline", derivatives),
             derivatives / "somnotate_training" / "baseline" / "model.pickle",

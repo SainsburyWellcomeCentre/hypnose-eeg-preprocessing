@@ -18,6 +18,8 @@ dependencies = [
     "pyarrow>=20",
     "matplotlib>=3.10,<4",
     "mne>=1.12,<1.13",
+    # Backs MNE's EDF export, used to write concatenated recordings.
+    "edfio",
     "PyYAML>=6,<7",
     # Scoring models pickle a scikit-learn LDA transformer at this version.
     "scikit-learn==1.6.1",
@@ -28,7 +30,8 @@ dependencies = [
     "lspopt",
 ]
 
-[project.optional-dependencies]
+# Development-only dependencies; `uv sync` installs both groups by default.
+[dependency-groups]
 notebook = [
     "jupyterlab>=4.4,<5",
     "ipywidgets>=8.1,<9",
@@ -54,13 +57,21 @@ hypnose-eeg-locations = "hypnose_eeg.io.repository_paths:main"
 # src layout: `src/hypnose_eeg` is the importable package, pipeline stages
 # included (`hypnose_eeg.pipeline`, with `hypnose_eeg.api` as its Python
 # facade). Configuration stays in the repository's `configs/`, so install in
-# editable mode (`pip install -e .`); tests run against that install.
+# editable mode (`uv sync` does this); tests run against that install.
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["hypnose_eeg*"]
 
 [tool.setuptools.package-data]
 "hypnose_eeg.io" = ["checkpoints/*.json"]
+
+[tool.uv]
+default-groups = ["dev", "notebook"]
+
+# Shared paths/visualisation and scoring are developed in sibling checkouts.
+[tool.uv.sources]
+hypnose-helpers = { path = "../hypnose-helpers", editable = true }
+hypnose-somnotate = { path = "../hypnose-somnotate", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
