@@ -40,6 +40,12 @@ git clone https://github.com/SainsburyWellcomeCentre/hypnose-somnotate.git
 git clone https://github.com/SainsburyWellcomeCentre/hypnose-eeg-preprocessing.git
 cd hypnose-eeg-preprocessing
 
+# Optional: build the environment on /ceph instead of in the repo's .venv.
+# Put it in ~/.bashrc so every shell, and every job submitted from one, sees it.
+echo 'export UV_PROJECT_ENVIRONMENT=/ceph/python_envs/$USER/hypnose-eeg-env' >> ~/.bashrc
+echo 'export UV_LINK_MODE=copy' >> ~/.bashrc   # cache and env on different filesystems
+source ~/.bashrc
+
 # Exact versions from uv.lock; the notebook group (JupyterLab, Qt) is not
 # needed on the cluster.
 uv sync --frozen --no-group notebook
@@ -54,9 +60,15 @@ Somnotate's `pomegranate` dependency builds from source; if `uv sync` fails for
 want of a C/C++ compiler, load one (`module avail gcc`, then `module load …`)
 and rerun it.
 
+The environment lives at `$UV_PROJECT_ENVIRONMENT` when that is set, otherwise
+in `.venv` in the repo. `uv sync`, `uv run`, `submit.sh` and the job all follow
+the variable, so it must be set the same way when you sync and when you
+submit; `sbatch` passes it from your shell to the jobs. The task header in
+each `.out` log prints the environment the job used.
+
 After `git pull`, rerun `uv sync --frozen --no-group notebook` on the login
 node. Jobs never sync (`uv run --no-sync`): every array task shares the one
-`.venv`, and a sync racing another task would rewrite it under them.
+environment, and a sync racing another task would rewrite it under them.
 
 ## 2. Sanity-check
 
@@ -189,7 +201,7 @@ scancel 12345                                     # the whole array (12345_0 for
 
 | File | Contents |
 |---|---|
-| `slurm/logs/hypnose_eeg_<job>_<task>.out` | Task header (node, CPUs, commit, arguments, task, data profile), then the pipeline's output and batch summary |
+| `slurm/logs/hypnose_eeg_<job>_<task>.out` | Task header (node, CPUs, commit, environment, arguments, task, data profile), then the pipeline's output and batch summary |
 | `slurm/logs/hypnose_eeg_<job>_<task>.err` | Warnings, tracebacks, `FAILED:` lines |
 | `<derivatives>/sub-XXX/batch_report_<timestamp>[_<session>].csv` | One row per session: status, QC status, failed step, error, what was erased |
 | `<derivatives>/sub-XXX/ses-…/eeg/` | The outputs themselves (main readme, "Output folders") |
@@ -204,7 +216,7 @@ needs review.
 | Symptom | Likely cause |
 |---|---|
 | `uv not found` | uv not installed in `~/.local/bin` (§1) |
-| `No .venv in …` | `uv sync` not run in this checkout (§1) |
+| `No uv environment at …` | `uv sync` not run, or run with a different `UV_PROJECT_ENVIRONMENT` (§1) |
 | `REPO_DIR does not look like the repo root` | Raw `sbatch` submitted from outside the repo |
 | `The tasks for this selection changed since submission` | Rawdata changed while the array was pending; resubmit |
 | `rawdata … MISSING` in the task header | `/ceph` not mounted on that node, or the wrong profile (§1) |

@@ -45,6 +45,14 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
+# The environment the jobs will use; sbatch passes UV_PROJECT_ENVIRONMENT on
+# to them through --export=ALL below.
+VENV="${UV_PROJECT_ENVIRONMENT:-.venv}"
+if [[ ! -d "${VENV}" ]]; then
+    echo "No uv environment at ${VENV}; run \`uv sync --frozen --no-group notebook\` first (slurm/README.md §1)." >&2
+    exit 1
+fi
+
 # Peel off any SBATCH override flags from the front of the argument list.
 # They get forwarded to `sbatch` ahead of the script name, where they take
 # precedence over the matching #SBATCH directives.
@@ -106,6 +114,7 @@ if [[ -n "${MAX_RUNNING}" ]]; then
 fi
 
 echo "Submitting ${N} task(s) (array ${ARRAY}); task list: ${TASK_LIST}"
+echo "  environment: ${VENV}"
 sed 's/^/  /' "${TASK_LIST}"
 if (( ${#SBATCH_OVERRIDES[@]} > 0 )); then
     echo "  sbatch overrides: ${SBATCH_OVERRIDES[*]}"

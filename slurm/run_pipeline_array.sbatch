@@ -65,8 +65,12 @@ if [[ ! -f "${REPO_DIR}/src/hypnose_eeg/pipeline/run.py" ]]; then
 fi
 cd "${REPO_DIR}"
 
-if [[ ! -d .venv ]]; then
-    echo "No .venv in ${REPO_DIR}; run \`uv sync --frozen --no-group notebook\` on a login node first." >&2
+# The environment `uv sync` built: $UV_PROJECT_ENVIRONMENT when set (sbatch
+# passes the submitting shell's environment through), else the repo's .venv.
+VENV="${UV_PROJECT_ENVIRONMENT:-.venv}"
+if [[ ! -d "${VENV}" ]]; then
+    echo "No uv environment at ${VENV}; run \`uv sync --frozen --no-group notebook\` on a login node first" >&2
+    echo "(with the same UV_PROJECT_ENVIRONMENT, see slurm/README.md §1)." >&2
     exit 1
 fi
 
@@ -82,7 +86,7 @@ export OPENBLAS_NUM_THREADS="${THREADS}"
 export MKL_NUM_THREADS="${THREADS}"
 export NUMEXPR_NUM_THREADS="${THREADS}"
 
-# Never sync from a job: every array task shares this .venv, and a sync
+# Never sync from a job: every array task shares this environment, and a sync
 # racing another would rewrite it underneath the running tasks.
 PIPELINE=(uv run --no-sync hypnose-eeg-pipeline)
 
@@ -119,6 +123,7 @@ echo "  Node       : $(hostname)"
 echo "  CPUs / mem : ${THREADS} / ${SLURM_MEM_PER_NODE:-?}M"
 echo "  Started    : $(date -Iseconds)"
 echo "  Repo       : ${REPO_DIR} ($(git rev-parse --short HEAD 2>/dev/null || echo 'no git'))"
+echo "  Env        : ${VENV}"
 echo "  Arguments  : $*"
 echo "  Task       : ${TASKS[$TASK_ID]}  (${TASK_ID} / $((N_TASKS - 1)))"
 # The checkout's data profile; --rawdata-root/--derivatives-root above, or
