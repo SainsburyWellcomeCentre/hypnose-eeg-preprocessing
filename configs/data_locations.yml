@@ -8,6 +8,11 @@ profiles:
     rawdata: /mnt/harris/hypnose/hypnose_eeg/rawdata
     derivatives: /mnt/harris/hypnose/hypnose_eeg/derivatives
 
+  # SWC HPC compute and login nodes, which mount ceph at /ceph (slurm/README.md).
+  swc-hpc:
+    rawdata: /ceph/harris/hypnose/hypnose_eeg/rawdata
+    derivatives: /ceph/harris/hypnose/hypnose_eeg/derivatives
+
   server-mac:
     rawdata: /Volumes/harris/hypnose/hypnose_eeg/rawdata
     derivatives: /Volumes/harris/hypnose/hypnose_eeg/derivatives

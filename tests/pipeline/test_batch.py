@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import csv
+import io
 import os
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -255,6 +257,17 @@ class ReportTests(unittest.TestCase):
             path = report_path(root, [66, 67], datetime(2026, 9, 22, 14, 15, 30))
 
         self.assertEqual(path, root / "batch_report_20260922-141530.csv")
+
+    def test_a_label_keeps_runs_started_in_the_same_second_apart(self):
+        from datetime import datetime
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = report_path(
+                Path(tmp), [SUBJECT], datetime(2026, 9, 22, 14, 15, 30),
+                label="ses-002_date-20260718",
+            )
+
+        self.assertEqual(path.name, "batch_report_20260922-141530_ses-002_date-20260718.csv")
 
     def test_a_failed_outcome_row_carries_the_step_and_what_was_erased(self):
         erased = [Path("/derivatives/a"), Path("/derivatives/b")]
@@ -1169,6 +1182,160 @@ class MultiSubjectBatchTests(unittest.TestCase):
 
                 self.assertEqual(ctx.exception.code, 2)
         mock_preprocessing.run_steps.assert_not_called()
+
+
+@patch("hypnose_eeg.pipeline.run.qc")
+@patch("hypnose_eeg.pipeline.run.sleep_scoring")
+@patch("hypnose_eeg.pipeline.run.preprocessing")
+class JobArrayTaskTests(unittest.TestCase):
+    """`--list-tasks` / `--task-index`, which split a selection for a job array."""
+
+    # The same two-subject rawdata as the multi-subject batch tests.
+    setUp = MultiSubjectBatchTests.setUp
+    report_rows = MultiSubjectBatchTests.report_rows
+    qc_selectors = MultiSubjectBatchTests.qc_selectors
+
+    def pipeline(self, *argv: str, report: bool = True) -> int:
+        return run_pipeline.main(
+            [
+                *argv,
+                "--rawdata-root", str(self.rawdata),
+                "--derivatives-root", str(self.derivatives),
+                *(("--report", str(self.report)) if report else ()),
+            ]
+        )
+
+    def listed(self, *argv: str) -> tuple[int, list[str]]:
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            code = self.pipeline(*argv, "--list-tasks")
+        return code, out.getvalue().splitlines()
+
+    def test_each_subject_is_one_task_by_default(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        code, lines = self.listed("--subject", "66", "67", "--all-sessions")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            lines,
+            [
+                "sub-066 ses-001_date-20260717",
+                "sub-067 ses-001_date-20260718 ses-002_date-20260719",
+            ],
+        )
+        mock_preprocessing.run_steps.assert_not_called()
+
+    def test_each_session_is_one_task_by_session(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        code, lines = self.listed(
+            "--subject", "66", "67", "--all-sessions", "--task-unit", "session"
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            lines,
+            [
+                "sub-066 ses-001_date-20260717",
+                "sub-067 ses-001_date-20260718",
+                "sub-067 ses-002_date-20260719",
+            ],
+        )
+
+    def test_a_subject_selected_twice_is_still_one_task(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        code, lines = self.listed("--subject", "67:2", "67:1")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, ["sub-067 ses-002_date-20260719 ses-001_date-20260718"])
+
+    def test_missing_selections_are_left_out_of_the_tasks(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        code, lines = self.listed("--subject", "66", "99", "--all-sessions")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, ["sub-066 ses-001_date-20260717"])
+
+    def test_a_selection_without_sessions_lists_nothing_and_fails(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        code, lines = self.listed("--subject", "98", "99", "--all-sessions")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(lines, [])
+
+    def test_a_task_runs_only_its_subjects_sessions(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        result = self.pipeline("--subject", "66", "67", "--all-sessions", "--task-index", "1")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("sub-067", "1"), ("sub-067", "2")])
+
+    def test_a_session_task_runs_as_a_batch_and_erases_its_failure(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        mock_scoring.run_steps.side_effect = StepFailed(
+            "sleep_scoring:score", "hypnose_eeg.sleep_scoring.score_recordings", 4
+        )
+
+        result = self.pipeline(
+            "--subject", "66", "67", "--all-sessions",
+            "--task-unit", "session", "--task-index", "2",
+        )
+
+        self.assertEqual(result, 1)
+        self.erase.assert_called_once()
+        self.assertEqual(self.erase.call_args.kwargs["subject"], 67)
+        self.assertEqual(self.erase.call_args.kwargs["session"], 2)
+        self.assertEqual(
+            [(row["subject"], row["session"], row["status"]) for row in self.report_rows()],
+            [("sub-067", "2", "failed")],
+        )
+
+    def test_a_task_of_one_session_is_still_a_batch(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        result = self.pipeline("--subject", "66:1", "--task-index", "0")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.report_rows()[0]["status"], "ok")
+
+    def test_session_task_reports_are_named_after_their_session(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        for index in ("0", "1"):
+            result = self.pipeline(
+                "--subject", "67", "--all-sessions",
+                "--task-unit", "session", "--task-index", index, report=False,
+            )
+            self.assertEqual(result, 0)
+
+        reports = sorted(path.name for path in self.derivatives.glob("sub-067/*.csv"))
+        self.assertEqual(len(reports), 2)
+        self.assertTrue(reports[0].endswith("_ses-001_date-20260718.csv"))
+        self.assertTrue(reports[1].endswith("_ses-002_date-20260719.csv"))
+
+    def test_an_out_of_range_task_fails_without_running(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        with redirect_stderr(io.StringIO()) as err:
+            result = self.pipeline("--subject", "66", "67", "--all-sessions", "--task-index", "2")
+
+        self.assertEqual(result, 1)
+        self.assertIn("splits into 2 task(s) by subject", err.getvalue())
+        mock_preprocessing.run_steps.assert_not_called()
+
+    def test_the_viewer_is_refused_for_a_task(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        with self.assertRaises(SystemExit) as ctx, redirect_stderr(io.StringIO()):
+            self.pipeline("--subject", "66:1", "--task-index", "0", "--view")
+
+        self.assertEqual(ctx.exception.code, 2)
 
 
 if __name__ == "__main__":

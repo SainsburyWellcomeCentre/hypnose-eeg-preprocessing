@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Convenience wrapper around `sbatch slurm/run_pipeline_array.sbatch`.
+#
+# Counts the tasks the pipeline selection splits into and submits exactly
+# that many array tasks — so you don't have to compute N and stitch together
+# --export/--array by hand.  The task list is frozen at submit time; a task
+# whose list no longer matches (new sessions in rawdata) refuses to run.
+#
+# Usage:
+#   slurm/submit.sh [SBATCH_OVERRIDES] [--] PIPELINE_ARGS
+#
+# Examples:
+#   slurm/submit.sh --subject 66 67 --all-sessions --model my-model
+#   slurm/submit.sh --subject all --all-sessions --model my-model --task-unit session
+#   slurm/submit.sh --subject 66:1,3 67:2-4 --stage qc
+#
+#   # Bump SLURM resources for this submission only (overrides the matching
+#   # #SBATCH directives in run_pipeline_array.sbatch; nothing edited on disk):
+#   slurm/submit.sh --time 48:00:00 --mem 64G -- --subject 66 --all-sessions --model my-model
+#   slurm/submit.sh --max-running 10 -- --subject all --all-sessions --model my-model
+#
+# Recognised SBATCH overrides (they go first; everything after them, or
+# after `--`, is a hypnose-eeg-pipeline argument):
+#   --time, -t                 wall-clock limit per task (e.g. 48:00:00)
+#   --mem                      RAM per task (e.g. 64G)
+#   --cpus-per-task, -c        CPU cores per task
+#   --partition, -p            SLURM partition
+#   --max-running N            at most N array tasks at once (--array=0-M%N)
+#
+# Both `--flag value` and `--flag=value` forms are accepted.  For any other
+# sbatch option, edit run_pipeline_array.sbatch in place or use raw `sbatch`.
+#
+# All paths are resolved against the repo root (the parent of this script),
+# so you can run it from anywhere.
+# ============================================================================
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+cd "${REPO_DIR}"
+
+export PATH="${HOME}/.local/bin:${PATH}"
+if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not found on PATH (or in ~/.local/bin); install it as in slurm/README.md §1." >&2
+    exit 1
+fi
+
+# Peel off any SBATCH override flags from the front of the argument list.
+# They get forwarded to `sbatch` ahead of the script name, where they take
+# precedence over the matching #SBATCH directives.
+SBATCH_OVERRIDES=()
+MAX_RUNNING=""
+while (( $# > 0 )); do
+    case "$1" in
+        --)
+            shift
+            break
+            ;;
+        --time=*|--mem=*|--cpus-per-task=*|--partition=*)
+            SBATCH_OVERRIDES+=("$1"); shift
+            ;;
+        --time|-t|--mem|--cpus-per-task|-c|--partition|-p)
+            if (( $# < 2 )); then
+                echo "Missing value for $1" >&2
+                exit 2
+            fi
+            SBATCH_OVERRIDES+=("$1" "$2"); shift 2
+            ;;
+        --max-running=*)
+            MAX_RUNNING="${1#*=}"; shift
+            ;;
+        --max-running)
+            if (( $# < 2 )); then
+                echo "Missing value for $1" >&2
+                exit 2
+            fi
+            MAX_RUNNING="$2"; shift 2
+            ;;
+        *)
+            # The first argument that is not an override starts the
+            # pipeline arguments (usually --subject).
+            break
+            ;;
+    esac
+done
+
+if (( $# == 0 )); then
+    echo "No pipeline arguments given; for example:" >&2
+    echo "  slurm/submit.sh --subject 66 --all-sessions --model my-model" >&2
+    exit 2
+fi
+
+mkdir -p slurm/logs slurm/tasks
+TASK_LIST="${REPO_DIR}/slurm/tasks/tasks_$(date +%Y%m%d-%H%M%S)_$$.txt"
+# Missing sessions and selection errors print to stderr, shown here as-is.
+if ! uv run --no-sync hypnose-eeg-pipeline "$@" --list-tasks > "${TASK_LIST}"; then
+    rm -f "${TASK_LIST}"
+    echo "Could not list the tasks for: $*" >&2
+    exit 1
+fi
+N=$(wc -l < "${TASK_LIST}")
+
+ARRAY="0-$((N - 1))"
+if [[ -n "${MAX_RUNNING}" ]]; then
+    ARRAY="${ARRAY}%${MAX_RUNNING}"
+fi
+
+echo "Submitting ${N} task(s) (array ${ARRAY}); task list: ${TASK_LIST}"
+sed 's/^/  /' "${TASK_LIST}"
+if (( ${#SBATCH_OVERRIDES[@]} > 0 )); then
+    echo "  sbatch overrides: ${SBATCH_OVERRIDES[*]}"
+fi
+# `${a[@]+...}` expands an empty array to nothing under `set -u`, even on
+# bash < 4.4.
+exec sbatch \
+    ${SBATCH_OVERRIDES[@]+"${SBATCH_OVERRIDES[@]}"} \
+    --export=ALL,REPO_DIR="${REPO_DIR}",TASK_LIST="${TASK_LIST}" \
+    --array="${ARRAY}" \
+    "${REPO_DIR}/slurm/run_pipeline_array.sbatch" "$@"

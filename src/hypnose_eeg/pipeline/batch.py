@@ -344,7 +344,11 @@ def erase_session_outputs(
 
 
 def report_path(
-    derivatives_root: str | Path, subjects: Sequence[str | int], started_at: datetime
+    derivatives_root: str | Path,
+    subjects: Sequence[str | int],
+    started_at: datetime,
+    *,
+    label: str | None = None,
 ) -> Path:
     """Where a batch run's report lands: one timestamped CSV per run.
 
@@ -355,11 +359,13 @@ def report_path(
 
     Timestamped rather than a fixed name so a rerun -- which is the normal
     response to a failed session -- cannot overwrite the report that recorded
-    why the first run failed.
+    why the first run failed. `label` is appended to the name, so runs that
+    start in the same second -- job-array tasks for one subject's sessions --
+    keep a report each.
     """
     root = Path(derivatives_root)
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
-    filename = f"batch_report_{stamp}.csv"
+    filename = f"batch_report_{stamp}_{label}.csv" if label else f"batch_report_{stamp}.csv"
     # A lone subject is a sequence of characters to `list()`, which would read
     # as a multi-subject run and quietly move the report.
     subjects = [subjects] if isinstance(subjects, (str, int)) else list(subjects)

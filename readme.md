@@ -260,6 +260,19 @@ the first run failed.
 and a batch run has nobody to close it. Review a session afterwards with
 `--session N --stage qc --view`.
 
+### On the SWC HPC (SLURM)
+
+A batch can also run as a SLURM job array on CPU nodes, with one array task per
+subject (its sessions in order) or, with `--task-unit session`, per session:
+
+```bash
+./slurm/submit.sh --subject 66 67 --all-sessions --model my-model
+```
+
+`--list-tasks` previews how a selection splits into tasks, and `--task-index N`
+runs one of them as a batch run. Setup with uv, resources, and logs are
+covered in [`slurm/README.md`](slurm/README.md).
+
 ### Which sessions need QC review
 
 `hypnose-eeg-qc-review` reads the QC summaries already on disk and lists every

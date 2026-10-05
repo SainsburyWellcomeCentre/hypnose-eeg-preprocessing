@@ -58,6 +58,15 @@ Sleep scoring, artifact detection, and the QC summary each write a
 `<output stem>_provenance.json` sidecar naming the git commit that produced the
 output -- and, for sleep scoring, which model was used.
 
+A selection can also be split into independent tasks for a SLURM job array
+(see `slurm/README.md`). `--list-tasks` prints one line per task --
+`--task-unit subject` (the default) gives each subject its own task, running
+its sessions in order; `--task-unit session` gives every session its own --
+and `--task-index N` runs only task N of the same selection, as a batch run
+(failed sessions erased and reported). A short recording is normalized against
+another session of the same animal, so sessions of one subject run in parallel
+only with `--task-unit session`.
+
 Unrecognized arguments are forwarded verbatim to every stage that runs, so a
 flag understood by only one stage (`--model` aside, which this script does
 know about) is best passed by invoking that stage's script directly.
@@ -104,6 +113,10 @@ from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_ro
 from hypnose_eeg.utils.recording_selection import find_sessions
 
 STAGE_ORDER = ["preprocessing", "sleep_scoring", "qc"]
+
+# How `--list-tasks`/`--task-index` split a selection: one task per subject
+# (its sessions in order) or one per session.
+TASK_UNITS = ["subject", "session"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -179,6 +192,22 @@ def build_parser() -> argparse.ArgumentParser:
         "<derivatives>/sub-XXX/batch_report_<timestamp>.csv for one subject, "
         "<derivatives>/batch_report_<timestamp>.csv for several).",
     )
+    tasks = parser.add_argument_group("job-array options (see slurm/README.md)")
+    task_mode = tasks.add_mutually_exclusive_group()
+    task_mode.add_argument(
+        "--list-tasks", action="store_true",
+        help="Print the tasks the selection splits into, one per line, and exit "
+        "without running anything.",
+    )
+    task_mode.add_argument(
+        "--task-index", type=int, default=None, metavar="N",
+        help="Run only task N (counted from 0) of the selection, as a batch run.",
+    )
+    tasks.add_argument(
+        "--task-unit", choices=TASK_UNITS, default="subject",
+        help="What one task covers: every selected session of one subject, run in "
+        "order (default), or one session.",
+    )
     return parser
 
 
@@ -224,7 +253,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, extra = parser.parse_known_args(argv)
     output_dirs = output_dir_overrides(parser, args)
-    single = None if args.all_sessions else _single_session(args.subject, args.session, args.date)
+    # A job-array task always runs as a batch, so a failed session is erased
+    # and reported even when the task covers only one session.
+    as_tasks = args.list_tasks or args.task_index is not None
+    single = (
+        None if args.all_sessions or as_tasks
+        else _single_session(args.subject, args.session, args.date)
+    )
     if single is None and args.view:
         parser.error(
             "--view needs a single session: the viewer waits for a window to be "
@@ -249,12 +284,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"--date, SUBJECT{SUBJECT_SESSIONS_SEP}SESSIONS, or --all-sessions "
                 "for every session."
             )
+        if args.list_tasks:
+            return _print_tasks(
+                args.subject, sessions=args.session, dates=args.date,
+                rawdata_root=args.rawdata_root, unit=args.task_unit,
+            )
         try:
             result = run_batch(
                 args.subject, sessions=args.session, dates=args.date, **options,
                 stages=args.stage, model=args.model, overwrite=args.overwrite,
                 extra_args=extra, keep_failed=args.keep_failed,
                 erase_derived_edf=args.erase_derived_edf, report=args.report,
+                task_index=args.task_index, task_unit=args.task_unit,
             )
         except (FileNotFoundError, ValueError) as exc:
             print(f"FAILED: {exc}", file=sys.stderr)
@@ -350,6 +391,8 @@ def run_batch(
     keep_failed: bool = False,
     erase_derived_edf: bool = False,
     report: str | Path | None = None,
+    task_index: int | None = None,
+    task_unit: str = "subject",
 ) -> BatchResult:
     """Run the selected sessions of every selected subject, erasing and noting the failures.
 
@@ -362,6 +405,10 @@ def run_batch(
     timestamped file below the derivatives root. Raises
     `FileNotFoundError`/`ValueError` when the subjects themselves cannot be
     resolved or a session or date is malformed.
+
+    `task_index` runs only that task of the selection, split by `task_unit` as
+    `plan_tasks` splits it -- one task of a job array. Selections that come up
+    missing belong to no task; `--list-tasks` reports them.
     """
     rawdata = Path(rawdata_root) if rawdata_root else get_rawdata_root()
     derivatives = Path(derivatives_root) if derivatives_root else get_derivatives_root()
@@ -369,6 +416,20 @@ def run_batch(
     resolved_subjects = list(dict.fromkeys(selection.subject for selection in selections))
 
     plan = _plan_batch(rawdata, selections)
+    report_label = None
+    if task_index is not None:
+        tasks = _split_tasks(plan, task_unit)
+        if not 0 <= task_index < len(tasks):
+            raise ValueError(
+                f"Task index {task_index} is out of range: the selection splits "
+                f"into {len(tasks)} task(s) by {task_unit}"
+            )
+        plan = tasks[task_index]
+        resolved_subjects = [subject for subject, _, _ in plan]
+        if task_unit == "session":
+            # Tasks for one subject's sessions start together and would
+            # otherwise write the same timestamped report.
+            report_label = plan[0][1][0].path.name
     total = sum(len(sessions) for _, sessions, _ in plan)
     if not total:
         # Nothing resolved for any subject: the errors are already on stderr and
@@ -427,7 +488,7 @@ def run_batch(
     print(format_summary(outcomes, elapsed_seconds=elapsed))
     destination: Path | None = (
         Path(report) if report
-        else report_path(derivatives, resolved_subjects, started)
+        else report_path(derivatives, resolved_subjects, started, label=report_label)
     )
     try:
         write_report(outcomes, destination, batch_duration_seconds=elapsed)
@@ -474,6 +535,72 @@ def _plan_batch(
             if fresh:
                 plan.append((subject, fresh, None))
     return plan
+
+
+def plan_tasks(
+    subjects: Sequence[str],
+    *,
+    sessions: Sequence[str] | None = None,
+    dates: Sequence[str] | None = None,
+    rawdata_root: str | Path | None = None,
+    unit: str = "subject",
+) -> list[list[tuple[int, list, None]]]:
+    """The tasks a selection splits into for a job array, in the order run.
+
+    Each task is a batch plan of its own: every selected session of one
+    subject (`unit="subject"`), in the order a batch run would take them, or a
+    single session (`unit="session"`). `run_batch(task_index=N)` runs task N.
+    Selections that come up missing are printed to stderr and left out.
+    """
+    rawdata = Path(rawdata_root) if rawdata_root else get_rawdata_root()
+    selections = resolve_selections(rawdata, subjects, sessions=sessions, dates=dates)
+    return _split_tasks(_plan_batch(rawdata, selections), unit)
+
+
+def _split_tasks(
+    plan: list[tuple[int, list, Exception | None]], unit: str
+) -> list[list[tuple[int, list, None]]]:
+    """`plan` split into one plan per subject or per session, missing entries dropped."""
+    if unit not in TASK_UNITS:
+        raise ValueError(f"Unknown task unit {unit!r}; expected one of {TASK_UNITS}")
+    runnable = [(subject, sessions) for subject, sessions, error in plan if error is None]
+    if unit == "session":
+        return [
+            [(subject, [session], None)]
+            for subject, sessions in runnable
+            for session in sessions
+        ]
+    # A subject selected more than once (`66:1 66:3`) is still one task.
+    by_subject: dict[int, list] = {}
+    for subject, sessions in runnable:
+        by_subject.setdefault(subject, []).extend(sessions)
+    return [[(subject, sessions, None)] for subject, sessions in by_subject.items()]
+
+
+def _print_tasks(
+    subjects: Sequence[str],
+    *,
+    sessions: Sequence[str] | None,
+    dates: Sequence[str] | None,
+    rawdata_root: str | None,
+    unit: str,
+) -> int:
+    """Print one line per task -- its subject, then its session directories."""
+    try:
+        tasks = plan_tasks(
+            subjects, sessions=sessions, dates=dates, rawdata_root=rawdata_root, unit=unit
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 1
+    for task in tasks:
+        for subject, task_sessions, _ in task:
+            names = " ".join(session.path.name for session in task_sessions)
+            print(f"{normalize_subjid(subject)} {names}")
+    if not tasks:
+        print("FAILED: the selection holds no sessions to run", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _run_one_session(
