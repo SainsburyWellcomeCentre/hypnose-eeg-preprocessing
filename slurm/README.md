@@ -30,8 +30,9 @@ On a login node. The pipeline installs `hypnose-helpers` and
 `hypnose-somnotate` from **sibling checkouts**, so clone all three side by side:
 
 ```bash
-# uv, installed to ~/.local/bin (the scripts look there too)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# uv, from the cluster's module system (the scripts load it themselves too)
+module load uv
+uv --version
 
 mkdir -p /nfs/nhome/live/$USER/Repos
 cd /nfs/nhome/live/$USER/Repos
@@ -215,7 +216,7 @@ needs review.
 
 | Symptom | Likely cause |
 |---|---|
-| `uv not found` | uv not installed in `~/.local/bin` (§1) |
+| `uv not found` | `module load uv` failed on that node; check `module avail uv` (§1) |
 | `No uv environment at …` | `uv sync` not run, or run with a different `UV_PROJECT_ENVIRONMENT` (§1) |
 | `REPO_DIR does not look like the repo root` | Raw `sbatch` submitted from outside the repo |
 | `The tasks for this selection changed since submission` | Rawdata changed while the array was pending; resubmit |

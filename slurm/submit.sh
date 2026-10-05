@@ -39,9 +39,17 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 cd "${REPO_DIR}"
 
-export PATH="${HOME}/.local/bin:${PATH}"
+# uv comes from the cluster's module; load it if this shell has not.  The
+# jobs inherit the resulting PATH through --export=ALL below.
+if ! command -v uv >/dev/null 2>&1 && command -v module >/dev/null 2>&1; then
+    # Module scripts may read unset variables.
+    set +u
+    module load uv >/dev/null 2>&1 || true
+    set -u
+fi
+export PATH="${PATH}:${HOME}/.local/bin"
 if ! command -v uv >/dev/null 2>&1; then
-    echo "uv not found on PATH (or in ~/.local/bin); install it as in slurm/README.md §1." >&2
+    echo "uv not found: \`module load uv\` failed and it is not in ~/.local/bin (slurm/README.md §1)." >&2
     exit 1
 fi
 

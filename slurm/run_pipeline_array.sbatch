@@ -42,11 +42,18 @@ if (( $# == 0 )); then
 fi
 
 # ── uv ──────────────────────────────────────────────────────────────────────
-# The standalone installer puts uv in ~/.local/bin, which a batch shell may
-# not have on PATH.
-export PATH="${HOME}/.local/bin:${PATH}"
+# uv comes from the cluster's module (`module load uv`).  If it was loaded in
+# the submitting shell, sbatch already passed it on through PATH; otherwise
+# load it here.  A standalone install in ~/.local/bin also works.
+if ! command -v uv >/dev/null 2>&1 && command -v module >/dev/null 2>&1; then
+    # Module scripts may read unset variables.
+    set +u
+    module load uv >/dev/null 2>&1 || true
+    set -u
+fi
+export PATH="${PATH}:${HOME}/.local/bin"
 if ! command -v uv >/dev/null 2>&1; then
-    echo "uv not found on PATH (or in ~/.local/bin); install it as in slurm/README.md §1." >&2
+    echo "uv not found: \`module load uv\` failed and it is not in ~/.local/bin (slurm/README.md §1)." >&2
     exit 1
 fi
 
