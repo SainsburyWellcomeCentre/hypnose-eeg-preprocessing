@@ -270,7 +270,8 @@ subject (its sessions in order) or, with `--task-unit session`, per session:
 ```
 
 `--list-tasks` previews how a selection splits into tasks, and `--task-index N`
-runs one of them as a batch run. Setup with uv, resources, and logs are
+runs one of them as a batch run; with `--task-file FILE`, a saved
+`--list-tasks` output, it runs line N of that file instead. Setup with uv, resources, and logs are
 covered in [`slurm/README.md`](slurm/README.md).
 
 ### Which sessions need QC review

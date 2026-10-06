@@ -17,7 +17,7 @@ SLURM job 12345  (default: --task-unit subject)
 
 | File | Purpose |
 |---|---|
-| `slurm/run_pipeline_array.sbatch` | The array job: finds its task with `--list-tasks`, runs it with `--task-index` |
+| `slurm/run_pipeline_array.sbatch` | The array job: runs its line of the frozen task list with `--task-index`/`--task-file` |
 | `slurm/submit.sh` | Wrapper: counts the tasks, freezes the task list, sizes `--array`, submits |
 | `slurm/logs/` | SLURM stdout/stderr per array task (git-ignored) |
 | `slurm/tasks/` | Task lists frozen by `submit.sh` (git-ignored) |
@@ -111,9 +111,11 @@ Run from the repo root:
 ```
 
 The wrapper writes the task list to `slurm/tasks/` and submits that many array
-tasks. A task whose list no longer matches refuses to run rather than run the
-wrong session — for example, after a new session appears in rawdata while the
-array is still pending. Resubmit in that case.
+tasks. Array task N runs line N of that file (`--task-index N --task-file …`),
+so the sessions each task runs are fixed at submission: a session that appears
+in rawdata while the array is pending, or running, is not picked up — submit
+again to process it. A listed session directory that has disappeared fails its
+task rather than letting it run a different session.
 
 SLURM overrides go **first**, and `--` separates them from the pipeline
 arguments:
@@ -143,7 +145,9 @@ sbatch --array=0-$((N - 1)) slurm/run_pipeline_array.sbatch "${ARGS[@]}"
 Submit **from the repo root**: the job finds the code through
 `$SLURM_SUBMIT_DIR`, and the log paths are relative to it. Any `sbatch` flag
 placed before the script name, such as `--qos` or `--exclude`, overrides the
-matching `#SBATCH` directive. Raw `sbatch` skips the frozen-task-list check.
+matching `#SBATCH` directive. Raw `sbatch` has no frozen task list: each task
+lists the selection when it starts, so do not add sessions to rawdata while
+such an array is pending — the indices would shift.
 
 ## 4. One task per subject, or per session?
 
@@ -219,7 +223,8 @@ needs review.
 | `uv not found` | `module load uv` failed on that node; check `module avail uv` (§1) |
 | `No uv environment at …` | `uv sync` not run, or run with a different `UV_PROJECT_ENVIRONMENT` (§1) |
 | `REPO_DIR does not look like the repo root` | Raw `sbatch` submitted from outside the repo |
-| `The tasks for this selection changed since submission` | Rawdata changed while the array was pending; resubmit |
+| `… no longer has ses-… in …` | A listed session directory was moved or renamed after submission; resubmit |
+| `The task list frozen at submission is gone` | The `slurm/tasks/` file was deleted while the array was pending; resubmit |
 | `rawdata … MISSING` in the task header | `/ceph` not mounted on that node, or the wrong profile (§1) |
 | `OUT_OF_MEMORY` in `sacct` | Raise `--mem` |
 | `TIMEOUT` in `sacct` | Raise `--time`, or use `--task-unit session` |

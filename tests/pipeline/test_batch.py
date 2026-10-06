@@ -1337,6 +1337,85 @@ class JobArrayTaskTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 2)
 
+    def freeze_tasks(self, *argv: str) -> Path:
+        """The `--list-tasks` output for `argv`, saved as submit.sh saves it."""
+        code, lines = self.listed(*argv)
+        self.assertEqual(code, 0)
+        task_file = self.root / "tasks.txt"
+        task_file.write_text("".join(f"{line}\n" for line in lines))
+        return task_file
+
+    def test_a_task_file_runs_the_session_listed_at_submission(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        selection = ("--subject", "67", "--all-sessions", "--task-unit", "session")
+        task_file = self.freeze_tasks(*selection)
+        # A session that sorts first arrives after submission, shifting the
+        # selection's own task indices.
+        self.by_subject[67].insert(0, session_ref(self.rawdata, 3, "20260716", 67))
+
+        result = self.pipeline(
+            *selection, "--task-index", "1", "--task-file", str(task_file)
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("sub-067", "2")])
+
+    def test_a_subject_task_file_leaves_new_sessions_alone(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        selection = ("--subject", "66", "67", "--all-sessions")
+        task_file = self.freeze_tasks(*selection)
+        self.by_subject[67].append(session_ref(self.rawdata, 3, "20260720", 67))
+
+        result = self.pipeline(
+            *selection, "--task-index", "1", "--task-file", str(task_file)
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.qc_selectors(mock_qc), [("sub-067", "1"), ("sub-067", "2")])
+
+    def test_a_listed_session_that_is_gone_fails_without_running(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        selection = ("--subject", "67", "--all-sessions")
+        task_file = self.freeze_tasks(*selection)
+        del self.by_subject[67][1]
+
+        with redirect_stderr(io.StringIO()) as err:
+            result = self.pipeline(
+                *selection, "--task-index", "0", "--task-file", str(task_file)
+            )
+
+        self.assertEqual(result, 1)
+        self.assertIn("sub-067 no longer has ses-002_date-20260719", err.getvalue())
+        mock_preprocessing.run_steps.assert_not_called()
+
+    def test_a_task_file_index_out_of_range_fails_without_running(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        selection = ("--subject", "66", "67", "--all-sessions")
+        task_file = self.freeze_tasks(*selection)
+
+        with redirect_stderr(io.StringIO()) as err:
+            result = self.pipeline(
+                *selection, "--task-index", "2", "--task-file", str(task_file)
+            )
+
+        self.assertEqual(result, 1)
+        self.assertIn("lists 2 task(s)", err.getvalue())
+        mock_preprocessing.run_steps.assert_not_called()
+
+    def test_a_task_file_needs_a_task_index(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        with self.assertRaises(SystemExit) as ctx, redirect_stderr(io.StringIO()):
+            self.pipeline(
+                "--subject", "66", "--all-sessions", "--task-file", str(self.root / "t.txt")
+            )
+
+        self.assertEqual(ctx.exception.code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

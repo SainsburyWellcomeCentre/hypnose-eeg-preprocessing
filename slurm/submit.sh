@@ -4,8 +4,9 @@
 #
 # Counts the tasks the pipeline selection splits into and submits exactly
 # that many array tasks — so you don't have to compute N and stitch together
-# --export/--array by hand.  The task list is frozen at submit time; a task
-# whose list no longer matches (new sessions in rawdata) refuses to run.
+# --export/--array by hand.  The task list is frozen at submit time, and each
+# array task runs its line of it, so sessions added to rawdata while the
+# array is pending are left for the next submission.
 #
 # Usage:
 #   slurm/submit.sh [SBATCH_OVERRIDES] [--] PIPELINE_ARGS

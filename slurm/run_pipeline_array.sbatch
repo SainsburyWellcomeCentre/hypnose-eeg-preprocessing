@@ -5,7 +5,8 @@
 # Every argument after the script name is a `hypnose-eeg-pipeline` argument:
 # the selection (--subject/--session/--date/--all-sessions) plus any options
 # (--model, --stage, --overwrite, --task-unit, ...).  The selection is split
-# into tasks with `--list-tasks`; array task N runs `--task-index N`.  By
+# into tasks with `--list-tasks`; array task N runs `--task-index N` -- line N
+# of the list slurm/submit.sh froze at submission, when there is one.  By
 # default one task is one subject, its sessions run in order; pass
 # `--task-unit session` for one task per session (see slurm/README.md).
 #
@@ -98,25 +99,27 @@ export NUMEXPR_NUM_THREADS="${THREADS}"
 PIPELINE=(uv run --no-sync hypnose-eeg-pipeline)
 
 # ── Find this task ─────────────────────────────────────────────────────────
-# The same selection the pipeline runs, so SLURM always sees the tasks the
-# pipeline would run.
-mapfile -t TASKS < <("${PIPELINE[@]}" "$@" --list-tasks)
-N_TASKS=${#TASKS[@]}
+# slurm/submit.sh freezes the task list at submit time, and the task runs its
+# line of that file (`--task-file`): sessions added to rawdata since then are
+# left for the next submission instead of shifting the indices.  Without a
+# frozen list (raw sbatch), list the selection as rawdata stands now.
 TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
+if [[ -n "${TASK_LIST:-}" ]]; then
+    if [[ ! -f "${TASK_LIST}" ]]; then
+        echo "The task list frozen at submission is gone: ${TASK_LIST}; resubmit." >&2
+        exit 1
+    fi
+    mapfile -t TASKS < "${TASK_LIST}"
+    TASK_ARGS=(--task-index "${TASK_ID}" --task-file "${TASK_LIST}")
+else
+    mapfile -t TASKS < <("${PIPELINE[@]}" "$@" --list-tasks)
+    TASK_ARGS=(--task-index "${TASK_ID}")
+fi
+N_TASKS=${#TASKS[@]}
 
 if (( N_TASKS == 0 )); then
     echo "No tasks found for: $*" >&2
     exit 1
-fi
-
-# slurm/submit.sh freezes the task list at submit time.  New sessions in
-# rawdata since then would shift the indices and run the wrong sessions.
-if [[ -n "${TASK_LIST:-}" ]]; then
-    if ! diff -q <(printf '%s\n' "${TASKS[@]}") "${TASK_LIST}" >/dev/null; then
-        echo "The tasks for this selection changed since submission (${TASK_LIST})." >&2
-        echo "Compare it with the current --list-tasks output and resubmit." >&2
-        exit 1
-    fi
 fi
 
 if (( TASK_ID >= N_TASKS )); then
@@ -142,7 +145,7 @@ echo "────────────────────────�
 # ── Run the task ───────────────────────────────────────────────────────────
 # Not `exec`: the footer below should report how the task ended.
 status=0
-"${PIPELINE[@]}" "$@" --task-index "${TASK_ID}" || status=$?
+"${PIPELINE[@]}" "$@" "${TASK_ARGS[@]}" || status=$?
 
 echo "─────────────────────────────────────────────────────────────────────────────"
 echo "  Finished   : $(date -Iseconds)  (exit ${status})"

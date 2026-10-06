@@ -63,9 +63,11 @@ A selection can also be split into independent tasks for a SLURM job array
 `--task-unit subject` (the default) gives each subject its own task, running
 its sessions in order; `--task-unit session` gives every session its own --
 and `--task-index N` runs only task N of the same selection, as a batch run
-(failed sessions erased and reported). A short recording is normalized against
-another session of the same animal, so sessions of one subject run in parallel
-only with `--task-unit session`.
+(failed sessions erased and reported). With `--task-file FILE` -- a saved
+`--list-tasks` output -- task N is line N of that file instead, so a task runs
+the sessions frozen at submission even if rawdata has gained sessions since.
+A short recording is normalized against another session of the same animal,
+so sessions of one subject run in parallel only with `--task-unit session`.
 
 Unrecognized arguments are forwarded verbatim to every stage that runs, so a
 flag understood by only one stage (`--model` aside, which this script does
@@ -106,7 +108,7 @@ from hypnose_eeg.pipeline.steps import (
     output_dir_overrides,
     output_layout_env,
 )
-from hypnose_helpers.io.layout import normalize_subjid
+from hypnose_helpers.io.layout import normalize_subjid, parse_subject
 from hypnose_helpers.io.selectors import flatten
 
 from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
@@ -208,6 +210,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="What one task covers: every selected session of one subject, run in "
         "order (default), or one session.",
     )
+    tasks.add_argument(
+        "--task-file", default=None, metavar="FILE",
+        help="With --task-index N, run line N of this saved --list-tasks output "
+        "instead of task N of the selection as rawdata stands now.",
+    )
     return parser
 
 
@@ -253,6 +260,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, extra = parser.parse_known_args(argv)
     output_dirs = output_dir_overrides(parser, args)
+    if args.task_file is not None and args.task_index is None:
+        parser.error("--task-file needs --task-index: which line of the file to run")
     # A job-array task always runs as a batch, so a failed session is erased
     # and reported even when the task covers only one session.
     as_tasks = args.list_tasks or args.task_index is not None
@@ -296,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                 extra_args=extra, keep_failed=args.keep_failed,
                 erase_derived_edf=args.erase_derived_edf, report=args.report,
                 task_index=args.task_index, task_unit=args.task_unit,
+                task_file=args.task_file,
             )
         except (FileNotFoundError, ValueError) as exc:
             print(f"FAILED: {exc}", file=sys.stderr)
@@ -393,6 +403,7 @@ def run_batch(
     report: str | Path | None = None,
     task_index: int | None = None,
     task_unit: str = "subject",
+    task_file: str | Path | None = None,
 ) -> BatchResult:
     """Run the selected sessions of every selected subject, erasing and noting the failures.
 
@@ -408,24 +419,35 @@ def run_batch(
 
     `task_index` runs only that task of the selection, split by `task_unit` as
     `plan_tasks` splits it -- one task of a job array. Selections that come up
-    missing belong to no task; `--list-tasks` reports them.
+    missing belong to no task; `--list-tasks` reports them. With `task_file`,
+    a saved `--list-tasks` output, the task is line `task_index` of that file
+    instead, and the selection is not resolved again: sessions added to
+    rawdata since the file was written are left alone.
     """
     rawdata = Path(rawdata_root) if rawdata_root else get_rawdata_root()
     derivatives = Path(derivatives_root) if derivatives_root else get_derivatives_root()
-    selections = resolve_selections(rawdata, subjects, sessions=sessions, dates=dates)
-    resolved_subjects = list(dict.fromkeys(selection.subject for selection in selections))
-
-    plan = _plan_batch(rawdata, selections)
     report_label = None
-    if task_index is not None:
-        tasks = _split_tasks(plan, task_unit)
-        if not 0 <= task_index < len(tasks):
-            raise ValueError(
-                f"Task index {task_index} is out of range: the selection splits "
-                f"into {len(tasks)} task(s) by {task_unit}"
-            )
-        plan = tasks[task_index]
+    if task_file is not None:
+        if task_index is None:
+            raise ValueError("A task file needs a task index: which line of it to run")
+        plan = _read_task(rawdata, Path(task_file), task_index)
         resolved_subjects = [subject for subject, _, _ in plan]
+    else:
+        selections = resolve_selections(rawdata, subjects, sessions=sessions, dates=dates)
+        resolved_subjects = list(
+            dict.fromkeys(selection.subject for selection in selections)
+        )
+        plan = _plan_batch(rawdata, selections)
+        if task_index is not None:
+            tasks = _split_tasks(plan, task_unit)
+            if not 0 <= task_index < len(tasks):
+                raise ValueError(
+                    f"Task index {task_index} is out of range: the selection splits "
+                    f"into {len(tasks)} task(s) by {task_unit}"
+                )
+            plan = tasks[task_index]
+            resolved_subjects = [subject for subject, _, _ in plan]
+    if task_index is not None:
         if task_unit == "session":
             # Tasks for one subject's sessions start together and would
             # otherwise write the same timestamped report.
@@ -575,6 +597,42 @@ def _split_tasks(
     for subject, sessions in runnable:
         by_subject.setdefault(subject, []).extend(sessions)
     return [[(subject, sessions, None)] for subject, sessions in by_subject.items()]
+
+
+def _read_task(
+    rawdata_root: Path, task_file: Path, task_index: int
+) -> list[tuple[int, list, None]]:
+    """Task `task_index` of a saved `--list-tasks` output, as a batch plan.
+
+    The line names the subject and its session directories; each is looked
+    up in rawdata by that name, so the task runs what was listed even if the
+    subject has gained sessions since. A session directory that has gone
+    fails the task instead of running a different one.
+    """
+    lines = task_file.read_text().splitlines()
+    if not 0 <= task_index < len(lines):
+        raise ValueError(
+            f"Task index {task_index} is out of range: {task_file} lists "
+            f"{len(lines)} task(s)"
+        )
+    subject_name, *session_names = lines[task_index].split()
+    if not session_names:
+        raise ValueError(
+            f"Line {task_index} of {task_file} names no sessions: "
+            f"{lines[task_index]!r}"
+        )
+    subject = parse_subject(subject_name)
+    available = {
+        session.path.name: session
+        for session in find_sessions(rawdata_root, subject=subject)
+    }
+    gone = [name for name in session_names if name not in available]
+    if gone:
+        raise FileNotFoundError(
+            f"{normalize_subjid(subject)} no longer has {', '.join(gone)} in "
+            f"{rawdata_root} (task {task_index} of {task_file})"
+        )
+    return [(subject, [available[name] for name in session_names], None)]
 
 
 def _print_tasks(
