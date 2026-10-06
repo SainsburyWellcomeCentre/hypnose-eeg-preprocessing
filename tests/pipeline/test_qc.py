@@ -8,6 +8,64 @@ from hypnose_eeg.pipeline.steps import StepFailed
 
 
 class RunStepsTests(unittest.TestCase):
+    def setUp(self):
+        # No QC summary on disk unless a test says otherwise.
+        verdict = patch("hypnose_eeg.pipeline.qc.read_qc_verdict", return_value=None)
+        self.stored_verdict = verdict.start()
+        self.addCleanup(verdict.stop)
+
+    @patch("hypnose_eeg.pipeline.qc.run_step")
+    def test_an_existing_summary_skips_the_summary_and_its_figures(self, mock_run_step):
+        self.stored_verdict.return_value = ("review", [])
+
+        qc.run_steps(subject="66", session="1", derivatives_root="/deriv")
+
+        mock_run_step.assert_not_called()
+        self.assertEqual(self.stored_verdict.call_args.args, ("/deriv",))
+        self.assertEqual(self.stored_verdict.call_args.kwargs["session"], 1)
+
+    @patch("hypnose_eeg.pipeline.qc.run_step")
+    def test_an_existing_fail_summary_still_fails_the_stage(self, mock_run_step):
+        self.stored_verdict.return_value = ("fail", ["artifacts"])
+
+        with self.assertRaises(StepFailed) as ctx:
+            qc.run_steps(subject="66", session="1", derivatives_root="/deriv")
+
+        self.assertEqual(ctx.exception.label, "qc:summary")
+        self.assertEqual(ctx.exception.returncode, 1)
+        self.assertIsNone(ctx.exception.error)
+        mock_run_step.assert_not_called()
+
+    @patch("hypnose_eeg.pipeline.qc.run_step")
+    def test_overwrite_recomputes_an_existing_summary(self, mock_run_step):
+        self.stored_verdict.return_value = ("pass", [])
+
+        qc.run_steps(subject="66", session="1", derivatives_root="/deriv", overwrite=True)
+
+        labels = [c.kwargs["label"] for c in mock_run_step.call_args_list]
+        self.assertEqual(labels, ["qc:summary", "qc:figures"])
+        self.stored_verdict.assert_not_called()
+
+    @patch("hypnose_eeg.pipeline.qc.run_step")
+    def test_figures_asked_for_on_their_own_are_always_drawn(self, mock_run_step):
+        self.stored_verdict.return_value = ("review", [])
+
+        qc.run_steps(
+            subject="66", session="1", derivatives_root="/deriv",
+            steps=["integrity", "figures"],
+        )
+
+        labels = [c.kwargs["label"] for c in mock_run_step.call_args_list]
+        self.assertEqual(labels, ["qc:integrity", "qc:figures"])
+
+    @patch("hypnose_eeg.pipeline.qc.run_step")
+    def test_cli_overwrite_reaches_the_steps(self, mock_run_step):
+        self.stored_verdict.return_value = ("pass", [])
+
+        qc.main(["--subject", "66", "--session", "1", "--overwrite"])
+
+        self.assertEqual(mock_run_step.call_count, 2)
+
     @patch("hypnose_eeg.pipeline.qc.run_step")
     def test_default_steps_are_the_summary_then_the_review_figures(self, mock_run_step):
         qc.run_steps(subject="66", session="1")

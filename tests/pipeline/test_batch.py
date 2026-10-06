@@ -863,6 +863,54 @@ class BatchRunTests(unittest.TestCase):
         self.assertEqual([row["qc_status"] for row in rows], ["pass", "pass", "review"])
         self.assertEqual([row["qc_failed_sections"] for row in rows], ["", "", ""])
 
+    def write_old_summaries(self, review_session: int) -> None:
+        """A QC summary per session from an earlier run, as a skipped QC stage leaves."""
+        for ses, date in SESSION_DATES.items():
+            make_session_tree(
+                self.derivatives, ses, date,
+                files={"eeg/quality_control/x_qc_summary.csv": qc_summary_csv(
+                    ("integrity", "pass"),
+                    ("spectra", "review" if ses == review_session else "pass"),
+                )},
+            )
+        an_hour_ago = time.time() - 3600
+        for path in self.derivatives.rglob("*_qc_summary.csv"):
+            os.utime(path, (an_hour_ago, an_hour_ago))
+
+    def test_a_skipped_qc_reports_the_summary_already_on_disk(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        self.write_old_summaries(review_session=3)
+
+        result = self.run_batch()
+
+        self.assertEqual(result, 0)
+        rows = self.report_rows()
+        self.assertEqual([row["qc_status"] for row in rows], ["pass", "pass", "review"])
+
+    def test_without_the_qc_stage_an_old_summary_is_not_reported(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        self.write_old_summaries(review_session=3)
+
+        result = self.run_batch("--stage", "preprocessing")
+
+        self.assertEqual(result, 0)
+        self.assertEqual([row["qc_status"] for row in self.report_rows()], ["", "", ""])
+
+    def test_overwrite_reaches_the_qc_stage(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        for argv in ((), ("--overwrite",)):
+            mock_qc.reset_mock()
+            with self.subTest(argv=argv):
+                self.run_batch(*argv)
+
+                self.assertEqual(
+                    {call.kwargs["overwrite"] for call in mock_qc.run_steps.call_args_list},
+                    {bool(argv)},
+                )
+
     def test_a_qc_crash_without_a_fresh_summary_is_still_a_failure(
         self, mock_preprocessing, mock_scoring, mock_qc
     ):

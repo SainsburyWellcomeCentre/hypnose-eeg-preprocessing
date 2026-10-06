@@ -172,10 +172,10 @@ hypnose-eeg-score --subject 66 --session 1 --steps view --hours 3 6
 Every step whose output already exists is skipped and the run continues with
 the next one, so an interrupted or partially-completed session is resumed by
 rerunning the same command: channel trimming, concatenation, downsampling,
-sleep scoring, and artifact detection each leave their existing outputs in
-place. Pass
-`--overwrite` to recompute them regardless. The QC summary is the exception --
-it is cheap and always refreshed.
+sleep scoring, artifact detection, and the QC summary (with its review
+figures) each leave their existing outputs in place; a session whose QC
+summary is already on disk reports that verdict. Pass `--overwrite` to
+recompute them regardless -- for example after changing the QC thresholds.
 
 ### Batch: several sessions or subjects
 

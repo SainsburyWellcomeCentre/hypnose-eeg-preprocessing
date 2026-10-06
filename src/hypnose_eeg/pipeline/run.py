@@ -242,7 +242,9 @@ def run_stages(
             **common, overwrite=overwrite,
             steps=["detect_artifacts"], extra_args=extra,
         )
-        qc.run_steps(**common, steps=["summary", "figures"], extra_args=extra)
+        qc.run_steps(
+            **common, overwrite=overwrite, steps=["summary", "figures"], extra_args=extra
+        )
     else:
         if "preprocessing" in stages:
             preprocessing.run_steps(**common, overwrite=overwrite, extra_args=extra)
@@ -251,7 +253,7 @@ def run_stages(
                 **common, model=model, overwrite=overwrite, extra_args=extra
             )
         if "qc" in stages:
-            qc.run_steps(**common, extra_args=extra)
+            qc.run_steps(**common, overwrite=overwrite, extra_args=extra)
     if view:
         sleep_scoring.run_steps(**common, steps=["view"], extra_args=extra)
 
@@ -677,9 +679,13 @@ def _run_one_session(
     )
     clock = time.monotonic()
     wall_start = time.time()
+    # A QC stage that found a summary already on disk reports that one, so
+    # when QC runs, the summary on disk is its verdict however old; without
+    # QC, only a summary written during this session's run would count.
+    runs_qc = batch.stages is None or "qc" in batch.stages
     qc_lookup = dict(
         subject=subject, session=session_ref.ses, date=session_ref.date,
-        env=batch.env, since=wall_start,
+        env=batch.env, since=None if runs_qc else wall_start,
     )
     try:
         run_stages(
