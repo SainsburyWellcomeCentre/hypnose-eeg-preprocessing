@@ -20,9 +20,14 @@ SLURM job 12345  (default: --task-unit subject)
 | `slurm/run_pipeline_array.sbatch` | The array job: runs its line of the frozen task list with `--task-index`/`--task-file` |
 | `slurm/submit.sh` | Wrapper: counts the tasks, freezes the task list, sizes `--array`, submits the array and its report job |
 | `slurm/submit.yaml` | Template for `submit.sh --config`: resources and pipeline arguments in a file |
-| `slurm/logs/` | SLURM stdout/stderr per array task (git-ignored) |
-| `slurm/tasks/` | Task lists frozen by `submit.sh` (git-ignored) |
-| `slurm/reports/` | Per-task reports waiting to be merged, one folder per array job (git-ignored) |
+| `<derivatives>/slurm/logs/` | SLURM stdout/stderr per array task, from `submit.sh` |
+| `<derivatives>/slurm/tasks/` | Task lists frozen by `submit.sh` |
+| `<derivatives>/slurm/reports/` | Per-task reports waiting to be merged, one folder per array job |
+| `slurm/logs/` | SLURM stdout/stderr of raw `sbatch` submissions only (git-ignored) |
+
+`<derivatives>` is the derivatives root the pipeline arguments resolve to:
+`--derivatives-root` when given, else the data profile's (on the cluster,
+`swc-hpc`). `submit.sh` prints the log folder when it submits.
 
 ---
 
@@ -112,7 +117,7 @@ Run from the repo root:
 ./slurm/submit.sh --subject 66:1,3 67:2-4 --stage qc
 ```
 
-The wrapper writes the task list to `slurm/tasks/` and submits that many array
+The wrapper writes the task list to `<derivatives>/slurm/tasks/` and submits that many array
 tasks. Array task N runs line N of that file (`--task-index N --task-file …`),
 so the sessions each task runs are fixed at submission: a session that appears
 in rawdata while the array is pending, or running, is not picked up — submit
@@ -189,7 +194,9 @@ sbatch --array=0-$((N - 1)) slurm/run_pipeline_array.sbatch "${ARGS[@]}"
 ```
 
 Submit **from the repo root**: the job finds the code through
-`$SLURM_SUBMIT_DIR`, and the log paths are relative to it. Any `sbatch` flag
+`$SLURM_SUBMIT_DIR`, and the log paths are relative to it: raw `sbatch` logs
+go to the repo's `slurm/logs/` (an `#SBATCH` line cannot name the derivatives
+root), unless you pass `--output`/`--error` yourself. Any `sbatch` flag
 placed before the script name, such as `--qos` or `--exclude`, overrides the
 matching `#SBATCH` directive. Raw `sbatch` has no frozen task list: each task
 lists the selection when it starts, so do not add sessions to rawdata while
@@ -241,8 +248,9 @@ the rest.
 ```bash
 squeue -u $USER                                   # pending / running
 sacct -j 12345 -X --format=JobID,State,ExitCode,Elapsed,MaxRSS,NodeList
-tail -f slurm/logs/hypnose_eeg_12345_0.out        # array task 0
-find slurm/logs -name 'hypnose_eeg_12345_*.err' ! -empty   # tasks with errors
+LOGS=<derivatives>/slurm/logs                     # as submit.sh printed it
+tail -f $LOGS/hypnose_eeg_12345_0.out             # array task 0
+find $LOGS -name 'hypnose_eeg_12345_*.err' ! -empty   # tasks with errors
 scancel 12345                                     # the whole array (12345_0 for one task)
 ```
 
@@ -250,9 +258,9 @@ scancel 12345                                     # the whole array (12345_0 for
 
 | File | Contents |
 |---|---|
-| `slurm/logs/hypnose_eeg_<job>_<task>.out` | Task header (node, CPUs, commit, environment, arguments, task, data profile), then the pipeline's output and batch summary |
-| `slurm/logs/hypnose_eeg_<job>_<task>.err` | Warnings, tracebacks, `FAILED:` lines |
-| `slurm/logs/hypnose_eeg_<job>_report.out` / `.err` | The report job's output |
+| `<derivatives>/slurm/logs/hypnose_eeg_<job>_<task>.out` | Task header (node, CPUs, commit, environment, job files folder, arguments, task, data profile), then the pipeline's output and batch summary |
+| `<derivatives>/slurm/logs/hypnose_eeg_<job>_<task>.err` | Warnings, tracebacks, `FAILED:` lines |
+| `<derivatives>/slurm/logs/hypnose_eeg_<job>_report.out` / `.err` | The report job's output |
 | `<derivatives>/batch_report_<timestamp>_job-<job>.csv` | The job's report, one row per session: status, QC status, failed step, error, what was erased (in `sub-XXX/` when the job covers one subject; `--report FILE` puts it elsewhere) |
 | `<derivatives>/sub-XXX/ses-…/eeg/` | The outputs themselves (main readme, "Output folders") |
 
@@ -263,7 +271,7 @@ step whose output already exists, so it costs little for the sessions that
 completed. `hypnose-eeg-qc-review --subject …` lists the sessions whose QC
 needs review.
 
-Each array task writes its rows to `slurm/reports/<job>/task-N.csv`, and the
+Each array task writes its rows to `<derivatives>/slurm/reports/<job>/task-N.csv`, and the
 report job merges them, in task order, and removes them. A task that left no
 report — cancelled, `TIMEOUT`, `OUT_OF_MEMORY` — still gets a `no_report` row
 for each of its sessions, taken from the frozen task list, so the report
@@ -272,7 +280,9 @@ job's: from its first task starting to its last one finishing. If the report
 job could not run, merge by hand once the array has ended:
 
 ```bash
-uv run hypnose-eeg-pipeline <same pipeline arguments> \n    --merge-reports slurm/reports/<job> --task-file slurm/tasks/<task list>.txt
+uv run hypnose-eeg-pipeline <same pipeline arguments> \
+    --merge-reports <derivatives>/slurm/reports/<job> \
+    --task-file <derivatives>/slurm/tasks/<task list>.txt
 ```
 
 Raw `sbatch` arrays (§3 B) have no report job: each task writes its own
@@ -284,9 +294,9 @@ report, as an interactive batch run does.
 | `No uv environment at …` | `uv sync` not run, or run with a different `UV_PROJECT_ENVIRONMENT` (§1) |
 | `REPO_DIR does not look like the repo root` | Raw `sbatch` submitted from outside the repo |
 | `… no longer has ses-… in …` | A listed session directory was moved or renamed after submission; resubmit |
-| `The task list frozen at submission is gone` | The `slurm/tasks/` file was deleted while the array was pending; resubmit |
+| `The task list frozen at submission is gone` | The `<derivatives>/slurm/tasks/` file was deleted while the array was pending; resubmit |
 | `rawdata … MISSING` in the task header | `/ceph` not mounted on that node, or the wrong profile (§1) |
 | `OUT_OF_MEMORY` in `sacct` | Raise `--mem` |
 | `TIMEOUT` in `sacct` | Raise `--time`, or use `--task-unit session` |
 | `no_report` rows in the job's report | That task was cancelled or killed; check `sacct` for its state |
-| No job report, files left in `slurm/reports/<job>/` | The report job failed; see its `_report.err` log, or merge by hand (above) |
+| No job report, files left in `<derivatives>/slurm/reports/<job>/` | The report job failed; see its `_report.err` log, or merge by hand (above) |

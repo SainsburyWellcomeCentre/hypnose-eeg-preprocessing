@@ -117,7 +117,11 @@ from hypnose_helpers.io.layout import normalize_subjid, parse_session_dirname, p
 from hypnose_helpers.io.selectors import flatten
 
 from hypnose_eeg.io.output_paths import save_csv_rows
-from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
+from hypnose_eeg.io.repository_paths import (
+    get_derivatives_root,
+    get_rawdata_root,
+    resolve_data_roots,
+)
 from hypnose_eeg.utils.recording_selection import find_sessions
 
 STAGE_ORDER = ["preprocessing", "sleep_scoring", "qc"]
@@ -217,6 +221,12 @@ def build_parser() -> argparse.ArgumentParser:
         "into one batch report, and exit without running anything. With "
         "--task-file, tasks that left no report are reported too.",
     )
+    task_mode.add_argument(
+        "--print-derivatives-root", action="store_true",
+        help="Print the derivatives root this run would write to (after "
+        "--derivatives-root and the data profile) and exit without running "
+        "anything; slurm/submit.sh keeps its logs and reports below it.",
+    )
     tasks.add_argument(
         "--task-unit", choices=TASK_UNITS, default="subject",
         help="What one task covers: every selected session of one subject, run in "
@@ -274,6 +284,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, extra = parser.parse_known_args(argv)
     output_dirs = output_dir_overrides(parser, args)
+    if args.print_derivatives_root:
+        print(resolve_data_roots(args.rawdata_root, args.derivatives_root)[1])
+        return 0
     if args.merge_reports is not None:
         try:
             merge_task_reports(
@@ -764,7 +777,7 @@ def _no_report_rows(rawdata_root: Path, line: str, index: int) -> list[dict[str,
         available = {}
     error = (
         f"array task {index} left no report: it was cancelled, ran out of time or "
-        "memory, or failed before running (see its slurm/logs files and sacct)"
+        "memory, or failed before running (see its logs in <derivatives>/slurm/logs and sacct)"
     )
     rows: list[dict[str, object]] = []
     for name in session_names:

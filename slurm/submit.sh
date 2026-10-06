@@ -43,7 +43,9 @@
 # sbatch option, edit run_pipeline_array.sbatch in place or use raw `sbatch`.
 #
 # All paths are resolved against the repo root (the parent of this script),
-# so you can run it from anywhere.
+# so you can run it from anywhere.  Logs, frozen task lists and per-task
+# reports go to <derivatives>/slurm/ (logs/, tasks/, reports/), where
+# <derivatives> is the root the pipeline arguments resolve to.
 # ============================================================================
 set -euo pipefail
 
@@ -148,8 +150,17 @@ if (( $# == 0 )); then
     exit 2
 fi
 
-mkdir -p slurm/logs slurm/tasks
-TASK_LIST="${REPO_DIR}/slurm/tasks/tasks_$(date +%Y%m%d-%H%M%S)_$$.txt"
+# Logs, frozen task lists and per-task reports go to <derivatives>/slurm/,
+# beside the outputs they describe -- the derivatives root these pipeline
+# arguments resolve to (--derivatives-root, else the data profile).
+if ! DERIVATIVES_ROOT=$(uv run --no-sync hypnose-eeg-pipeline "$@" --print-derivatives-root); then
+    echo "Could not resolve the derivatives root for: $*" >&2
+    exit 1
+fi
+JOB_DIR="${DERIVATIVES_ROOT}/slurm"
+LOG_DIR="${JOB_DIR}/logs"
+mkdir -p "${LOG_DIR}" "${JOB_DIR}/tasks" "${JOB_DIR}/reports"
+TASK_LIST="${JOB_DIR}/tasks/tasks_$(date +%Y%m%d-%H%M%S)_$$.txt"
 # Missing sessions and selection errors print to stderr, shown here as-is.
 if ! uv run --no-sync hypnose-eeg-pipeline "$@" --list-tasks > "${TASK_LIST}"; then
     rm -f "${TASK_LIST}"
@@ -165,6 +176,7 @@ fi
 
 echo "Submitting ${N} task(s) (array ${ARRAY}); task list: ${TASK_LIST}"
 echo "  environment: ${VENV}"
+echo "  logs: ${LOG_DIR}"
 if [[ -n "${CONFIG}" ]]; then
     echo "  config: ${CONFIG}"
 fi
@@ -177,27 +189,29 @@ fi
 # bash < 4.4.  --parsable prints the job ID (`ID` or `ID;cluster`).
 JOB_ID=$(sbatch --parsable \
     ${SBATCH_OVERRIDES[@]+"${SBATCH_OVERRIDES[@]}"} \
-    --export=ALL,REPO_DIR="${REPO_DIR}",TASK_LIST="${TASK_LIST}" \
+    --output="${LOG_DIR}/hypnose_eeg_%A_%a.out" \
+    --error="${LOG_DIR}/hypnose_eeg_%A_%a.err" \
+    --export=ALL,REPO_DIR="${REPO_DIR}",JOB_DIR="${JOB_DIR}",TASK_LIST="${TASK_LIST}" \
     --array="${ARRAY}" \
     "${REPO_DIR}/slurm/run_pipeline_array.sbatch" "$@")
 JOB_ID="${JOB_ID%%;*}"
 echo "Submitted job array ${JOB_ID}"
 
 # One report for the whole array: once every task has ended, whatever its
-# state (afterany), merge the per-task reports in slurm/reports/<job>/.
+# state (afterany), merge the per-task reports in <derivatives>/slurm/reports/<job>/.
 # Small resources of its own; only the partition follows the overrides.
 if MERGE_ID=$(sbatch --parsable \
     ${PARTITION_OVERRIDE[@]+"${PARTITION_OVERRIDE[@]}"} \
     --dependency="afterany:${JOB_ID}" \
     --job-name=hypnose_eeg_report \
     --array=0 --cpus-per-task=1 --mem=4G --time=00:30:00 \
-    --output="slurm/logs/hypnose_eeg_${JOB_ID}_report.out" \
-    --error="slurm/logs/hypnose_eeg_${JOB_ID}_report.err" \
-    --export=ALL,REPO_DIR="${REPO_DIR}",TASK_LIST="${TASK_LIST}",MERGE_REPORTS_FOR="${JOB_ID}" \
+    --output="${LOG_DIR}/hypnose_eeg_${JOB_ID}_report.out" \
+    --error="${LOG_DIR}/hypnose_eeg_${JOB_ID}_report.err" \
+    --export=ALL,REPO_DIR="${REPO_DIR}",JOB_DIR="${JOB_DIR}",TASK_LIST="${TASK_LIST}",MERGE_REPORTS_FOR="${JOB_ID}" \
     "${REPO_DIR}/slurm/run_pipeline_array.sbatch" "$@"); then
     echo "Submitted report job ${MERGE_ID%%;*} (runs after ${JOB_ID} ends)"
 else
     echo "WARNING: could not submit the report job; the per-task reports stay in" >&2
-    echo "  slurm/reports/${JOB_ID}/ -- merge them once the array ends with:" >&2
-    echo "  uv run hypnose-eeg-pipeline $* --merge-reports slurm/reports/${JOB_ID} --task-file ${TASK_LIST}" >&2
+    echo "  ${JOB_DIR}/reports/${JOB_ID}/ -- merge them once the array ends with:" >&2
+    echo "  uv run hypnose-eeg-pipeline $* --merge-reports ${JOB_DIR}/reports/${JOB_ID} --task-file ${TASK_LIST}" >&2
 fi

@@ -29,6 +29,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
+# Raw sbatch only: #SBATCH lines cannot expand variables, so these stay in the
+# repo.  slurm/submit.sh overrides them with <derivatives>/slurm/logs/.
 #SBATCH --output=slurm/logs/hypnose_eeg_%A_%a.out
 #SBATCH --error=slurm/logs/hypnose_eeg_%A_%a.err
 # Default array of one task; override with `sbatch --array=0-N` at submit.
@@ -99,8 +101,9 @@ export NUMEXPR_NUM_THREADS="${THREADS}"
 PIPELINE=(uv run --no-sync hypnose-eeg-pipeline)
 
 # Each array task submitted by slurm/submit.sh leaves its report here, and a
-# follow-up job merges them into one report for the whole array.
-REPORTS_ROOT="${REPO_DIR}/slurm/reports"
+# follow-up job merges them into one report for the whole array.  submit.sh
+# passes JOB_DIR, <derivatives>/slurm, which also holds the logs and task lists.
+REPORTS_ROOT="${JOB_DIR:-${REPO_DIR}/slurm}/reports"
 
 # ── Merge the array's reports (the follow-up job) ──────────────────────────
 # slurm/submit.sh queues this script once more, after every array task has
@@ -155,6 +158,7 @@ echo "  CPUs / mem : ${THREADS} / ${SLURM_MEM_PER_NODE:-?}M"
 echo "  Started    : $(date -Iseconds)"
 echo "  Repo       : ${REPO_DIR} ($(git rev-parse --short HEAD 2>/dev/null || echo 'no git'))"
 echo "  Env        : ${VENV}"
+echo "  Job files  : ${JOB_DIR:-${REPO_DIR}/slurm}"
 echo "  Arguments  : $*"
 echo "  Task       : ${TASKS[$TASK_ID]}  (${TASK_ID} / $((N_TASKS - 1)))"
 # The checkout's data profile; --rawdata-root/--derivatives-root above, or

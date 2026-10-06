@@ -1315,6 +1315,20 @@ class JobArrayTaskTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(lines, [])
 
+    def test_print_derivatives_root_prints_it_and_runs_nothing(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = self.pipeline(
+                "--subject", "66", "--all-sessions", "--print-derivatives-root",
+                report=False,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().strip(), str(Path(self.derivatives).resolve()))
+        mock_preprocessing.run_steps.assert_not_called()
+
     def test_a_task_runs_only_its_subjects_sessions(
         self, mock_preprocessing, mock_scoring, mock_qc
     ):
