@@ -98,6 +98,22 @@ export NUMEXPR_NUM_THREADS="${THREADS}"
 # racing another would rewrite it underneath the running tasks.
 PIPELINE=(uv run --no-sync hypnose-eeg-pipeline)
 
+# Each array task submitted by slurm/submit.sh leaves its report here, and a
+# follow-up job merges them into one report for the whole array.
+REPORTS_ROOT="${REPO_DIR}/slurm/reports"
+
+# ── Merge the array's reports (the follow-up job) ──────────────────────────
+# slurm/submit.sh queues this script once more, after every array task has
+# ended, with MERGE_REPORTS_FOR set to the array's job ID.
+if [[ -n "${MERGE_REPORTS_FOR:-}" ]]; then
+    echo "Merging the reports of job array ${MERGE_REPORTS_FOR}"
+    MERGE_ARGS=(--merge-reports "${REPORTS_ROOT}/${MERGE_REPORTS_FOR}")
+    if [[ -n "${TASK_LIST:-}" && -f "${TASK_LIST}" ]]; then
+        MERGE_ARGS+=(--task-file "${TASK_LIST}")
+    fi
+    exec "${PIPELINE[@]}" "$@" "${MERGE_ARGS[@]}"
+fi
+
 # ── Find this task ─────────────────────────────────────────────────────────
 # slurm/submit.sh freezes the task list at submit time, and the task runs its
 # line of that file (`--task-file`): sessions added to rawdata since then are
@@ -110,7 +126,12 @@ if [[ -n "${TASK_LIST:-}" ]]; then
         exit 1
     fi
     mapfile -t TASKS < "${TASK_LIST}"
-    TASK_ARGS=(--task-index "${TASK_ID}" --task-file "${TASK_LIST}")
+    # After the selection's own arguments, so this --report wins over any
+    # given there; that one is where the merged report goes.
+    TASK_ARGS=(
+        --task-index "${TASK_ID}" --task-file "${TASK_LIST}"
+        --report "${REPORTS_ROOT}/${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-local}}/task-${TASK_ID}.csv"
+    )
 else
     mapfile -t TASKS < <("${PIPELINE[@]}" "$@" --list-tasks)
     TASK_ARGS=(--task-index "${TASK_ID}")

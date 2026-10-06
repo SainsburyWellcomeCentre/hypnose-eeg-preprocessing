@@ -18,9 +18,10 @@ SLURM job 12345  (default: --task-unit subject)
 | File | Purpose |
 |---|---|
 | `slurm/run_pipeline_array.sbatch` | The array job: runs its line of the frozen task list with `--task-index`/`--task-file` |
-| `slurm/submit.sh` | Wrapper: counts the tasks, freezes the task list, sizes `--array`, submits |
+| `slurm/submit.sh` | Wrapper: counts the tasks, freezes the task list, sizes `--array`, submits the array and its report job |
 | `slurm/logs/` | SLURM stdout/stderr per array task (git-ignored) |
 | `slurm/tasks/` | Task lists frozen by `submit.sh` (git-ignored) |
+| `slurm/reports/` | Per-task reports waiting to be merged, one folder per array job (git-ignored) |
 
 ---
 
@@ -117,6 +118,12 @@ in rawdata while the array is pending, or running, is not picked up — submit
 again to process it. A listed session directory that has disappeared fails its
 task rather than letting it run a different session.
 
+The wrapper also queues a small report job (`hypnose_eeg_report`, 1 CPU,
+30 min) that waits for every array task to end, however it ended, and merges
+their reports into **one batch report for the whole job** (§7). It shows in
+`squeue` as `(Dependency)` until then; `scancel` on the array leaves it to
+report what ran.
+
 SLURM overrides go **first**, and `--` separates them from the pipeline
 arguments:
 
@@ -169,9 +176,7 @@ exists. Use `--task-unit session` when the selection has no short recordings,
 when each short recording's reference is already scored, or when you rerun
 those sessions afterwards with `--overwrite`.
 
-Each per-session task writes its own report,
-`batch_report_<timestamp>_<session dir>.csv`, so tasks of one subject that
-start together do not overwrite each other's.
+Either way, the job writes one report covering all its tasks (§7).
 
 ## 5. Resources
 
@@ -208,7 +213,8 @@ scancel 12345                                     # the whole array (12345_0 for
 |---|---|
 | `slurm/logs/hypnose_eeg_<job>_<task>.out` | Task header (node, CPUs, commit, environment, arguments, task, data profile), then the pipeline's output and batch summary |
 | `slurm/logs/hypnose_eeg_<job>_<task>.err` | Warnings, tracebacks, `FAILED:` lines |
-| `<derivatives>/sub-XXX/batch_report_<timestamp>[_<session>].csv` | One row per session: status, QC status, failed step, error, what was erased |
+| `slurm/logs/hypnose_eeg_<job>_report.out` / `.err` | The report job's output |
+| `<derivatives>/batch_report_<timestamp>_job-<job>.csv` | The job's report, one row per session: status, QC status, failed step, error, what was erased (in `sub-XXX/` when the job covers one subject; `--report FILE` puts it elsewhere) |
 | `<derivatives>/sub-XXX/ses-…/eeg/` | The outputs themselves (main readme, "Output folders") |
 
 A task exits non-zero, and `sacct` shows `FAILED`, when any of its sessions
@@ -217,6 +223,21 @@ erased so a rerun recomputes it. Resubmitting the same arguments skips every
 step whose output already exists, so it costs little for the sessions that
 completed. `hypnose-eeg-qc-review --subject …` lists the sessions whose QC
 needs review.
+
+Each array task writes its rows to `slurm/reports/<job>/task-N.csv`, and the
+report job merges them, in task order, and removes them. A task that left no
+report — cancelled, `TIMEOUT`, `OUT_OF_MEMORY` — still gets a `no_report` row
+for each of its sessions, taken from the frozen task list, so the report
+accounts for every session the job was given. `batch_duration_seconds` is the
+job's: from its first task starting to its last one finishing. If the report
+job could not run, merge by hand once the array has ended:
+
+```bash
+uv run hypnose-eeg-pipeline <same pipeline arguments> \n    --merge-reports slurm/reports/<job> --task-file slurm/tasks/<task list>.txt
+```
+
+Raw `sbatch` arrays (§3 B) have no report job: each task writes its own
+report, as an interactive batch run does.
 
 | Symptom | Likely cause |
 |---|---|
@@ -228,3 +249,5 @@ needs review.
 | `rawdata … MISSING` in the task header | `/ceph` not mounted on that node, or the wrong profile (§1) |
 | `OUT_OF_MEMORY` in `sacct` | Raise `--mem` |
 | `TIMEOUT` in `sacct` | Raise `--time`, or use `--task-unit session` |
+| `no_report` rows in the job's report | That task was cancelled or killed; check `sacct` for its state |
+| No job report, files left in `slurm/reports/<job>/` | The report job failed; see its `_report.err` log, or merge by hand (above) |

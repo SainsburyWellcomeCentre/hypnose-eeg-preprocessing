@@ -1454,6 +1454,87 @@ class JobArrayTaskTests(unittest.TestCase):
         self.assertIn("lists 2 task(s)", err.getvalue())
         mock_preprocessing.run_steps.assert_not_called()
 
+    def run_array(self, selection: tuple[str, ...], indices: list[int]) -> Path:
+        """Run the given tasks of `selection` as a job array would; return their report dir."""
+        task_file = self.freeze_tasks(*selection)
+        report_dir = self.root / "reports" / "12345"
+        for index in indices:
+            result = self.pipeline(
+                *selection, "--task-index", str(index), "--task-file", str(task_file),
+                "--report", str(report_dir / f"task-{index}.csv"), report=False,
+            )
+            self.assertEqual(result, 0)
+        return report_dir
+
+    def merge(self, selection: tuple[str, ...], report_dir: Path, *extra: str) -> int:
+        with redirect_stdout(io.StringIO()):
+            return self.pipeline(
+                *selection, "--merge-reports", str(report_dir),
+                "--task-file", str(self.root / "tasks.txt"), *extra,
+            )
+
+    def test_the_task_reports_of_a_job_merge_into_one(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        selection = ("--subject", "66", "67", "--all-sessions", "--task-unit", "session")
+        report_dir = self.run_array(selection, [2, 0, 1])
+
+        result = self.merge(selection, report_dir)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            [(row["subject"], row["session"], row["status"]) for row in self.report_rows()],
+            [("sub-066", "1", "ok"), ("sub-067", "1", "ok"), ("sub-067", "2", "ok")],
+        )
+        self.assertEqual(len({row["batch_duration_seconds"] for row in self.report_rows()}), 1)
+        # The per-task files are gone once merged.
+        self.assertFalse(report_dir.exists())
+
+    def test_a_task_that_left_no_report_is_reported_from_the_task_file(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        selection = ("--subject", "66", "67", "--all-sessions")
+        report_dir = self.run_array(selection, [0])
+
+        result = self.merge(selection, report_dir)
+
+        self.assertEqual(result, 0)
+        rows = self.report_rows()
+        self.assertEqual(
+            [(row["subject"], row["session"], row["date"], row["status"]) for row in rows],
+            [
+                ("sub-066", "1", "20260717", "ok"),
+                ("sub-067", "1", "20260718", "no_report"),
+                ("sub-067", "2", "20260719", "no_report"),
+            ],
+        )
+        self.assertIn("array task 1 left no report", rows[1]["error"])
+
+    def test_a_merged_report_without_a_destination_is_named_after_the_job(
+        self, mock_preprocessing, mock_scoring, mock_qc
+    ):
+        selection = ("--subject", "66", "67", "--all-sessions")
+        report_dir = self.run_array(selection, [0, 1])
+
+        with redirect_stdout(io.StringIO()):
+            result = self.pipeline(
+                *selection, "--merge-reports", str(report_dir), report=False
+            )
+
+        self.assertEqual(result, 0)
+        merged = list(self.derivatives.glob("batch_report_*_job-12345.csv"))
+        self.assertEqual(len(merged), 1)
+
+    def test_nothing_to_merge_fails(self, mock_preprocessing, mock_scoring, mock_qc):
+        with redirect_stderr(io.StringIO()) as err:
+            result = self.pipeline(
+                "--subject", "66", "--all-sessions",
+                "--merge-reports", str(self.root / "reports" / "999"),
+            )
+
+        self.assertEqual(result, 1)
+        self.assertIn("No task reports to merge", err.getvalue())
+
     def test_a_task_file_needs_a_task_index(
         self, mock_preprocessing, mock_scoring, mock_qc
     ):

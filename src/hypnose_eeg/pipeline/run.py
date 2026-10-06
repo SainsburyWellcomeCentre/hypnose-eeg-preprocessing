@@ -66,6 +66,8 @@ and `--task-index N` runs only task N of the same selection, as a batch run
 (failed sessions erased and reported). With `--task-file FILE` -- a saved
 `--list-tasks` output -- task N is line N of that file instead, so a task runs
 the sessions frozen at submission even if rawdata has gained sessions since.
+`--merge-reports DIR` combines the per-task reports an array left in DIR into
+one batch report for the whole job.
 A short recording is normalized against another session of the same animal,
 so sessions of one subject run in parallel only with `--task-unit session`.
 
@@ -78,16 +80,19 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Sequence
 
 from hypnose_eeg.pipeline import preprocessing, qc, sleep_scoring
 from hypnose_eeg.pipeline.batch import (
     ALL_SUBJECTS,
+    REPORT_FIELDS,
     SUBJECT_SESSIONS_SEP,
     SessionOutcome,
     SessionSelection,
@@ -108,9 +113,10 @@ from hypnose_eeg.pipeline.steps import (
     output_dir_overrides,
     output_layout_env,
 )
-from hypnose_helpers.io.layout import normalize_subjid, parse_subject
+from hypnose_helpers.io.layout import normalize_subjid, parse_session_dirname, parse_subject
 from hypnose_helpers.io.selectors import flatten
 
+from hypnose_eeg.io.output_paths import save_csv_rows
 from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
 from hypnose_eeg.utils.recording_selection import find_sessions
 
@@ -205,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--task-index", type=int, default=None, metavar="N",
         help="Run only task N (counted from 0) of the selection, as a batch run.",
     )
+    task_mode.add_argument(
+        "--merge-reports", default=None, metavar="DIR",
+        help="Merge the per-task reports a job array left in DIR (task-N.csv) "
+        "into one batch report, and exit without running anything. With "
+        "--task-file, tasks that left no report are reported too.",
+    )
     tasks.add_argument(
         "--task-unit", choices=TASK_UNITS, default="subject",
         help="What one task covers: every selected session of one subject, run in "
@@ -262,6 +274,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, extra = parser.parse_known_args(argv)
     output_dirs = output_dir_overrides(parser, args)
+    if args.merge_reports is not None:
+        try:
+            merge_task_reports(
+                Path(args.merge_reports),
+                task_file=args.task_file,
+                rawdata_root=args.rawdata_root,
+                derivatives_root=args.derivatives_root,
+                report=args.report,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"FAILED: {exc}", file=sys.stderr)
+            return 1
+        return 0
     if args.task_file is not None and args.task_index is None:
         parser.error("--task-file needs --task-index: which line of the file to run")
     # A job-array task always runs as a batch, so a failed session is erased
@@ -635,6 +660,126 @@ def _read_task(
             f"{rawdata_root} (task {task_index} of {task_file})"
         )
     return [(subject, [available[name] for name in session_names], None)]
+
+
+# The per-task reports a job array leaves for `merge_task_reports`.
+_TASK_REPORT_RE = re.compile(r"^task-(\d+)\.csv$")
+
+
+def merge_task_reports(
+    report_dir: Path,
+    *,
+    task_file: str | Path | None = None,
+    rawdata_root: str | Path | None = None,
+    derivatives_root: str | Path | None = None,
+    report: str | Path | None = None,
+) -> Path:
+    """Merge a job array's per-task reports into one batch report; return its path.
+
+    Each array task writes its rows to `report_dir/task-N.csv`; they are
+    combined in task order. With `task_file` -- the `--list-tasks` output the
+    array ran -- a task that left no report (cancelled, out of time or memory,
+    or failed before it ran) gets a `no_report` row for each of its sessions,
+    so the report still accounts for every session the job was given. The
+    batch duration on every row is the job's, from its first task starting to
+    its last one finishing. The report goes to `report`, or where a batch
+    run's report would, labelled `job-<report_dir name>`; the per-task files
+    are removed once it is written.
+    """
+    task_reports = {
+        int(match.group(1)): path
+        for path in (report_dir.iterdir() if report_dir.is_dir() else [])
+        if (match := _TASK_REPORT_RE.match(path.name))
+    }
+    task_lines = Path(task_file).read_text().splitlines() if task_file else []
+    if not task_reports and not task_lines:
+        raise FileNotFoundError(f"No task reports to merge in {report_dir}")
+
+    rawdata = Path(rawdata_root) if rawdata_root else get_rawdata_root()
+    rows: list[dict[str, object]] = []
+    starts: list[datetime] = []
+    ends: list[datetime] = []
+    for index in range(max([*task_reports, len(task_lines) - 1]) + 1):
+        path = task_reports.get(index)
+        if path is None:
+            if index < len(task_lines):
+                rows.extend(_no_report_rows(rawdata, task_lines[index], index))
+            continue
+        with path.open(newline="") as handle:
+            task_rows = list(csv.DictReader(handle))
+        rows.extend(task_rows)
+        span = _task_span(task_rows)
+        if span is not None:
+            starts.append(span[0])
+            ends.append(span[1])
+
+    duration = round((max(ends) - min(starts)).total_seconds(), 1) if starts else ""
+    for row in rows:
+        row["batch_duration_seconds"] = duration
+    derivatives = Path(derivatives_root) if derivatives_root else get_derivatives_root()
+    destination = Path(report) if report else report_path(
+        derivatives,
+        list(dict.fromkeys(str(row["subject"]) for row in rows)),
+        min(starts) if starts else datetime.now(),
+        label=f"job-{report_dir.name}",
+    )
+    save_csv_rows(rows, REPORT_FIELDS, destination)
+
+    for path in task_reports.values():
+        path.unlink()
+    try:
+        report_dir.rmdir()
+    except OSError:
+        pass  # something else was left in it; keep it
+    counts = Counter(str(row["status"]) for row in rows)
+    print(
+        f"Merged {len(task_reports)} task report(s): "
+        + ", ".join(f"{count} {status}" for status, count in counts.items())
+    )
+    return destination
+
+
+def _task_span(rows: list[dict[str, str]]) -> tuple[datetime, datetime] | None:
+    """When one task's batch started and finished, from its report rows."""
+    try:
+        start = min(
+            datetime.fromisoformat(row["started_at"]) for row in rows if row.get("started_at")
+        )
+        duration = float(rows[0]["batch_duration_seconds"])
+    except (IndexError, KeyError, ValueError):
+        return None
+    return start, start + timedelta(seconds=duration)
+
+
+def _no_report_rows(rawdata_root: Path, line: str, index: int) -> list[dict[str, object]]:
+    """Report rows for the sessions of a task that left no report of its own."""
+    subject_name, *session_names = line.split()
+    subject = parse_subject(subject_name)
+    try:
+        available = {
+            session.path.name: session.path
+            for session in find_sessions(rawdata_root, subject=subject)
+        }
+    except (FileNotFoundError, ValueError):
+        available = {}
+    error = (
+        f"array task {index} left no report: it was cancelled, ran out of time or "
+        "memory, or failed before running (see its slurm/logs files and sacct)"
+    )
+    rows: list[dict[str, object]] = []
+    for name in session_names:
+        ses, date = parse_session_dirname(name) or (None, "")
+        rows.append(
+            SessionOutcome(
+                subject=normalize_subjid(subject),
+                session=ses,
+                date=date,
+                session_dir=available.get(name, Path(name)),
+                status="no_report",
+                error=error,
+            ).as_row()
+        )
+    return rows
 
 
 def _print_tasks(
