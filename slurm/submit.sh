@@ -11,7 +11,7 @@
 # batch report for the whole array.
 #
 # Usage:
-#   slurm/submit.sh [SBATCH_OVERRIDES] [--] PIPELINE_ARGS
+#   slurm/submit.sh [--config FILE] [SBATCH_OVERRIDES] [--] PIPELINE_ARGS
 #
 # Examples:
 #   slurm/submit.sh --subject 66 67 --all-sessions --model my-model
@@ -23,6 +23,11 @@
 #   slurm/submit.sh --time 48:00:00 --mem 64G -- --subject 66 --all-sessions --model my-model
 #   slurm/submit.sh --max-running 10 -- --subject all --all-sessions --model my-model
 #
+#   # Settings from a YAML file (template: slurm/submit.yaml); anything typed
+#   # on the command line wins over the file:
+#   slurm/submit.sh --config slurm/submit.yaml
+#   slurm/submit.sh --config slurm/submit.yaml --mem 64G -- --subject 67 --session 2
+#
 # Recognised SBATCH overrides (they go first; everything after them, or
 # after `--`, is a hypnose-eeg-pipeline argument):
 #   --time, -t                 wall-clock limit per task (e.g. 48:00:00)
@@ -30,6 +35,9 @@
 #   --cpus-per-task, -c        CPU cores per task
 #   --partition, -p            SLURM partition
 #   --max-running N            at most N array tasks at once (--array=0-M%N)
+#   --config FILE              read resources and pipeline arguments from a YAML
+#                              file (slurm/submit.yaml); see
+#                              src/hypnose_eeg/pipeline/submit_config.py
 #
 # Both `--flag value` and `--flag=value` forms are accepted.  For any other
 # sbatch option, edit run_pipeline_array.sbatch in place or use raw `sbatch`.
@@ -39,6 +47,8 @@
 # ============================================================================
 set -euo pipefail
 
+# Where submit.sh was run from, for a relative --config path.
+CALLER_DIR="${PWD}"
 REPO_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 cd "${REPO_DIR}"
 
@@ -64,55 +74,77 @@ if [[ ! -d "${VENV}" ]]; then
     exit 1
 fi
 
-# Peel off any SBATCH override flags from the front of the argument list.
-# They get forwarded to `sbatch` ahead of the script name, where they take
-# precedence over the matching #SBATCH directives.
-SBATCH_OVERRIDES=()
-# The partition also applies to the report-merging job; its other resources
-# are its own (see the end of this script).
-PARTITION_OVERRIDE=()
-MAX_RUNNING=""
+# Peel off submit.sh's own options -- the SLURM resources and --config --
+# from the front of the argument list; the rest are pipeline arguments.
+TIME="" MEM="" CPUS="" PARTITION="" MAX_RUNNING="" CONFIG=""
 while (( $# > 0 )); do
     case "$1" in
         --)
             shift
             break
             ;;
-        --time=*|--mem=*|--cpus-per-task=*|--partition=*)
-            SBATCH_OVERRIDES+=("$1")
-            [[ "$1" == --partition=* ]] && PARTITION_OVERRIDE=("$1")
-            shift
+        --*=*)
+            name="${1%%=*}"; value="${1#*=}"; consumed=1
             ;;
-        --time|-t|--mem|--cpus-per-task|-c|--partition|-p)
+        --time|-t|--mem|--cpus-per-task|-c|--partition|-p|--max-running|--config)
             if (( $# < 2 )); then
                 echo "Missing value for $1" >&2
                 exit 2
             fi
-            SBATCH_OVERRIDES+=("$1" "$2")
-            [[ "$1" == --partition || "$1" == -p ]] && PARTITION_OVERRIDE=("$1" "$2")
-            shift 2
-            ;;
-        --max-running=*)
-            MAX_RUNNING="${1#*=}"; shift
-            ;;
-        --max-running)
-            if (( $# < 2 )); then
-                echo "Missing value for $1" >&2
-                exit 2
-            fi
-            MAX_RUNNING="$2"; shift 2
+            name="$1"; value="$2"; consumed=2
             ;;
         *)
-            # The first argument that is not an override starts the
-            # pipeline arguments (usually --subject).
+            # The first argument that is not ours starts the pipeline
+            # arguments (usually --subject).
             break
             ;;
     esac
+    case "${name}" in
+        --time|-t) TIME="${value}" ;;
+        --mem) MEM="${value}" ;;
+        --cpus-per-task|-c) CPUS="${value}" ;;
+        --partition|-p) PARTITION="${value}" ;;
+        --max-running) MAX_RUNNING="${value}" ;;
+        --config) CONFIG="${value}" ;;
+        *) break ;;  # a pipeline option written --flag=value
+    esac
+    shift "${consumed}"
 done
+
+# A --config file fills in whatever the command line left out: its sbatch
+# values where no flag was given, and its pipeline options except those the
+# command line replaces (src/hypnose_eeg/pipeline/submit_config.py).
+if [[ -n "${CONFIG}" ]]; then
+    [[ "${CONFIG}" == /* ]] || CONFIG="${CALLER_DIR}/${CONFIG}"
+    if ! CONFIG_VALUES=$(uv run --no-sync python -m hypnose_eeg.pipeline.submit_config "${CONFIG}" -- "$@"); then
+        echo "Could not read the submit config ${CONFIG}" >&2
+        exit 1
+    fi
+    # Every value in it is shell-quoted by the helper.
+    eval "${CONFIG_VALUES}"
+    : "${TIME:=${CFG_TIME}}" "${MEM:=${CFG_MEM}}" "${CPUS:=${CFG_CPUS_PER_TASK}}"
+    : "${PARTITION:=${CFG_PARTITION}}" "${MAX_RUNNING:=${CFG_MAX_RUNNING}}"
+    set -- ${CFG_PIPELINE_ARGS[@]+"${CFG_PIPELINE_ARGS[@]}"}
+fi
+
+# Forwarded to `sbatch` ahead of the script name, where they take precedence
+# over the matching #SBATCH directives.
+SBATCH_OVERRIDES=()
+if [[ -n "${TIME}" ]]; then SBATCH_OVERRIDES+=(--time "${TIME}"); fi
+if [[ -n "${MEM}" ]]; then SBATCH_OVERRIDES+=(--mem "${MEM}"); fi
+if [[ -n "${CPUS}" ]]; then SBATCH_OVERRIDES+=(--cpus-per-task "${CPUS}"); fi
+# The partition also applies to the report-merging job; its other resources
+# are its own (see the end of this script).
+PARTITION_OVERRIDE=()
+if [[ -n "${PARTITION}" ]]; then
+    SBATCH_OVERRIDES+=(--partition "${PARTITION}")
+    PARTITION_OVERRIDE=(--partition "${PARTITION}")
+fi
 
 if (( $# == 0 )); then
     echo "No pipeline arguments given; for example:" >&2
     echo "  slurm/submit.sh --subject 66 --all-sessions --model my-model" >&2
+    echo "  slurm/submit.sh --config slurm/submit.yaml" >&2
     exit 2
 fi
 
@@ -133,6 +165,10 @@ fi
 
 echo "Submitting ${N} task(s) (array ${ARRAY}); task list: ${TASK_LIST}"
 echo "  environment: ${VENV}"
+if [[ -n "${CONFIG}" ]]; then
+    echo "  config: ${CONFIG}"
+fi
+echo "  pipeline arguments: $*"
 sed 's/^/  /' "${TASK_LIST}"
 if (( ${#SBATCH_OVERRIDES[@]} > 0 )); then
     echo "  sbatch overrides: ${SBATCH_OVERRIDES[*]}"

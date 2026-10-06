@@ -1,0 +1,37 @@
+# Settings for slurm/submit.sh, read with --config:
+#
+#   ./slurm/submit.sh --config slurm/submit.yaml
+#
+# Anything typed on the command line wins over this file, so a one-off change
+# needs no edit:
+#
+#   ./slurm/submit.sh --config slurm/submit.yaml --mem 64G -- --subject 67
+#
+# Keep a copy per kind of run (for example slurm/configs/rescore.yaml) rather
+# than editing this one back and forth. A flag set to true here cannot be
+# switched off on the command line; edit the file for that.
+
+# SLURM resources per array task. Leave a key out (or null) to keep the
+# #SBATCH default in run_pipeline_array.sbatch.
+sbatch:
+  time: "24:00:00"      # quote it: YAML reads 24:00:00 unquoted as a number
+  mem: 32G
+  cpus_per_task: 4
+  partition: cpu
+  max_running: null     # at most N array tasks at once, to go easy on /ceph
+
+# hypnose-eeg-pipeline options, by long name without the leading dashes
+# (all_sessions or all-sessions for --all-sessions). true sets a flag, a list
+# gives several values, and false or null leaves the option out. Run
+# `uv run hypnose-eeg-pipeline --help` for the full list.
+pipeline:
+  subject: [66, 67]     # or [all], or per-subject sessions such as ["66:1,3", "67:2-4"]
+  all_sessions: true    # or session: [1, 3] / session: ["2-5"] / date: ["20260707-20260718"]
+  model: null           # Somnotate model name or model.pickle path
+  stage: null           # e.g. [qc]; null runs all three stages
+  task_unit: subject    # subject (default) or session
+  overwrite: false
+  keep_failed: false
+  erase_derived_edf: false
+  # Raw arguments passed on unchecked, for options only a stage understands.
+  extra_args: []

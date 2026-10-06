@@ -19,6 +19,7 @@ SLURM job 12345  (default: --task-unit subject)
 |---|---|
 | `slurm/run_pipeline_array.sbatch` | The array job: runs its line of the frozen task list with `--task-index`/`--task-file` |
 | `slurm/submit.sh` | Wrapper: counts the tasks, freezes the task list, sizes `--array`, submits the array and its report job |
+| `slurm/submit.yaml` | Template for `submit.sh --config`: resources and pipeline arguments in a file |
 | `slurm/logs/` | SLURM stdout/stderr per array task (git-ignored) |
 | `slurm/tasks/` | Task lists frozen by `submit.sh` (git-ignored) |
 | `slurm/reports/` | Per-task reports waiting to be merged, one folder per array job (git-ignored) |
@@ -139,6 +140,44 @@ arguments:
 | `--cpus-per-task`, `-c` | CPU cores per task (thread pools follow it) |
 | `--partition`, `-p` | SLURM partition |
 | `--max-running N` | At most N tasks at once (`--array=0-M%N`), to go easy on `/ceph` |
+
+### Settings in a YAML file
+
+Instead of typing everything, keep the resources and pipeline arguments in a
+YAML file and pass it with `--config` (template:
+[`slurm/submit.yaml`](submit.yaml)):
+
+```yaml
+sbatch:
+  time: "24:00:00"      # quoted: YAML reads 24:00:00 unquoted as a number
+  mem: 32G
+  max_running: 10
+pipeline:
+  subject: [66, 67]
+  all_sessions: true
+  model: my-model
+  task_unit: session
+```
+
+```bash
+./slurm/submit.sh --config slurm/submit.yaml
+./slurm/submit.sh --config slurm/submit.yaml --mem 64G -- --subject 67 --session 2
+```
+
+`sbatch` takes `time`, `mem`, `cpus_per_task`, `partition` and `max_running`.
+`pipeline` takes any `hypnose-eeg-pipeline` option by its long name
+(`all_sessions` for `--all-sessions`): `true` sets a flag, a list gives
+several values, and `false` or `null` leaves the option out. `extra_args` is a
+list of raw arguments for options only a stage understands. Unknown keys are
+refused, so a typo fails at submission rather than in the job.
+
+The command line wins over the file. A resource flag replaces the file's
+value, and a pipeline option replaces the file's value for that option and for
+any option it cannot be combined with: `--session 2` above drops the file's
+`all_sessions`. A flag set to `true` in the file cannot be switched off on the
+command line, so keep one file per kind of run (for example
+`slurm/configs/rescore.yaml`) rather than editing one back and forth. The
+`Submitting …` lines print the arguments the job will actually run with.
 
 ### B. Raw `sbatch`
 
