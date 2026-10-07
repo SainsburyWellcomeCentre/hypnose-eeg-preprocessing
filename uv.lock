@@ -423,7 +423,7 @@ wheels = [
 ]
 
 [[package]]
-name = "hypnose-eeg-analysis"
+name = "hypnose-eeg-preprocessing"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

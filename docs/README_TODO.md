@@ -185,7 +185,7 @@ folders within a session" in `readme.md`.
 
 ~~## 20. Batch running of pipelines~~
 
-## 21. Guidance for running qc scripts and options for external running when requiring review
+~~## 21. Guidance for running qc scripts and options for external running when requiring review~~
 
 ~~## 22. Automate running of the preprocessing for hypnose dataset with reports of errors~~
 
@@ -261,4 +261,4 @@ commands are the `hypnose-eeg-*` console scripts declared in `pyproject.toml`
 
 -Already exists
 
-## Make every script have the ability to enter multiple subjects and sessions
+~~## Make every script have the ability to enter multiple subjects and sessions~~

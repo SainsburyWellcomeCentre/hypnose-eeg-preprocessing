@@ -5,8 +5,19 @@ recordings.
 
 ## Environment
 
-Dependencies are managed with [uv](https://docs.astral.sh/uv/). From the
-repository root:
+Dependencies are managed with [uv](https://docs.astral.sh/uv/). This
+repository installs `hypnose-helpers` and `hypnose-somnotate` from sibling
+checkouts, so clone all three side by side:
+
+```bash
+mkdir hypnose && cd hypnose
+git clone https://github.com/SainsburyWellcomeCentre/hypnose-helpers.git
+git clone https://github.com/SainsburyWellcomeCentre/hypnose-somnotate.git
+git clone https://github.com/SainsburyWellcomeCentre/hypnose-eeg-preprocessing.git
+cd hypnose-eeg-preprocessing
+```
+
+Then, from the repository root:
 
 ```bash
 uv sync
@@ -18,10 +29,9 @@ the exact versions recorded in `uv.lock`, including the `dev` (pytest) and
 `uv run <command>`, or activate it with `source .venv/bin/activate`
 (`.venv\Scripts\activate` on Windows).
 
-The environment expects the `hypnose-helpers` and `hypnose-somnotate` repositories
-in sibling checkouts and installs them in editable mode. Somnotate's legacy
-`pomegranate` dependency builds from source, so a working C/C++ compiler is also
-required.
+The two sibling repositories are installed in editable mode, so changes made
+there take effect without reinstalling. Keep all three checkouts up to date
+together: after pulling, run `git pull` in the siblings too, then `uv sync`.
 
 It also installs this repository in editable mode as the `hypnose_eeg` package,
 so its modules import from any directory and other projects or notebooks in
@@ -29,6 +39,94 @@ the environment can use them. After pulling a change, re-run `uv sync`.
 Configuration is read from this checkout's `configs/`, so keep the install
 editable. Add or change dependencies with `uv add` / `uv remove` so that
 `pyproject.toml` and `uv.lock` stay in step.
+
+On a machine that only runs the pipeline (the HPC, a headless server),
+`uv sync --no-group notebook` skips JupyterLab and the Qt browser.
+
+### C/C++ compiler
+
+Somnotate depends on the legacy `pomegranate<1.0`, which PyPI ships only as
+source, so `uv sync` compiles it and needs a C/C++ compiler. Install one before
+the first `uv sync`:
+
+| Platform | Compiler |
+| --- | --- |
+| Windows | [Build Tools for Visual Studio](https://visualstudio.microsoft.com/visual-cpp-build-tools/), with the **Desktop development with C++** workload selected in the installer |
+| macOS | Xcode command-line tools: `xcode-select --install` |
+| Linux workstation | GCC: `sudo apt install build-essential` (Debian/Ubuntu) or `sudo dnf groupinstall "Development Tools"` (Fedora/RHEL) |
+| SWC HPC | `module avail gcc`, then `module load gcc/<version>` before `uv sync` (see [slurm/README.md](slurm/README.md)) |
+
+A missing compiler shows up as `uv sync` failing while building `pomegranate`,
+for example with `Microsoft Visual C++ 14.0 or greater is required` on Windows
+or `gcc: command not found` / `command 'cc' failed` on Linux. Install the
+compiler and rerun `uv sync`; nothing needs cleaning up first. The compiler is
+only needed to build the environment, not to run the pipeline.
+
+## First run
+
+A checklist for a new checkout, from an empty machine to a scored session. Run
+the commands with the environment activated (or prefix each with `uv run`).
+
+1. **Install.** Install a [C/C++ compiler](#cc-compiler), clone the three
+   repositories and run `uv sync` (see [Environment](#environment)).
+
+2. **Check the install.** The test suite uses synthetic data only, so it needs
+   no data access and takes under a minute:
+
+   ```bash
+   uv run pytest -q
+   ```
+
+3. **Choose a data-location profile** for this machine (`swc-hpc` on the
+   cluster, `server-linux` / `server-mac` / `server-windows` with ceph mounted
+   on a workstation; see [Data location](#data-location)):
+
+   ```bash
+   hypnose-eeg-locations --list
+   hypnose-eeg-locations swc-hpc
+   hypnose-eeg-locations --show
+   ```
+
+4. **Confirm where outputs will go**, without running anything:
+
+   ```bash
+   hypnose-eeg-pipeline --subject 66 --print-derivatives-root
+   ```
+
+5. **Look at a session that is already processed.** The viewer only reads
+   what is on disk, so this is a safe way to check the data mount and the
+   display (it opens a plot window; over SSH see
+   [docs/remote_visualization.md](docs/remote_visualization.md)):
+
+   ```bash
+   hypnose-eeg-score --subject 66 --session 1 --steps view --hours 0 3
+   ```
+
+6. **Process a new session.** The model defaults to `somno_model_1` from
+   `configs/pipelines/sleep_scoring.yaml`, which lives below the shared
+   derivatives root; pass `--model` to choose another:
+
+   ```bash
+   hypnose-eeg-pipeline --subject 66 --session 1 --model somno_model_1
+   ```
+
+   Steps whose outputs already exist are skipped, so rerunning is cheap and
+   does not touch earlier results. Keep in mind that the data is shared by the
+   lab:
+   - Outputs are written to the shared derivatives tree, and the trim and
+     concatenate steps write EDFs beside the raw recordings in `rawdata`.
+   - Agree with whoever owns a subject before running it, so two people do not
+     process the same session at once.
+   - Do not pass `--overwrite` on sessions someone else produced unless they
+     know.
+
+   For several sessions or subjects, see [Batch](#batch-several-sessions-or-subjects)
+   and [On the SWC HPC (SLURM)](#on-the-swc-hpc-slurm).
+
+7. **Check the result.** The QC summary and, for sessions flagged REVIEW or
+   FAIL, the [review figures](#review-figures-no-display-needed) are in the
+   session's `eeg/quality_control/` folder. Each output has a
+   [provenance](#output-provenance) sidecar recording the commit and model used.
 
 ## Data location
 
@@ -427,6 +525,51 @@ skipped because its output already exists keeps the provenance of the run that
 actually produced it. Outside a git checkout (an installed copy, an exported
 tarball, a machine without `git`) the `git` field is `null` rather than the run
 failing.
+
+## Versioning
+
+Releases are git tags named `v<major>.<minor>.<patch>` (`v0.1.0`, `v0.2.0`, ...),
+matching `version` in `pyproject.toml`. A tag marks a state of the pipeline
+that can be cited in an analysis or a paper, and that a later rerun can
+return to.
+
+The `describe` field in each [provenance](#output-provenance) sidecar
+names the tag a result came from: `v0.2.0` for a run on the tagged commit,
+`v0.2.0-3-gabc1234` for three commits after it, with `-dirty` appended when
+the checkout had uncommitted changes. Results meant to be compared or reported
+should come from a clean, tagged checkout.
+
+**Using a release.** Check out the tag and rebuild the environment from its
+lockfile:
+
+```bash
+git fetch --tags
+git checkout v0.2.0
+uv sync --frozen
+```
+
+`git checkout main` (then `uv sync`) returns to the latest development state.
+
+**Making a release.** Bump the version, so the tag and the package agree:
+
+1. Set `version` in `pyproject.toml` (patch: bug fixes; minor: new steps,
+   options, or output changes; major: incompatible changes to the outputs or
+   commands), then run `uv lock` to record it.
+2. Commit, then tag and push:
+
+   ```bash
+   git tag -a v0.2.0 -m "v0.2.0: <one-line summary>"
+   git push origin main v0.2.0
+   ```
+
+3. Note in the tag message or the GitHub release which changes alter results
+   (a new artifact threshold, a retrained model), so users know which sessions
+   to rerun.
+
+The sibling `hypnose-helpers` and `hypnose-somnotate` checkouts are not
+pinned by this repository's tag, and provenance records only this
+repository's commit. When a release depends on a change in either of them,
+tag that repository too and name the sibling versions in the release notes.
 
 ## Running preprocessing
 
