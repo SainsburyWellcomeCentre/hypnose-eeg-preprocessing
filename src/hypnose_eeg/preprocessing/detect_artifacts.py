@@ -4,11 +4,17 @@ Aligns sleep states to epochs, extracts EEG/EMG features, and flags epochs using
 per-channel, per-state robust outlier scores plus state-independent hard failures
 (nonfinite, flatline, clipping). Writes epoch-level CSV and parquet outputs;
 settings come from the pipeline YAML.
+
+The clipping check counts samples sitting exactly at an epoch's minimum or
+maximum, so it reads the source EDF the FIF was downsampled from: resampling
+smooths a clipped plateau into values that are no longer exactly equal, which
+hides clipping in the FIF itself.
 """
 
 from __future__ import annotations
 
 import argparse
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -130,6 +136,7 @@ class ArtifactDetector:
         fif_path: str | Path,
         sleep_parquet_path: str | Path,
         output_dir: str | Path | None = None,
+        edf_path: str | Path | None = None,
     ) -> dict[str, object]:
         csv_path, parquet_path = artifact_output_paths(
             fif_path, output_suffix=self.output_suffix, output_dir=output_dir
@@ -150,6 +157,7 @@ class ArtifactDetector:
             sleep_parquet_path,
             output_dir=output_dir,
             detector=self,
+            edf_path=edf_path,
         )
         n_epochs = len(artifact_epochs)
         n_artifacts = int(artifact_epochs["artifact"].sum())
@@ -201,8 +209,16 @@ def extract_features(
     psd_maximum_frequency_hz: float,
     high_frequency_band_hz: tuple[float, float],
     line_noise_band_hz: tuple[float, float],
+    edge_source: Any | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[str], list[str], int]:
-    """Extract chunked EEG and optional EMG epoch features from an MNE Raw."""
+    """Extract chunked EEG and optional EMG epoch features from an MNE Raw.
+
+    `edge_source` is the original-rate recording `raw` was downsampled from
+    (`read_edge_source`). When given, `edge_fraction` is computed from its
+    samples, epoched on the same time grid; epochs it does not fully cover get
+    NaN. Without it, `edge_fraction` comes from `raw`, where resampling hides
+    clipping.
+    """
     mne = import_mne()
     eeg_picks = mne.pick_types(raw.info, eeg=True, exclude=[])
     if len(eeg_picks) == 0:
@@ -213,9 +229,18 @@ def extract_features(
 
     sfreq = float(raw.info["sfreq"])
     epoch_samples = int(round(epoch_seconds * sfreq))
+    chunk_sfreq = sfreq
+    if edge_source is not None:
+        missing = sorted(set(eeg.ch_names).difference(edge_source.ch_names))
+        if missing:
+            raise ValueError(f"Source EDF lacks the FIF's EEG channels: {missing}")
+        edge_sfreq = float(edge_source.info["sfreq"])
+        edge_epoch_samples = int(round(epoch_seconds * edge_sfreq))
+        edge_epoch_count = complete_epoch_count(edge_source.n_times, edge_sfreq, epoch_seconds)
+        chunk_sfreq = max(sfreq, edge_sfreq)
     signal_channel_count = len(eeg.ch_names) + (len(emg.ch_names) if emg is not None else 0)
     chunk_epochs = choose_chunk_epochs(
-        sfreq, epoch_seconds, signal_channel_count, chunk_memory_mb,
+        chunk_sfreq, epoch_seconds, signal_channel_count, chunk_memory_mb,
         chunk_working_array_factor, max_chunk_epochs,
     )
     nyquist = sfreq / 2
@@ -246,12 +271,22 @@ def extract_features(
         rms = np.sqrt(np.mean(clean**2, axis=-1))
         max_derivative = np.max(np.abs(np.diff(clean, axis=-1)), axis=-1)
         standard_deviation = np.std(clean, axis=-1)
-        epoch_min = clean.min(axis=-1, keepdims=True)
-        epoch_max = clean.max(axis=-1, keepdims=True)
-        edge_fraction = np.maximum(
-            np.mean(clean == epoch_min, axis=-1),
-            np.mean(clean == epoch_max, axis=-1),
-        )
+        if edge_source is None:
+            edge_fraction = _edge_fraction(clean)
+        else:
+            edge_fraction = np.full((epoch_count, len(eeg_channel_names)), np.nan)
+            covered = min(last_epoch, edge_epoch_count) - first_epoch
+            if covered > 0:
+                edge_samples = edge_source.get_data(
+                    picks=list(eeg_channel_names),
+                    start=first_epoch * edge_epoch_samples,
+                    stop=(first_epoch + covered) * edge_epoch_samples,
+                )
+                edge_fraction[:covered] = _edge_fraction(
+                    epoch_batch(
+                        edge_samples, epoch_count=covered, epoch_samples=edge_epoch_samples
+                    )
+                )
         psd, frequencies = mne.time_frequency.psd_array_welch(
             clean,
             sfreq=sfreq,
@@ -336,6 +371,38 @@ def extract_features(
         list(eeg.ch_names),
         list(emg.ch_names) if emg is not None else [],
         chunk_epochs,
+    )
+
+
+def _edge_fraction(batch: np.ndarray) -> np.ndarray:
+    """Fraction of each epoch's samples exactly at its minimum or maximum."""
+    epoch_min = batch.min(axis=-1, keepdims=True)
+    epoch_max = batch.max(axis=-1, keepdims=True)
+    return np.maximum(
+        np.mean(batch == epoch_min, axis=-1),
+        np.mean(batch == epoch_max, axis=-1),
+    )
+
+
+def read_edge_source(edf_path: str | Path | None) -> Any | None:
+    """Open the source EDF for the clipping check, or warn when there is none.
+
+    Read the way `downsample_recordings.py` reads it, so channel names match the
+    FIF's. Not preloaded: `extract_features` reads it one chunk at a time.
+    """
+    if edf_path is None:
+        warnings.warn(
+            "No source EDF given; the clipping check runs on the downsampled FIF, "
+            "where resampling hides clipping.",
+            stacklevel=2,
+        )
+        return None
+    edf_path = Path(edf_path)
+    if not edf_path.is_file():
+        raise FileNotFoundError(f"Source EDF not found: {edf_path}")
+    print(f"Clipping check source: {edf_path}")
+    return import_mne().io.read_raw_edf(
+        edf_path, preload=False, infer_types=True, verbose="ERROR"
     )
 
 
@@ -484,6 +551,7 @@ def _detect_fif_artifacts(
     *,
     detector: ArtifactDetector,
     output_dir: str | Path | None = None,
+    edf_path: str | Path | None = None,
 ) -> tuple[pd.DataFrame, Path, Path]:
     """Run detection and write epoch-level CSV and parquet outputs."""
     mne = import_mne()
@@ -529,6 +597,7 @@ def _detect_fif_artifacts(
         unscored_numeric_state=detector.unscored_numeric_state,
         unscored_text_state=detector.unscored_text_state,
     )
+    edge_source = read_edge_source(edf_path)
     eeg_features, emg_features, eeg_channels, emg_channels, chunk_epochs = extract_features(
         raw,
         n_epochs,
@@ -541,6 +610,7 @@ def _detect_fif_artifacts(
         detector.psd_maximum_frequency_hz,
         detector.high_frequency_band_hz,
         detector.line_noise_band_hz,
+        edge_source=edge_source,
     )
     print(f"EEG channels: {eeg_channels}")
     print(f"EMG channels: {emg_channels or 'none (EMG checks disabled)'}")
@@ -578,10 +648,12 @@ def _detect_fif_artifacts(
         inputs={
             "fif_path": str(fif_path),
             "sleep_parquet_path": str(sleep_parquet_path),
+            "edf_path": str(edf_path) if edf_path is not None else None,
             "eeg_channels": list(eeg_channels),
             "emg_channels": list(emg_channels),
         },
         parameters={
+            "edge_fraction_source": "edf" if edge_source is not None else "fif",
             "epoch_seconds": detector.epoch_seconds,
             "robust_z_threshold": detector.robust_z_threshold,
             "extreme_z_threshold": detector.extreme_z_threshold,
@@ -620,8 +692,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--edf", default=None,
-        help="Raw EDF recording; resolves the matching sleep-scoring parquet. "
-        "Requires --fif.",
+        help="Source EDF the FIF was downsampled from; the clipping check reads it. "
+        "With --fif it also resolves the matching sleep-scoring parquet.",
     )
     parser.add_argument("--fif", default=None, help="Matching derivative FIF for --edf.")
     parser.add_argument(
@@ -665,22 +737,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[Path, Path]:
-    """Resolve the FIF and sleep-scoring parquet from explicit paths, --edf/--fif, or selectors."""
+def _resolve_paths(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> tuple[Path, Path, Path | None]:
+    """Resolve the FIF, sleep-scoring parquet, and source EDF from explicit paths,
+    --edf/--fif, or selectors. Explicit paths name no EDF unless --edf is given.
+    """
     has_explicit_path = args.fif_path is not None or args.sleep_parquet_path is not None
-    has_edf_fif = args.edf is not None or args.fif is not None
+    has_fif = args.fif is not None
     has_selector = args.subject is not None or args.date is not None or args.session is not None
-    if sum([has_explicit_path, has_edf_fif, has_selector]) > 1:
+    if sum([has_explicit_path, has_fif, has_selector]) > 1 or (
+        has_selector and args.edf is not None
+    ):
         parser.error(
-            "use exactly one of: fif_path/sleep_parquet_path, --edf/--fif, or "
+            "use exactly one of: fif_path/sleep_parquet_path [--edf], --edf/--fif, or "
             "--subject/--date/--session selectors"
         )
     if has_explicit_path:
         if args.fif_path is None or args.sleep_parquet_path is None:
             parser.error("fif_path and sleep_parquet_path must be supplied together")
-        return Path(args.fif_path), Path(args.sleep_parquet_path)
+        edf_path = Path(args.edf) if args.edf is not None else None
+        return Path(args.fif_path), Path(args.sleep_parquet_path), edf_path
 
-    if has_edf_fif:
+    if has_fif or args.edf is not None:
         if bool(args.edf) != bool(args.fif):
             parser.error("--edf and --fif must be supplied together")
         edf_path = Path(args.edf).resolve(strict=False)
@@ -690,7 +769,7 @@ def _resolve_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
             args.derivatives_root or fif_path.parent
         ).resolve(strict=False)
         sleep_parquet_path = scoring_path(edf_path, rawdata_root, derivatives_root)
-        return fif_path, sleep_parquet_path
+        return fif_path, sleep_parquet_path, edf_path
 
     if args.subject is None:
         parser.error("fif_path/sleep_parquet_path, --edf/--fif, or --subject is required")
@@ -710,13 +789,13 @@ def _resolve_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         )
     edf_path, fif_path = pairs[0]
     sleep_parquet_path = scoring_path(edf_path, rawdata_root, derivatives_root)
-    return fif_path, sleep_parquet_path
+    return fif_path, sleep_parquet_path, edf_path
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
-    fif_path, sleep_parquet_path = _resolve_paths(parser, args)
+    fif_path, sleep_parquet_path, edf_path = _resolve_paths(parser, args)
     detector = ArtifactDetector.from_yaml(
         args.config,
         epoch_seconds=args.epoch_seconds,
@@ -729,7 +808,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         max_edge_fraction=args.max_edge_fraction,
         overwrite=args.overwrite,
     )
-    result = detector.process(fif_path, sleep_parquet_path, args.output_dir)
+    result = detector.process(fif_path, sleep_parquet_path, args.output_dir, edf_path)
     if result["status"] == "skipped_exists":
         existing = ", ".join(result["existing_outputs"])
         print(f"Skipped, output exists: {existing}. Pass --overwrite to replace it.")

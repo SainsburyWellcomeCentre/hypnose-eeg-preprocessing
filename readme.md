@@ -631,7 +631,8 @@ Before scoring, the artifact prescan looks through the downsampled FIF for long
 stretches of unusable signal, which scoring then leaves out. It needs no sleep
 states. An EEG epoch is flagged when it is dead (almost no power in the
 analysed band, e.g. a disconnected headstage that is drifting rather than
-perfectly flat), fails hard (non-finite values or clipping), or is extreme
+perfectly flat), fails hard (non-finite values, or clipping, which both
+artifact steps read from the source EDF because downsampling hides it), or is extreme
 against the recording's live epochs. Flagged epochs become *periods*. Runs
 separated by at most 30 s are joined, runs shorter than 60 s are dropped, and
 periods separated by less than 5 min of clean signal are bridged into one.

@@ -12,7 +12,8 @@ An EEG channel-epoch is flagged when it is
 - dead: broadband (analysed-band) RMS below an absolute floor -- a disconnected
   headstage drifting slowly, which is not constant enough for somnotate's own
   gap detection to catch;
-- a hard failure: non-finite samples, or clipping/repeated edge values;
+- a hard failure: non-finite samples, or clipping/repeated edge values (read
+  from the source EDF; see `detect_artifacts.py`);
 - extreme: at least N features above a robust z threshold, where the z-scores
   are computed per channel against the recording's *live* epochs only, so a
   recording dominated by dead signal does not make real EEG look extreme.
@@ -40,7 +41,7 @@ import pandas as pd
 from hypnose_eeg.io.mne_io import import_mne
 from hypnose_eeg.io.output_paths import artifact_output_paths, save_csv
 from hypnose_eeg.io.repository_paths import get_derivatives_root, get_rawdata_root
-from hypnose_eeg.preprocessing.detect_artifacts import extract_features
+from hypnose_eeg.preprocessing.detect_artifacts import extract_features, read_edge_source
 from hypnose_eeg.utils.config import (
     DEFAULT_ARTIFACT_DETECTION_CONFIG_PATH,
     load_config,
@@ -257,8 +258,13 @@ def prescan_fif(
     fif_path: str | Path,
     settings: PrescanSettings,
     output_dir: str | Path | None = None,
+    edf_path: str | Path | None = None,
 ) -> dict[str, object]:
-    """Scan one FIF and write its artifact periods; skip when the output exists."""
+    """Scan one FIF and write its artifact periods; skip when the output exists.
+
+    `edf_path` is the source EDF the FIF was downsampled from, read for the
+    clipping check.
+    """
     fif_path = Path(fif_path)
     csv_path, parquet_path = artifact_output_paths(
         fif_path, output_suffix=settings.output_suffix, output_dir=output_dir
@@ -279,6 +285,7 @@ def prescan_fif(
 
     print(f"FIF: {fif_path}")
     print(f"Scanning all {n_epochs:,} complete epochs")
+    edge_source = read_edge_source(edf_path)
     eeg_features, _, eeg_channels, _, _ = extract_features(
         raw,
         n_epochs,
@@ -291,6 +298,7 @@ def prescan_fif(
         settings.psd_maximum_frequency_hz,
         settings.high_frequency_band_hz,
         settings.line_noise_band_hz,
+        edge_source=edge_source,
     )
     epochs = flag_prescan_epochs(eeg_features, settings)
     periods = artifact_periods(
@@ -320,8 +328,13 @@ def prescan_fif(
     write_provenance(
         "artifact_prescan",
         outputs=[parquet_path, csv_path],
-        inputs={"fif_path": str(fif_path), "eeg_channels": list(eeg_channels)},
+        inputs={
+            "fif_path": str(fif_path),
+            "edf_path": str(edf_path) if edf_path is not None else None,
+            "eeg_channels": list(eeg_channels),
+        },
         parameters={
+            "edge_fraction_source": "edf" if edge_source is not None else "fif",
             "epoch_seconds": settings.epoch_seconds,
             "minimum_broadband_rms_uv": settings.minimum_broadband_rms_uv,
             "broadband_hz": [settings.psd_minimum_frequency_hz, settings.psd_maximum_frequency_hz],
@@ -346,6 +359,11 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("fif_path", nargs="?", default=None, help="Input MNE FIF recording.")
+    parser.add_argument(
+        "--edf", default=None,
+        help="Source EDF fif_path was downsampled from; the clipping check reads it. "
+        "Selectors find it themselves.",
+    )
     parser.add_argument(
         "--subject", "--subjid", dest="subject", default=None,
         help="Subject ID, for example 66 or sub-066. Alternative to fif_path.",
@@ -375,27 +393,32 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_fif_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) -> list[Path]:
+def _resolve_recordings(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> list[tuple[Path | None, Path]]:
+    """Resolve `(source EDF, FIF)` pairs; a bare fif_path has an EDF only via --edf."""
     if args.fif_path is not None:
         if args.subject is not None:
             parser.error("use either fif_path or --subject/--date/--session, not both")
-        return [Path(args.fif_path)]
+        edf_path = Path(args.edf) if args.edf is not None else None
+        return [(edf_path, Path(args.fif_path))]
+    if args.edf is not None:
+        parser.error("--edf requires fif_path")
     if args.subject is None:
         parser.error("fif_path or --subject is required")
     if args.date is None and args.session is None:
         parser.error("--subject requires either --date or --session")
     rawdata_root = Path(args.rawdata_root or get_rawdata_root()).resolve(strict=False)
     derivatives_root = Path(args.derivatives_root or get_derivatives_root()).resolve(strict=False)
-    pairs = select_recordings(
+    return select_recordings(
         rawdata_root, derivatives_root, subject=args.subject, date=args.date, session=args.session
     )
-    return [fif_path for _, fif_path in pairs]
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
-    fif_paths = _resolve_fif_paths(parser, args)
+    recordings = _resolve_recordings(parser, args)
     settings = PrescanSettings.from_yaml(
         args.config,
         minimum_broadband_rms_uv=args.minimum_broadband_rms_uv,
@@ -405,8 +428,8 @@ def main(argv: list[str] | None = None) -> None:
         bridge_gap_s=args.bridge_gap_s,
         overwrite=args.overwrite,
     )
-    for fif_path in fif_paths:
-        result = prescan_fif(fif_path, settings, args.output_dir)
+    for edf_path, fif_path in recordings:
+        result = prescan_fif(fif_path, settings, args.output_dir, edf_path)
         if result["status"] == "skipped_exists":
             existing = ", ".join(result["existing_outputs"])
             print(f"Skipped, output exists: {existing}. Pass --overwrite to replace it.")

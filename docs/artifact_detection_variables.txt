@@ -87,7 +87,13 @@ std_uv
 
 edge_fraction
   Larger of the fractions at the exact epoch minimum and maximum. Used by the
-  state-independent clipping/repeated-edge check.
+  state-independent clipping/repeated-edge check. Computed from the source EDF
+  at its original sampling rate, because resampling smooths a clipped plateau
+  into values that are no longer exactly equal. Selector runs find the EDF
+  themselves; explicit-path runs need --edf, or fall back to the FIF with a
+  warning (where clipping goes undetected). NaN for an epoch the EDF does not
+  fully cover. The provenance file records which source was used
+  (edge_fraction_source).
 
 high_frequency_power_uv2
   Welch PSD integral over high_frequency_band_hz, in microvolts squared.
